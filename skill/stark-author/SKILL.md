@@ -1,7 +1,7 @@
 ---
 name: stark-author
 description: >-
-  Stage 1 — human-gated spec+plan authoring in one session: tier check, time-boxed recon, structured interview, one self-contained doc, one zero-context advisory pass, human gate, commit-pinned handoff. No LLM review loops. Use for author, spec, plan a change.
+  Stage 1 — spec+plan authoring in one session, the operator decides: tier check, time-boxed recon, plain-language interview (only what only they know), one self-contained doc, one zero-context advisory pass, plain-language sign-off, commit-pinned handoff. No LLM review loops. Use for author, spec, plan a change.
 argument-hint: '<intent | notes-path> [--tier skip|short|full] [--out PATH] [--no-advisory] [--ready]'
 disable-model-invocation: true
 ---
@@ -12,22 +12,46 @@ If `$ARGUMENTS` requests help (a standalone `--help`, `-h`, or `help` token),
 follow [standard help](../../standards/help.md): print this skill's purpose,
 usage, and arguments, then stop — do not run any phase.
 
-# stark-author — Stage 1: spec+plan, one session, the human is the gate
+# stark-author — Stage 1: spec+plan, one session, you carry the load
 
-One interactive session: interview the operator, author ONE self-contained
-spec+plan doc, run at most one zero-context advisory pass, gate it on the human,
-pin it, hand off.
+One interactive session. The operator brings intent. **YOU bring the
+engineering** — you read the code, work out the shape, write the spec, and verify
+it yourself. You ask the operator only what only they can answer, in plain words.
+Then you play back what you understood, they say go or correct you, you pin it and
+hand off.
 
-**Non-negotiables:**
-- **No LLM-reviews-LLM loop.** One advisory pass per *body of text*; its findings
-  die at the human. Never revise from them autonomously, never re-run a pass over
-  text it already saw. Text the gate ADDS is unreviewed — see Phase 4's
-  expiry rule.
+## Who you're working with — read this before anything
+
+**The operator is not your QA, and is not reading the code.** Assume they will not
+open a file, check an interface, judge a done-when, or audit a task DAG — and that
+this is correct, not a gap. They bring two things you cannot: what they actually
+want, and the product judgment only they hold. Everything technical is YOURS.
+
+This changes how the whole session feels:
+- **You never ask them to verify your work.** Files exist because you checked.
+  Checks are real because you made them real. The plan holds together because you
+  made it hold. Never outsource any of that to a question.
+- **You ask only operator-oracle questions** — intent, product decisions, and
+  domain knowledge you have no way to derive. Plain language, like a peer.
+- **You are their help, not their examiner.** No quizzes, no "prove you read it,"
+  no lectures about owning a fast sign-off. When you need to confirm you
+  understood, carry that as YOUR risk of having misheard — never as their failure
+  to engage.
+
+This is a deliberate adaptation of the [Stage 1 dossier](references/stage1-dossier.md)
+for a non-coding operator: its gate research (RQ5) says extract only what the
+human uniquely knows — for this operator that is intent and product judgment, so
+the technical-verification items move onto you (Phase 3), not them (Phase 5).
+
+**Non-negotiables (these protect the operator; they are yours to guarantee):**
+- **No LLM-reviews-LLM loop.** One advisory pass per *body of text*; you triage its
+  findings once, then they stop (Phase 4). Never revise from them autonomously,
+  never re-run a pass over text it already saw. Text the sign-off ADDS is
+  unreviewed — see Phase 4's expiry rule.
 - **One writer.** This session authors everything; subagents only read.
-- **Vacuous checks are YOUR defect to catch, not the operator's.** Every task
-  carries a machine-checkable done-when that is also NON-VACUOUS — it must fail if
-  the work were never done. Catching this is the authoring checklist's job (Phase
-  3), not something you outsource to the gate.
+- **Vacuous checks are YOUR defect to catch, never the operator's.** Every task
+  carries a machine-checkable done-when that also FAILS if the work were never
+  done. Catching this is the authoring checklist's job (Phase 3).
 - **You are drafting for a fresh implementer session** that knows nothing the doc
   doesn't say. Pin decisions; leave the greppable out.
 
@@ -50,34 +74,47 @@ overrides.
 Read the repo map, root CLAUDE.md, and the files/interfaces plausibly touched.
 **Hard budget: ~10–15 tool calls.** Everything else is looked up on demand while
 authoring — recon is orientation, not an audit. Verify that every file/interface
-you intend to name actually exists.
+you intend to name actually exists. This is where you earn the right not to ask
+the operator about the code.
 
-## Phase 2 — Interview
+## Phase 2 — Ask the operator (only what only they know)
 
-Question wording, coverage, and order are fixed here — do not improvise them.
+You just did recon. You already know the files and interfaces — **so do not ask
+about them.** Working out the shape of the code is your job, not a question. What
+you cannot derive is what the operator wants and the product calls only they can
+make. Ask those, plainly, and nothing else.
 
-**Order:**
-1. **Scope boundary** — what's in; what's explicitly OUT.
-2. **Files & interfaces** — named, and verified to exist (Phase 1).
-3. **Behavior + edge cases**, EARS-shaped — walk the *unwanted-behaviour* pattern
-   explicitly: "what must NOT happen?"
-4. **Verification** — "what command proves this works, end to end?"
-5. **Tradeoffs the operator hasn't considered** — at least ONE adversarial probe
-   with a concrete failure scenario. Don't ask obvious questions.
+**Cover these — in whatever order the conversation makes natural, batched, plain:**
+- **What "done" looks like to them** — the user-visible outcome, in their words.
+- **What this must NOT do / must NOT touch** — the boundary only they can draw.
+  Get at least one real OUT.
+- **What must never happen** — the bad outcome to design against ("what would make
+  this a disaster?"). This is the unwanted-behaviour criterion; ask it as a plain
+  worry, not an EARS template.
+- **A product decision you're genuinely unsure about** — where two reasonable
+  reads exist and the choice is theirs, not yours.
 
-**Budgets:** 2–4 questions per `AskUserQuestion` call; ≤3 calls at Full tier, ≤1
-at Short.
+**Keep it short.** 2–4 questions per `AskUserQuestion` call; ≤3 calls at Full, ≤1
+at Short. **If you can answer it from the code, don't ask it** — every avoidable
+question is the ceremony they hate.
 
-**Ambiguity rule — voice, never silently resolve.** The one way tacit knowledge
-is lost is a silent wrong disambiguation. State your intended interpretation and
-ask. A "whatever you think" answer gets ONE concrete A/B re-ask, then is marked.
-**Max 3 open ambiguities**, inline:
-`[NEEDS CLARIFICATION: <question> | default: <your default>]`.
+**When you spot something they probably haven't considered** — a tradeoff, a way
+it could bite later — raise it ONCE, with a concrete example, as help: "Heads up:
+if we go with X, then Y breaks — do you want X, or Y?" That is you doing good
+work, not challenging them. Only raise a real one; never manufacture one to look
+thorough.
 
-**Stopping rule — all five, then stop asking:**
-(a) files+interfaces named and verified · (b) OUT has ≥1 real entry · (c) every
-task has a machine-checkable done-when · (d) open ambiguities ≤3 and marked ·
-(e) the last question round produced zero new decisions.
+**Ambiguity — decide it yourself, then tell them.** You are the engineer: when
+something is unclear, pick the sensible default and MOVE. Do not stall the
+operator on a call you can reasonably make. The one thing you may never do is
+silently pick a *wrong product* reading — so for genuine product forks, take your
+best pick and let them veto it at sign-off. Carry the unresolved ones (**max 3**)
+into the doc as `[NEEDS CLARIFICATION: <plain question> | default: <your pick>]`
+and surface them at the gate as "here's the call I made for you."
+
+**Stop asking when:** you know the outcome they want · you have ≥1 real OUT · every
+task has a done-when you can check · open product choices are ≤3, each with your
+default · the last round taught you nothing new. Then stop.
 
 ## Phase 3 — Author the doc
 
@@ -112,55 +149,61 @@ exponentially with task length, and the dependable horizon is 4–6× shorter th
 the headline one. **Edges are author-declared**, default independent; add an edge
 only when a named artifact forces it. A cycle is a defect — fix the decomposition.
 
-**Write checks the operator won't have to second-guess.** Before a task's file
-set and done-when are final, run the
-[authoring checklist](references/authoring-checklist.md): wiring-seam (does the
-diff actually take effect at runtime), non-vacuous done-whens (would it pass on an
-untouched repo), SIGPIPE-safe pipelines, the verification fallback ladder.
-**This QA is yours.** What you catch, you fix. What you cannot fully resolve
-becomes a flagged risk you carry to the gate in plain words — that honest list is
-the most useful thing you hand the operator.
+**Do the QA the operator will never do.** Before a task's file set and done-when
+are final, run the [authoring checklist](references/authoring-checklist.md):
+wiring-seam (does the diff actually take effect at runtime), non-vacuous
+done-whens (would it pass on an untouched repo), SIGPIPE-safe pipelines, the
+verification fallback ladder. **This QA is yours.** What you catch, you fix. What
+you cannot fully resolve becomes a flagged risk you carry to the gate in plain
+words — that honest list is the most useful thing you hand the operator.
 
 **Two files, one truth.** Alongside the spec, write the operator brief as a
 sidecar: `docs/specs/YYYY-MM-DD-<slug>-spec.human.md`. NON-normative: on any
 conflict the spec wins, and the gate (Phase 5) runs against the spec. Regenerate
 it on every spec revision.
 
-**The sidecar is your honest gate brief in plain English** — the same material
-you present at Phase 5, Step A. Not a marketing summary; not a hedge. Fixed
-sections:
+**The sidecar is the operator's whole view of your work, in plain English** — the
+same material you walk them through at Phase 5, Step A. Not a marketing summary;
+not a hedge. Write every row in words a non-coder reads without stopping — no
+jargon, no `go test` shorthand left unexplained. Fixed sections:
 
-| Section | Contents |
+| Section | Contents (plain language) |
 |---|---|
 | What this does | 2–3 plain sentences |
-| What it will NOT do | every OUT bullet, verbatim |
-| What I verified myself | files exist · each done-when fails on an untouched repo · the closing command **verbatim** + what a real pass prints |
-| Where I'm unsure | your flagged risks, one plain line each: weakest done-when, thinnest OUT boundary, any unresolved advisory finding, each defaulted ambiguity. Mandatory — "no residual risks" only if the authoring pass was genuinely clean |
-| Open choices I made for you | each defaulted ambiguity as a question + the default you took |
+| What it will NOT do | every OUT bullet, in plain words |
+| What I checked myself, so you don't have to | the code you're naming is really there · the checks you wrote would fail if the work wasn't actually done · the one command that proves it works, and what a passing run looks like |
+| Where I'm genuinely unsure | your flagged risks, one plain line each: the weakest check, the thinnest OUT boundary, any unresolved advisory finding, each call you defaulted. Mandatory — "no residual risks" only if the authoring pass was genuinely clean |
+| Calls I made for you | each defaulted ambiguity as a plain question + the default you took + one-line why |
 
-**Verbatim wherever it is checkable.** Commands and interface signatures are
-copied exactly, in code spans. Paraphrasing `go test ./... -run 'Docs'` into "runs
-the docs tests" hides exactly the detail the operator would catch on.
+**Verbatim wherever it is checkable — but explained.** Commands and interface
+signatures are copied exactly, in code spans, AND given a plain-English gloss.
+`go test ./... -run 'Docs'` becomes "runs the docs tests (`go test ./... -run
+'Docs'`)" — exact for you, readable for them.
 
 **Budget: ≤40 lines Full, ≤15 Short.** Every line is brief material or a flagged
 risk. Background, architecture narration, restated repo context live in the spec —
 cut them here. If the mandatory sections alone blow the budget, the tier was wrong
 or the scope is two changes.
 
-**Length follows tier.** No doc-length quota; what's bounded is the gate read
-(Phase 5). If the doc outgrows one gate sitting, the tier was wrong or the scope is
-two changes.
+**Length follows tier.** No doc-length quota; what's bounded is the gate sitting
+(Phase 5, aim ~10 min). If the doc outgrows one gate sitting, the tier was wrong or
+the scope is two changes.
 
-**Intent read-back (mandatory; the last act of Phase 3).** With both files
-written, tell the operator — in your own words, built from their interview
-answers, never the doc's phrasing — what they are trying to accomplish: the
-immediate deliverable AND the underlying goal it serves, layered if the interview
-revealed layers. Close with one sentence naming the point of it all, then ask them
-to confirm or correct. On confirm, fold the validated formulation into `## Intent`.
-On correction, fix Intent and any section the correction invalidates before Phase
-4. An intent you cannot state back convincingly is a doc defect, not an operator
-problem. The folded Intent is narrative — it does not trigger the Phase 4 expiry
-rule.
+**Intent read-back — in dead-simple words (mandatory; the last act of Phase 3).**
+When both files are written, hand the operator a plain playback they can check in
+30 seconds. No jargon, no doc phrasing, short lines. Three labelled layers, then
+one question:
+
+- **What you want right now:** the thing being built, in the operator's own world.
+- **The deeper thing you want:** the goal that thing serves.
+- **The point of it all:** why it matters, one line.
+- **Did I get that right, or did I miss it?**
+
+Build it only from what they told you, never the doc's phrasing. If they say "miss
+it," fix your understanding AND any section the correction breaks, then play it
+back again — as many times as it takes. This is a check on YOU, not a test of
+them. On confirm, fold the plain wording's meaning into `## Intent`; that folded
+Intent is narrative and does not trigger the Phase 4 expiry rule.
 
 ## Phase 4 — Advisory pass (one-shot; skip with `--no-advisory`)
 
@@ -177,73 +220,65 @@ the doc path and this contract, never your reasoning or the interview:
 > valid, expected answer for a sound doc.
 
 Append its findings verbatim under `## Advisory findings (gate)`. They are input
-for the human, not for you. Do not act on them, reply to them, or re-run the pass
-over text it already saw. Anything the pass surfaces that you agree with, fold into
-your "Where I'm unsure" brief so the operator sees it framed
-honestly rather than as a raw dump.
+for you to triage, not for the operator to adjudicate. Do not act on them, reply to
+them, or re-run the pass over text it already saw. Anything the pass surfaces that
+you agree with, fold into your "Where I'm genuinely unsure" brief so the operator
+sees it framed honestly in plain words, never as a raw dump.
 
 **Expiry — the pass covers the doc it read, not the doc you ship.** If the Phase 5
-gate sends you back to Phase 2 and the operator's deltas ADD tasks or behavior
+sign-off sends you back to Phase 2 and the operator's deltas ADD tasks or behavior
 criteria, the shipped doc now contains material nothing has reviewed. Before
 re-presenting, run ONE further pass **scoped to the added sections only** — name
 them explicitly, tell the subagent to ignore the rest. This is a first review of
-new text, not a re-review; findings still die at the human. A revision that only
-edits or deletes existing text triggers no new pass.
+new text, not a re-review; findings still die at you. A revision that only edits or
+deletes existing text triggers no new pass.
 
-## Phase 5 — Human gate
+## Phase 5 — Operator sign-off (plain language, no quiz)
 
-The gate is short by design: **one sitting, aim ~10 minutes, hard cap 60 minutes /
-400 lines read.**
+You already did every technical check (the Phase 3 authoring checklist). The
+sign-off does NOT ask the operator to redo any of it. You hand them a plain-English
+picture of what you built and ask only what only they can answer. Aim ~10 minutes.
+It should feel like a teammate showing their work — not an exam.
 
-**You already did the mechanical QA** (files exist, checks are non-vacuous, seams
-wired — the authoring checklist). The gate does not ask the operator to redo it. It
-asks the operator only what the operator alone knows, and asks them to sanity-check
-the risks you already found. The operator is the oracle, not the QA department.
+**Step A — show them what you did, in plain words** (this is the `.human.md`
+sidecar, walked through). Before any question, say plainly:
+- **the change in one sentence** — your read of what they want;
+- **what you checked yourself, so they don't have to** — the code you're naming is
+  really there; the checks you wrote would fail if the work wasn't actually done;
+  the one command that proves it works end-to-end, and what a passing run looks like;
+- **where you're genuinely unsure** — your flagged risks, one plain sentence each.
+  Don't soften them and don't drown them. This honest short list is the point.
 
-**Step A — hand over your honest brief** (this is the `.human.md` sidecar). Before
-any question, say plainly:
-- the change in one sentence — your read of their intent;
-- what you verified yourself: the named files exist; each done-when fails on an
-  untouched repo (or which don't, and why); the closing command proves the behavior
-  end-to-end;
-- **where you are genuinely unsure** — your flagged risks, one plain sentence each.
-  Do not soften them. The flagged risks are the point.
+**Step B — ask only the operator-oracle questions.** These are things only they
+know; there is no answer you could have pre-filled:
 
-**Step B — ask only the operator-oracle questions.** Every answer states a value,
-never yes/no — these are questions only the operator can answer, so there is
-no rubber-stamp option to pick:
+1. **Did I understand you?** You already played the dead-simple three-layer intent
+   read-back at the end of Phase 3 and they confirmed it — carry that confirmation
+   in, do NOT re-quiz. Revisit only if the doc changed materially since, and then
+   replay the same plain three-layer form, never a fresh interrogation.
+2. **The calls I made for you.** For each product choice you defaulted: "I went with
+   `<default>` because `<one plain reason>`. Keep it, or change it?" — never a
+   silent default; always your recommendation attached.
+3. **Anything I couldn't know.** "Is there something this should not touch, or
+   something bad that must never happen, that I'd have no way to see from the code?"
+   — pure domain knowledge; folds scope and safety into one plain ask.
 
-1. **Intent.** "Here's what I think you want: `<sentence>`. Right? Fix it if not."
-   — you cannot supply this; the operator is the only oracle.
-2. **Scope.** "What's the one thing most likely missing from the OUT list?" —
-   domain knowledge only they hold.
-3. **Decisions.** For each defaulted ambiguity: "I chose `<default>`. Keep it or
-   change it?" — no silent defaults through the gate.
-4. **Edge cases.** "Any unwanted-behaviour trigger I missed?" — domain knowledge.
-5. **Validate my risks.** "These are the risks I flagged: `<list>`. Do you agree
-   these are the real ones, or am I worried about the wrong thing?" — the operator
-   judges your self-assessment; they don't hunt for it.
+**If they just say "yeah, fine" to #1 — that's allowed, and it's not your cue to
+lecture them.** But if you're not sure they heard the same thing you meant, take
+the risk onto yourself: "Let me make sure I built the right thing — in your own
+words, what are you trying to get?" Framed as you double-checking your own
+understanding, never as them failing to review.
 
-**Critical first:** items 1 and 5 carry the most weight — point the operator's
-attention there.
+**Offer the plain-language walk.** If they'd rather have this walked even more
+simply — multiple-choice, zero jargon — offer the **`simple-gate`** skill. Same
+sign-off, gentler surface, no trick answers.
 
-**The one honest guard.** If the operator's restatement of intent just echoes your
-sentence back, you learned nothing — ask once more, in their own words, with the
-sidecar closed. Not a trap: you need to hear it from them to know you understood.
-A fast accept is the operator's call to own; your duty was to point their
-attention at items 1 and 5 and tell the truth in the brief.
-
-**Offer the plain-language walk.** If the operator is not the coder — or asks to
-have the gate "walked simply" — offer the **`simple-gate`** skill: it renders this
-same brief and these same questions in plain, non-technical words with
-multiple-choice + free-text. Same gate, made approachable, no trick answers.
-
-Gate verdicts: **accept** → Phase 6 · **revise** → back to Phase 2 with the
-operator's deltas (operator-driven; not a review loop) · **abandon** → stop.
+Verdicts: **go** → Phase 6 · **change something** → back to Phase 2 with their
+correction (their call, not a review loop) · **drop it** → stop.
 
 ## Phase 6 — Pin & land
 
-On accept (all git via Bash; never touch the default branch):
+On go (all git via Bash; never touch the default branch):
 
 1. `base=$(git rev-parse HEAD)` — stamp the doc header: `accepted-base: <base>`.
 2. Branch `spec/<slug>` from the default branch; commit **both files** (the spec
@@ -255,7 +290,7 @@ On accept (all git via Bash; never touch the default branch):
 ```bash
 gh pr create --head "spec/<slug>" --base main --draft \
   --title "spec: <slug>" \
-  --body "Stage-1 authored spec+plan (stark-author). Gate: accepted by operator."
+  --body "Stage-1 authored spec+plan (stark-author). Sign-off: accepted by operator."
 ```
 
 ## Phase 7 — Handoff
@@ -267,8 +302,8 @@ the implementer's first-move contract, verbatim:
 > BEFORE executing. Verify the repo contains `accepted-base`. Then per task: turn
 > the criterion into the first failing check → implement → verify → commit. The
 > accepted spec text is immutable — surprises go to `## Deviations` (append-only). A
-> deviation that moves the scope boundary stops work and returns to the gate as a
-> diff-review.
+> deviation that moves the scope boundary stops work and returns to the operator as
+> a diff-review.
 
 ## Measurement
 

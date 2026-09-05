@@ -22,8 +22,9 @@ imitate controls in prose.
 
 **This is not a test you give them.** It is help. You did the technical QA
 already; the gate asks the person for the things a machine cannot supply — what
-they actually want, what's out of scope, which way to decide the open choices,
-and whether the risks you flagged are the real ones. There are no trick answers.
+they actually want, which way to decide the open choices, and anything you had no
+way to see from the code (what it must not touch, and what must never happen).
+There are no trick answers.
 
 **Core rule: write every question as if to a bright 10-year-old.** Short words.
 Short sentences. Real choices, honestly labelled.
@@ -90,64 +91,55 @@ in plain words instead.
    - what this change does — 2-3 short lines;
    - what you checked yourself — the files are real, the checks are honest, the
      proof-it-works command does what it claims;
-   - **where you are unsure** — the risks the spec's "Where I'm unsure" section
-     lists, one plain line each. Say them straight. Do not hide them.
+   - **where you are unsure** — the risks the spec's "Where I'm genuinely unsure"
+     section lists, one plain line each. Say them straight. Do not hide them.
 3. **Then use the current host's structured user-input UI when it is exposed.**
    It must show honest options and accept free text. If it is unavailable, ask
    one short open-ended question, wait for the answer, then continue.
-4. **Ask up to 3 items per structured call.** The questions below take about
-   two calls. The conversational fallback asks one at a time.
+4. **Ask up to 3 items per structured call.** The three questions below fit one
+   call. The conversational fallback asks one at a time.
 5. **Every option is honest.** No planted wrong answer. Where you offer more than
    one real reading, all of them are things the doc could truly mean — you are
    asking which one THEY meant, not baiting them.
 6. **If they pick the first option every time without reading, slow down.** Say so
    kindly, and read the brief out loud with them before asking again.
-7. **At the end, give the verdict in simple words:** all good (accept) · fix some
-   things (revise) · stop (abandon). Name what they still must decide.
+7. **At the end, give the verdict in simple words:** all good (go) · fix some
+   things (change something) · stop (drop it). Name what they still must decide.
 
 ## The questions (simple stem + how to build options)
 
-These mirror the five things the stark-author gate asks — the things only the
-person can answer. Copy the shape; swap the facts from the doc.
+These mirror the three things the stark-author Phase 5 gate asks — the things only
+the person can answer. Copy the shape; swap the facts from the doc.
 
-**1. Is this what you wanted?** — "Here is what I think you want. Is that right?"
-Give your best plain read first, then one honest alternative read the doc could
-also mean, then let them fix it.
-- "You want the app to send tasks to ClickUp on its own." (my read)
-- "You want it to only get ready, and send later." (a real other meaning)
-- "Not quite — let me tell you." (free text)
+**1. Did I get what you want?** — first play it back in three plain layers, built
+from what they told you, not from the doc's words. Then ask.
+- **What you want right now:** "You want the app to send tasks to ClickUp on its own."
+- **The deeper thing:** "So you stop copying tasks over by hand."
+- **The point:** "Less busywork. Fewer missed tasks."
+- Then ask "Did I get that right?" with a real other reading and a free-text fix:
+  - "Yes, that's it."
+  - "Close, but it should only get ready, and send later." (a real other meaning)
+  - "Not quite — let me tell you." (free text)
 
-**2. What is missing from the "will NOT do" list?** — "What might be missing here?"
-Give the items YOU suspect might be missing, then "nothing", plus free text.
-- "It should say it won't touch other computers."
-- "It should say it won't change the old send paths."
-- "Nothing. The list looks full."
-
-**3. The open choices** — for each open choice in the doc, ask it plainly.
-Give the choice you made first, then the other way, then "not sure".
+**2. The calls I made for you** — for each choice you had to make yourself, ask it
+plainly. Give the call you made first, then the other way, then "not sure".
 - "Keep the old send path on. It is harmless." (what I chose)
 - "Turn it off later instead."
-- "I'm not sure. Tell me more."
+- "I'm not sure. Tell me more." (free text)
 
-**4. Did I miss a bad thing to stop?** — "It lists bad things it must stop. Did I
-miss one?" List what it already covers (so they don't repeat it), then ask.
+**3. Anything I could not see from the code?** — "Is there something this must not
+touch, or something bad that must never happen, that I would not know?" Name what
+the doc already covers first (so they don't repeat it), then ask.
+- "It already says it won't touch other computers."
 - "It already stops two helpers running at once."
-- "It already stops a stuck helper freezing the app."
-- "You missed one — let me tell you." (free text) · or "No, it covers them."
-
-**5. Are these the real risks?** — "These are the things I am unsure about. Are
-these the real worries, or am I worried about the wrong thing?" State your flagged
-risks plainly, then ask them to judge.
-- "Yes. Those are the real worries."
-- "No. The real worry is something else." (free text)
-- "I don't think any of those matter, because…" (free text)
+- "Yes — here is what I'd add." (free text) · or "No, that covers it."
 
 ## Common mistakes
 
 - **Faking structured controls in prose.** Wrong. Use the structured UI when
   available; otherwise ask one open-ended question at a time.
 - **Planting a trick answer.** Wrong. This is help, not a trap. Every option is honest.
-- **Hiding your doubts.** Wrong. The "Where I'm unsure" brief is the most useful thing you give.
+- **Hiding your doubts.** Wrong. The "Where I'm genuinely unsure" brief is the most useful thing you give.
 - **Sneaking in jargon** ("the dispatcher reconciles"). Translate it or cut it.
 - **Long sentences.** Over 10 words? Split it.
 - **Inventing options** the doc does not support. Read the doc first, always.
@@ -156,8 +148,8 @@ risks plainly, then ask them to judge.
 
 Choices make a gate easy to pass — so the honesty lives in *what* you ask, not in
 tricking the reader. Every question here is something only the person can answer:
-what they want, what's out of scope, how to decide, and whether your worries are
-the right ones. There is no safe option to rubber-stamp, because there is no answer
-you could have supplied for them. If they breeze through without reading, that is
+what they want, how to decide the open choices, and what you had no way to see from
+the code. There is no safe option to rubber-stamp, because there is no answer you
+could have supplied for them. If they breeze through without reading, that is
 theirs to own — but slow down, read the brief together, and make sure they saw
 your flagged risks.
