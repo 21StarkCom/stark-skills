@@ -44,10 +44,10 @@ human uniquely knows — for this operator that is intent and product judgment, 
 the technical-verification items move onto you (Phase 3), not them (Phase 5).
 
 **Non-negotiables (these protect the operator; they are yours to guarantee):**
-- **No LLM-reviews-LLM loop.** One advisory pass per *body of text*; its findings
-  die at the human. Never revise from them autonomously, never re-run a pass over
-  text it already saw. Text the sign-off ADDS is unreviewed — see Phase 4's
-  expiry rule.
+- **No LLM-reviews-LLM loop.** One advisory pass per *body of text*; you triage its
+  findings once, then they stop (Phase 4). Never revise from them autonomously,
+  never re-run a pass over text it already saw. Text the sign-off ADDS is
+  unreviewed — see Phase 4's expiry rule.
 - **One writer.** This session authors everything; subagents only read.
 - **Vacuous checks are YOUR defect to catch, never the operator's.** Every task
   carries a machine-checkable done-when that also FAILS if the work were never
@@ -185,9 +185,9 @@ risk. Background, architecture narration, restated repo context live in the spec
 cut them here. If the mandatory sections alone blow the budget, the tier was wrong
 or the scope is two changes.
 
-**Length follows tier.** No doc-length quota; what's bounded is the gate read
-(Phase 5). If the doc outgrows one gate sitting, the tier was wrong or the scope is
-two changes.
+**Length follows tier.** No doc-length quota; what's bounded is the gate sitting
+(Phase 5, aim ~10 min). If the doc outgrows one gate sitting, the tier was wrong or
+the scope is two changes.
 
 **Intent read-back — in dead-simple words (mandatory; the last act of Phase 3).**
 When both files are written, hand the operator a plain playback they can check in
