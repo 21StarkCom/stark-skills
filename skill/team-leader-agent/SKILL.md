@@ -72,24 +72,16 @@ worthless, and `ListAgents` is a per-send step, not per-spawn. When you're
 message's `from` attribute straight into your `to`.
 
 The **control client** is the terminal-driving tool. **Use hermod.** Prefer the
-purpose-built `hermod claude <sub>` driver, which sends the slash command and
-reads back a **tri-state result** (`completed` / `blocked` / `timed-out` — exit
-`0` / `4` / `3`), so you never assume a `/clear` or `/effort` that never landed:
-
-```
-# hermod — driven, with a measured result:
-bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude clear  --surface <uuid> --json   # DESTRUCTIVE: --surface REQUIRED, never env-defaulted
-bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude effort <level> --surface <uuid> --json   # established minion ⇒ `blocked` at the confirm menu (expected), then send-key <uuid> enter
-bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts claude context --surface <uuid> --json   # read the CTX panel (verify the ~10% baseline)
-```
-
-Detection is best-effort screen-scraping; the cap **never claims a success it
-did not observe** — a `blocked`/`timed-out` is a real failure to react to, not
-noise. **Fallback** (older hermod, or the driver returns `timed-out`): the raw
-two-step —
-`send --enter <uuid> "/clear"` then a discrete `send-key <uuid> enter`, proven by
-`read-screen`. `--enter` is a **leading** flag; a trailing `--enter` is sent as
-literal text, and a long `send` buffers as `[Pasted text]` and does **not**
+purpose-built `hermod claude <sub>` driver (`clear` / `effort` / `context` — exact
+invocation in Quick reference), which sends the slash command and reads back a
+**tri-state result** (`completed` / `blocked` / `timed-out` — exit `0` / `4` /
+`3`), so you never assume a `/clear` or `/effort` that never landed. Detection is
+best-effort screen-scraping; the cap **never claims a success it did not
+observe** — a `blocked`/`timed-out` is a real failure to react to, not noise.
+**Fallback** (older hermod, or the driver returns `timed-out`): the raw two-step
+— `send --enter <uuid> "/clear"` then a discrete `send-key <uuid> enter`, proven
+by `read-screen`. `--enter` is a **leading** flag; a trailing `--enter` is sent
+as literal text, and a long `send` buffers as `[Pasted text]` and does **not**
 submit — which is why briefs never go through the keyboard.
 
 ## Preflight — learn the repo's gate before you fan out
@@ -207,9 +199,8 @@ parallel but **serialize the merge**:
    counts match the just-merged reality → **rebuild + retest** (a clean rebase
    is **not** a green build). Then it re-enters the queue with "READY TO MERGE."
 
-**Release-spine examples that ride every cap PR:** the generated catalog, the
-docs index / table-of-contents, the per-connector count anchors, and the
-CHANGELOG. Disjoint feature code still collides on all four — that is why the
+The examples ride in step 4 (catalog/index, the "N connectors / N of X" anchors,
+CHANGELOG); disjoint feature code still collides on all of them — that is why the
 queue exists, and why a clean rebase without regenerate + reconcile ships a stale
 catalog and a wrong count.
 
@@ -426,6 +417,8 @@ same failure: acting past the point you should have asked.
 | "I'll post a status when something changes" | The 5-min progress bar is a fixed heartbeat, not event-driven. A silent leader looks identical to a dead one. `progress set` every 5 min. |
 | "The `/clear` send returned, so it's reset" | A returned send is not an observed clear. Use `claude clear` and require `completed`; a `blocked`/`timed-out` didn't land. |
 | "That SendMessage name/token worked before — I'll reuse it" | The name churns on `/rename` (measured) and can on `/clear`; a stale name fails even paired with the right ref. Re-resolve via `ListAgents` every send and use the exact token it prints. |
+| "It's a re-brief — it still has last time's guardrails" | The `/clear` erased them. Re-send the full STOP-LIST + untrusted-content block every re-brief; a bypass-mode minion has no other guardrail. |
+| "I know this repo — I'll dispatch without a Preflight" | You can't brief a gate command, a fixed-resource binding, or a real definition of "green" you never learned. Preflight first, then fan out. |
 
 ## Quick reference
 
@@ -454,41 +447,16 @@ bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts respawn <uuid> --command "
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts retry-api-errors --workspace <ws>  # fleet sweep: retry sessions wedged on an API Error
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts notify send "<title>" --body "<b>" --workspace <ws>   # attention to the human
 bun /Users/aryeh/Code/21Stark/hermod/ts/bin/hermod.ts minions <x> --workspace <ws>      # spawn dick tabs primed with /effort ultracode
-cmux workspace status                                                                    # lane todo|working|needs-attention|review|done — per WORKSPACE, not per tab
+cmux workspace status                                                                    # RAW cmux binary, NOT hermod — lane todo|working|needs-attention|review|done, per WORKSPACE not per tab
 ```
 
-## Common mistakes
+## Mechanical gotchas
 
-- Trailing `--enter` (`send <uuid> "/clear" --enter`) — typed as literal text.
-  Leading, always.
-- Briefing through the control client's `send` — buffers as `[Pasted text]`,
-  Enter lands inside the paste.
-- Keying on `surface:N` or a remembered SendMessage name/token — both churn (a
-  `/rename` alone renames the SendMessage name, and `/clear` can too). For
-  control-client sends use the **UUID**; for SendMessage re-resolve via
-  `ListAgents` every send and use the exact `name [ref]` token it prints — a stale
-  name fails ("no agent named … is reachable") even with the correct ref.
+Pure mechanics and reference; the judgment-call failures are in Rationalizations
+above.
+
+- Trailing `--enter` (`send <uuid> "/clear" --enter`) is typed as literal text.
+  The flag is **leading**, always. For a control-client send target by **UUID**
+  (`surface:N` is display-only and churns).
 - `cmux workspace list --json` has **no lane field** — lanes are `cmux workspace
-  status`; per-minion state is `sessions`.
-- Letting a slow ticket tool (~40s/call) become the gate, or skipping the
-  immediate blocker update to save a call.
-- Merging two shared-seam PRs without the queue — the second lands a stale
-  generated catalog and a wrong count because it rebased clean but never
-  regenerated + reconciled.
-- Claiming a live-verified result for a task that had no vendor grant — that is
-  a fabricated report, not a shortcut.
-- Fanning out on an ambiguous or outward-facing instruction instead of
-  confirming it first.
-- Forgetting the guardrail block in a **re-brief** — the `/clear` erased the
-  previous one; bypass-mode minions have nothing else.
-- Fanning a fleet into a repo without a **Preflight** — you can't brief a gate
-  command, a fixed-resource binding, or a real definition of "green" you never
-  learned.
-- Leaving finished minions open instead of `close`-ing them once they're out of
-  DAG work — waste, stale board slots, and it blocks the one Cleanup sweep.
-- Letting the 5-minute progress bar go stale (or never setting it) — the operator
-  can't tell a live fleet from a dead leader without the heartbeat.
-- Assuming a `/clear` or `/effort` landed off a returned `send` — drive `/clear`
-  with `claude clear` (require `completed`), and `/effort` with `claude effort`
-  (an established minion returns `blocked` at the confirm menu — expected — so
-  confirm with `send-key <uuid> enter`, then read the effort tag).
+  status` (raw cmux binary, not hermod); per-minion state is `sessions --json`.
