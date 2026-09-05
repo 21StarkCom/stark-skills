@@ -92,8 +92,8 @@ in plain words instead.
    - what this change does — 2-3 short lines;
    - what you checked yourself — the files are real, the checks are honest, the
      proof-it-works command does what it claims;
-   - **where you are unsure** — the risks the spec's "Where I'm unsure" section
-     lists, one plain line each. Say them straight. Do not hide them.
+   - **where you are unsure** — the risks the spec's "Where I'm genuinely unsure"
+     section lists, one plain line each. Say them straight. Do not hide them.
 3. **Then ask with the `AskUserQuestion` tool.** It shows your options AND a
    free-text "Other". That is "choices plus free text" — use it, do not type
    questions as plain prose.
@@ -103,8 +103,8 @@ in plain words instead.
    asking which one THEY meant, not baiting them.
 6. **If they pick the first option every time without reading, slow down.** Say so
    kindly, and read the brief out loud with them before asking again.
-7. **At the end, give the verdict in simple words:** all good (accept) · fix some
-   things (revise) · stop (abandon). Name what they still must decide.
+7. **At the end, give the verdict in simple words:** all good (go) · fix some
+   things (change something) · stop (drop it). Name what they still must decide.
 
 ## The questions (simple stem + how to build options)
 
@@ -138,7 +138,7 @@ the doc already covers first (so they don't repeat it), then ask.
 
 - **Typing questions as prose.** Wrong. Use `AskUserQuestion` so they get real choices.
 - **Planting a trick answer.** Wrong. This is help, not a trap. Every option is honest.
-- **Hiding your doubts.** Wrong. The "Where I'm unsure" brief is the most useful thing you give.
+- **Hiding your doubts.** Wrong. The "Where I'm genuinely unsure" brief is the most useful thing you give.
 - **Sneaking in jargon** ("the dispatcher reconciles"). Translate it or cut it.
 - **Long sentences.** Over 10 words? Split it.
 - **Inventing options** the doc does not support. Read the doc first, always.
