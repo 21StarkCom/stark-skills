@@ -242,6 +242,74 @@ resolve_procstart() {
   [ "$_ppcomm" = "claude" ] && printf '%s\n' "$_v" > "$_psf" 2>/dev/null
 }
 
+# Are the payload's 5H/7D windows stale — i.e. do they belong to a seat this
+# process is no longer authenticated to?
+# Args: $1 current seat  $2 this process's STARTUP seat → exit 0 == stale.
+#
+# The rate-limit windows arrive ONLY in the startup payload and are pinned to the
+# seat this `claude` process authenticated to at LAUNCH — they never follow a
+# mid-session /login or `idun cc` rotation. So after a rotation a still-running
+# process paints the PREVIOUS account's windows under the current account's label:
+# a confident wrong number (observed 2026-09-06 — statusline 83%/15% for a
+# rotated-away seat while /status showed the live account at 7%/1%).
+#
+# The signal is DIRECT: compare the seat this process started under (STARTSEAT,
+# captured on its first render — see resolve_startseat) against the live seat.
+# Equal → the payload is for the current seat, show it. Differ → rotated away,
+# show "—". Permissive when either is unknown (can't prove stale → show the
+# numbers). This deliberately does NOT use a wall-clock proxy: an earlier
+# marker-time approach flagged a legitimately-current process whose launch merely
+# predated the render that first recorded the seat — hiding correct data on the
+# exact window the gate was meant to fix.
+usage_windows_stale() {
+  [ -n "$1" ] || return 1
+  [ -n "$2" ] || return 1
+  [ "$1" != "$2" ]
+}
+
+# Seat this incarnation authenticated to at startup → sets STARTSEAT ("" == unknown).
+#
+# The payload carries no seat id and a process's auth is fixed at launch, so we
+# capture the CURRENT seat on this incarnation's FIRST render and cache it, then
+# every later render compares the live seat to it (usage_windows_stale).
+#
+# The cache file is keyed by session_id ($sid) and its line is `<procstart>\t<seat>`.
+# Both keys matter:
+#   • session_id keys the FILE — unique per session, so (unlike a pid key) it can't
+#     inherit a dead session's seat, and (unlike a per-render-ephemeral pid under a
+#     shell wrapper) it's one file per session, not one per render.
+#   • procstart TAGS the entry — because `claude --resume`/`--continue` REUSES the
+#     session_id across runs, so the file survives into a new process. Comparing the
+#     cached procstart to this process's PROCSTART detects that: a resumed
+#     incarnation (new launch epoch) mismatches and re-captures the now-current seat,
+#     rather than reading the prior run's rotated-away seat and hiding its own live
+#     windows as "—".
+#
+# On a cache HIT the file is rewritten (same content) to refresh its mtime, so the
+# 14-day housekeeping sweep only reaps a DEAD session's file — a live long session
+# keeps a fresh mtime and never loses its (unrecoverable) startup seat. Permissive
+# (STARTSEAT="") when seat / sid / procstart can't be resolved. Assumes the first
+# render is under the startup seat (renders fire ~1s after launch, far under any
+# rotation cadence).
+resolve_startseat() {
+  [ -n "${_SS_DONE:-}" ] && return
+  _SS_DONE=1
+  STARTSEAT=""
+  { [ -n "$acct_seat" ] && [ -n "$sid" ]; } || return
+  case "$sid" in *"/"*) return ;; esac            # unusable as a filename → permissive
+  resolve_procstart
+  [ "$PROCSTART" -gt 0 ] 2>/dev/null || return     # need an incarnation stamp → permissive
+  local _ssf="$HOME/.claude/.statusline-procseat-${sid}" _cps="" _cseat=""
+  [ -r "$_ssf" ] && IFS=$'\t' read -r _cps _cseat < "$_ssf"
+  if [ "$_cps" = "$PROCSTART" ] && [ -n "$_cseat" ]; then
+    STARTSEAT="$_cseat"
+    printf '%s\t%s\n' "$PROCSTART" "$_cseat" > "$_ssf" 2>/dev/null   # refresh mtime, content unchanged
+    return
+  fi
+  STARTSEAT="$acct_seat"                            # first render / resumed incarnation: capture
+  printf '%s\t%s\n' "$PROCSTART" "$acct_seat" > "$_ssf" 2>/dev/null
+}
+
 # All gauges render at width 10. Each gauge's filled prefixes are precomputed
 # by build_grad (light→dark), so mkbar is a pure array lookup + substring — no
 # per-cell loop.
@@ -586,8 +654,20 @@ acct_label=""
   fi
 }
 
+# Rate-limit staleness: does this process's payload still belong to the live seat?
+# resolve_startseat captures the seat this process launched under; if a mid-session
+# rotation has since moved the live seat away from it, the payload 5H/7D windows are
+# for the old seat and the gauges must show "—" instead. Computed once here, above
+# the render. (The snapshot WRITE below keeps its own independent marker guard.)
+usage_stale=""
+if [ -n "$acct_seat" ]; then
+  resolve_startseat
+  usage_windows_stale "$acct_seat" "$STARTSEAT" && usage_stale=1
+fi
+
 # Context capacity gauge — how full is the window. Always visible: a payload
-# without the field renders as 0% rather than hiding the gauge.
+# without the field renders as 0% rather than hiding the gauge. Not seat-pinned
+# (context is this process's own live state), so the staleness gate never applies.
 printf -v ctx '%.0f' "${used_pct:-0}"
 tcolor "$ctx" 80 50; mkbar "$ctx" _CTX_FB
 seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
@@ -595,17 +675,29 @@ seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 # 5-hour rate-limit window: fixed-color "5H" label instead of a dynamic-
 # colored emoji; countdown is a bare duration, no emoji/label of its own.
 # Always visible (missing pct → 0%); Enterprise fills with 🔸 instead of
-# the gradient.
+# the gradient. When the payload windows are stale (this process predates the
+# current seat — see usage_windows_stale) BOTH the percent and the reset belong
+# to a rotated-away seat, so show a dim "—" rather than a confident wrong number.
+# _fpct/_wpct are still computed unconditionally: the snapshot write below reads
+# them, and its own guard (not this flag) decides whether the write happens.
 printf -v _fpct '%.0f' "${five_pct:-0}"
-tcolor "$_fpct" 80 50; fmt_remain "$five_reset" ""
-if [ "$acct_label" = "Enterprise" ]; then mkbar_ent "$_fpct"; else mkbar "$_fpct" _5H_FB; fi
-seg2 "${FIVEHR_COL}5H${R} ${BAR} ${TC}${_fpct}%${FR}${R}"
+if [ -n "$usage_stale" ]; then
+  seg2 "${FIVEHR_COL}5H${R} ${DIM}—${R}"
+else
+  tcolor "$_fpct" 80 50; fmt_remain "$five_reset" ""
+  if [ "$acct_label" = "Enterprise" ]; then mkbar_ent "$_fpct"; else mkbar "$_fpct" _5H_FB; fi
+  seg2 "${FIVEHR_COL}5H${R} ${BAR} ${TC}${_fpct}%${FR}${R}"
+fi
 # 7-day rate-limit window: fixed-color "7D" label instead of the dynamic-
 # colored 📅 emoji; countdown is a bare duration, matching 5H.
 printf -v _wpct '%.0f' "${week_pct:-0}"
-tcolor "$_wpct" 80 50; fmt_remain "$week_reset" ""
-if [ "$acct_label" = "Enterprise" ]; then mkbar_ent "$_wpct"; else mkbar "$_wpct" _7D_FB; fi
-seg2 "${DAY_COL}7D${R} ${BAR} ${TC}${_wpct}%${FR}${R}"
+if [ -n "$usage_stale" ]; then
+  seg2 "${DAY_COL}7D${R} ${DIM}—${R}"
+else
+  tcolor "$_wpct" 80 50; fmt_remain "$week_reset" ""
+  if [ "$acct_label" = "Enterprise" ]; then mkbar_ent "$_wpct"; else mkbar "$_wpct" _7D_FB; fi
+  seg2 "${DAY_COL}7D${R} ${BAR} ${TC}${_wpct}%${FR}${R}"
+fi
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
@@ -659,6 +751,10 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 #
 # This subsumes the /login settling window too: on a switch the marker's epoch
 # becomes now, so every already-running process is excluded until restart.
+#
+# (The 5H/7D RENDER above uses a separate, more precise signal — resolve_startseat,
+# the per-process startup seat — because the render must not hide a legitimately
+# current process's own windows, whereas the write here can safely skip one cycle.)
 _scf="$HOME/.claude/.statusline-seat-current"
 _cur_seat="" _cur_since=""
 [ -r "$_scf" ] && IFS=$'\t' read -r _cur_seat _cur_since < "$_scf"
