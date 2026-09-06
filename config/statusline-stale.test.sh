@@ -102,15 +102,20 @@ fi
 rm -rf "$RH"
 
 # A cache HIT must refresh the file's mtime so a live long session is not age-swept.
+# mtime epoch cross-platform: GNU `stat -c %Y` first (BSD/macOS rejects -c → falls
+# back to `stat -f %m`). NOT the reverse — GNU `stat -f` is filesystem-status, not a
+# format, so it succeeds with garbage and the fallback never fires (the CI red that
+# caught this).
+_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 RH="$(mktemp -d)"; mkdir -p "$RH/.claude"
 printf '{"oauthAccount":{"emailAddress":"x@evinced.com","organizationType":"claude_max","accountUuid":"aaaa","organizationUuid":"bbbb"}}' > "$RH/.claude.json"
 printf '%s\n' "$PROC" > "$RH/.claude/.statusline-procstart-$PP"
 _seat_file="$RH/.claude/.statusline-procseat-$SID"
 printf '%b' '1700000000\taaaa:bbbb\n' > "$_seat_file"
 touch -t 200001010000 "$_seat_file"                       # backdate to the year 2000
-_before="$(stat -f %m "$_seat_file" 2>/dev/null || stat -c %Y "$_seat_file")"
+_before="$(_mtime "$_seat_file")"
 HOME="$RH" bash "$SCRIPT" <<<"$PAYLOAD" >/dev/null 2>&1
-_after="$(stat -f %m "$_seat_file" 2>/dev/null || stat -c %Y "$_seat_file")"
+_after="$(_mtime "$_seat_file")"
 if [ "$_after" -gt "$_before" ] 2>/dev/null \
    && IFS=$'\t' read -r cps cseat < "$_seat_file" 2>/dev/null \
    && [ "$cps" = "$PROC" ] && [ "$cseat" = "aaaa:bbbb" ]; then
