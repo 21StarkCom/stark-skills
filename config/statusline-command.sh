@@ -242,29 +242,56 @@ resolve_procstart() {
   [ "$_ppcomm" = "claude" ] && printf '%s\n' "$_v" > "$_psf" 2>/dev/null
 }
 
-# Are the payload's 5H/7D windows stale relative to the CURRENT seat?
-# Args: $1 acct_seat  $2 procstart epoch  $3 seat-since epoch → exit 0 == stale.
+# Are the payload's 5H/7D windows stale — i.e. do they belong to a seat this
+# process is no longer authenticated to?
+# Args: $1 current seat  $2 this process's STARTUP seat → exit 0 == stale.
 #
 # The rate-limit windows arrive ONLY in the startup payload and are pinned to the
 # seat this `claude` process authenticated to at LAUNCH — they never follow a
-# mid-session /login or `idun cc` rotation. So a process that predates the current
-# seat renders the PREVIOUS account's windows under the current account's label: a
-# confident wrong number (observed 2026-09-06 — statusline 83%/15% for a
-# rotated-away seat while /status showed the live account at 7%/1%). This is the
-# exact staleness the snapshot-write guard below refuses to PERSIST; the render
-# must refuse to SHOW it too.
+# mid-session /login or `idun cc` rotation. So after a rotation a still-running
+# process paints the PREVIOUS account's windows under the current account's label:
+# a confident wrong number (observed 2026-09-06 — statusline 83%/15% for a
+# rotated-away seat while /status showed the live account at 7%/1%).
 #
-# Stale only when we can PROVE the process predates the current seat: seat known,
-# and procstart + seat-since both resolvable (> 0) and strictly ordered
-# (procstart < since). Every unresolvable case is NOT stale — the render stays
-# permissive and shows the payload numbers, exactly as before this gate. The
-# boundary matches the write guard's `procstart >= since` (equal == fresh): the
-# process launched at or after the seat became current is authenticated to it.
+# The signal is DIRECT: compare the seat this process started under (STARTSEAT,
+# captured on its first render — see resolve_startseat) against the live seat.
+# Equal → the payload is for the current seat, show it. Differ → rotated away,
+# show "—". Permissive when either is unknown (can't prove stale → show the
+# numbers). This deliberately does NOT use a wall-clock proxy: an earlier
+# marker-time approach flagged a legitimately-current process whose launch merely
+# predated the render that first recorded the seat — hiding correct data on the
+# exact window the gate was meant to fix.
 usage_windows_stale() {
   [ -n "$1" ] || return 1
-  [ "${2:-0}" -gt 0 ] 2>/dev/null || return 1
-  [ "${3:-0}" -gt 0 ] 2>/dev/null || return 1
-  [ "$2" -lt "$3" ] 2>/dev/null
+  [ -n "$2" ] || return 1
+  [ "$1" != "$2" ]
+}
+
+# Seat this process authenticated to at startup → sets STARTSEAT ("" when unknown).
+#
+# The payload carries no seat id and a process's auth is fixed at launch, so we
+# capture the CURRENT seat on this pid's FIRST render and cache it, then every
+# later render compares the live seat to it (usage_windows_stale). Keyed by the
+# claude pid ($PPID — Claude Code execs the statusline directly), mirroring the
+# resolve_procstart cache. The cached line is `<procstart>\t<seat>`: pairing the
+# seat with the launch epoch makes a reused PID self-invalidating — a new process
+# on a recycled pid resolves a different PROCSTART, so the stale line is ignored
+# and the current seat re-captured, rather than inheriting a dead process's seat
+# and false-flagging. Permissive (STARTSEAT="") when the seat or procstart can't
+# be resolved. Assumes the first render happens under the startup seat — renders
+# fire ~1s after launch, far tighter than any rotation cadence.
+resolve_startseat() {
+  [ -n "${_SS_DONE:-}" ] && return
+  _SS_DONE=1
+  STARTSEAT=""
+  [ -n "$acct_seat" ] || return
+  resolve_procstart
+  [ "$PROCSTART" -gt 0 ] 2>/dev/null || return   # can't validate the cache → permissive
+  local _ssf="$HOME/.claude/.statusline-procseat-${PPID}" _cps="" _cseat=""
+  [ -r "$_ssf" ] && IFS=$'\t' read -r _cps _cseat < "$_ssf"
+  if [ "$_cps" = "$PROCSTART" ] && [ -n "$_cseat" ]; then STARTSEAT="$_cseat"; return; fi
+  STARTSEAT="$acct_seat"                          # first render (or reused pid): capture
+  printf '%s\t%s\n' "$PROCSTART" "$acct_seat" > "$_ssf" 2>/dev/null
 }
 
 # All gauges render at width 10. Each gauge's filled prefixes are precomputed
@@ -611,22 +638,15 @@ acct_label=""
   fi
 }
 
-# Seat-current marker: track when the CURRENT identity first appeared, so both the
-# 5H/7D RENDER (below) and the snapshot WRITE (further below) can tell whether this
-# process's payload windows belong to the live seat or a rotated-away one. Hoisted
-# above the render because the gauges need it; the write reuses the same values.
-# (Read + update logic is documented at the snapshot guard below.)
-_scf="$HOME/.claude/.statusline-seat-current"
-_cur_seat="" _cur_since=""
-[ -r "$_scf" ] && IFS=$'\t' read -r _cur_seat _cur_since < "$_scf"
-if [ -n "$acct_seat" ] && [ "$_cur_seat" != "$acct_seat" ]; then
-  _cur_seat="$acct_seat" _cur_since="$NOW"
-  printf '%s\t%s\n' "$acct_seat" "$NOW" > "$_scf" 2>/dev/null
-fi
+# Rate-limit staleness: does this process's payload still belong to the live seat?
+# resolve_startseat captures the seat this process launched under; if a mid-session
+# rotation has since moved the live seat away from it, the payload 5H/7D windows are
+# for the old seat and the gauges must show "—" instead. Computed once here, above
+# the render. (The snapshot WRITE below keeps its own independent marker guard.)
 usage_stale=""
 if [ -n "$acct_seat" ]; then
-  resolve_procstart
-  usage_windows_stale "$acct_seat" "$PROCSTART" "$_cur_since" && usage_stale=1
+  resolve_startseat
+  usage_windows_stale "$acct_seat" "$STARTSEAT" && usage_stale=1
 fi
 
 # Context capacity gauge — how full is the window. Always visible: a payload
@@ -716,10 +736,16 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # This subsumes the /login settling window too: on a switch the marker's epoch
 # becomes now, so every already-running process is excluded until restart.
 #
-# `_scf` / `_cur_seat` / `_cur_since` and the marker update are computed once above
-# the 5H/7D render (the gauges gate on the same staleness via usage_windows_stale);
-# reused here unchanged. The write keeps its own positive `procstart >= since`
-# guard so its behavior is byte-identical to before this staleness split.
+# (The 5H/7D RENDER above uses a separate, more precise signal — resolve_startseat,
+# the per-process startup seat — because the render must not hide a legitimately
+# current process's own windows, whereas the write here can safely skip one cycle.)
+_scf="$HOME/.claude/.statusline-seat-current"
+_cur_seat="" _cur_since=""
+[ -r "$_scf" ] && IFS=$'\t' read -r _cur_seat _cur_since < "$_scf"
+if [ -n "$acct_seat" ] && [ "$_cur_seat" != "$acct_seat" ]; then
+  _cur_seat="$acct_seat" _cur_since="$NOW"
+  printf '%s\t%s\n' "$acct_seat" "$NOW" > "$_scf" 2>/dev/null
+fi
 if [ -n "$acct_seat" ] && [ -n "$five_pct" ]; then
   resolve_procstart
   if [ "$PROCSTART" -gt 0 ] 2>/dev/null &&

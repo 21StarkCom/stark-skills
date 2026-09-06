@@ -146,23 +146,27 @@ test("findStaleCheckpointFiles walks subdirs and flags old checkpoint markdowns"
 
 // ── findStaleStatuslineStateFiles ───────────────────────────────
 
-test("findStaleStatuslineStateFiles flags old procstart/lastreply/prompt/stop files, spares fresh + single-file caches", (t) => {
+test("findStaleStatuslineStateFiles flags old procstart/procseat/lastreply/prompt/stop files, spares fresh + single-file caches", (t) => {
   const tmp = makeTmp(t);
   if (!tmp) return;
   try {
     const oldProc = path.join(tmp, ".statusline-procstart-1234");
     const freshProc = path.join(tmp, ".statusline-procstart-5678");
+    const oldSeat = path.join(tmp, ".statusline-procseat-1234");
+    const freshSeat = path.join(tmp, ".statusline-procseat-5678");
     const oldReply = path.join(tmp, ".statusline-lastreply-sessA");
     const oldStop = path.join(tmp, ".statusline-stop-sessA");
     const freshStop = path.join(tmp, ".statusline-stop-sessB");
     const gitCache = path.join(tmp, ".statusline-git-dirty-cache");
     const acctCache = path.join(tmp, ".statusline-account-cache");
-    for (const f of [oldProc, freshProc, oldReply, oldStop, freshStop, gitCache, acctCache]) {
+    for (const f of [oldProc, freshProc, oldSeat, freshSeat, oldReply, oldStop, freshStop, gitCache, acctCache]) {
       fs.writeFileSync(f, "x");
     }
     const ages: Record<string, Date> = {
       [oldProc]: days(30),
       [freshProc]: days(3),
+      [oldSeat]: days(30),
+      [freshSeat]: days(3),
       [oldReply]: days(20),
       [oldStop]: days(18),
       [freshStop]: days(2),
@@ -171,7 +175,7 @@ test("findStaleStatuslineStateFiles flags old procstart/lastreply/prompt/stop fi
     };
     const ageProvider: AgeProvider = (p) => ages[p] ?? new Date(0);
     const stale = findStaleStatuslineStateFiles(tmp, 14, ageProvider, NOW);
-    assert.deepEqual(stale.sort(), [oldReply, oldProc, oldStop].sort());
+    assert.deepEqual(stale.sort(), [oldReply, oldProc, oldSeat, oldStop].sort());
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
