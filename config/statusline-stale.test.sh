@@ -63,12 +63,15 @@ render_to() { # $1 = full line to seed into .statusline-procseat-$SID ("" = no f
 }
 
 icheck() { # name  seeded-cache-line  expect(stale|live)
-  local name="$1" cache="$2" want="$3" want_pat got
+  # The 5H and 7D windows are gated by the SAME usage_stale flag but rendered by
+  # two separate copy-pasted blocks, so assert BOTH — a stale/live regression in
+  # only the 7D block would otherwise ship unseen.
+  local name="$1" cache="$2" want="$3" pat5 pat7 got
   render_to "$cache"
-  if [ "$want" = "stale" ]; then want_pat='5H —'; else want_pat='5H .*83%'; fi
-  if grep -qE "$want_pat" <<<"$RENDER"; then got="$want"; else got="other"; fi
+  if [ "$want" = "stale" ]; then pat5='5H —'; pat7='7D —'; else pat5='5H .*83%'; pat7='7D .*15%'; fi
+  if grep -qE "$pat5" <<<"$RENDER" && grep -qE "$pat7" <<<"$RENDER"; then got="$want"; else got="other"; fi
   if [ "$got" = "$want" ]; then echo "  ok   $name"; else
-    printf '  FAIL %-34s want=%s\n    got: %s\n' "$name" "$want" "$(grep -oE '5H [^|]*' <<<"$RENDER" | head -1)"
+    printf '  FAIL %-34s want=%s\n    got: %s\n' "$name" "$want" "$(grep -oE '5H [^|]*| 7D [^|]*' <<<"$RENDER" | head -2 | tr '\n' ' ')"
     FAIL=1; fi
   rm -rf "$RH"
 }
