@@ -267,31 +267,47 @@ usage_windows_stale() {
   [ "$1" != "$2" ]
 }
 
-# Seat this session authenticated to at startup → sets STARTSEAT ("" when unknown).
+# Seat this incarnation authenticated to at startup → sets STARTSEAT ("" == unknown).
 #
-# The payload carries no seat id and a session's auth is fixed at launch, so we
-# capture the CURRENT seat on this session's FIRST render and cache it, then every
-# later render compares the live seat to it (usage_windows_stale). Keyed by
-# session_id ($sid) — UNIQUE per Claude Code session and never recycled, so unlike
-# a pid key it cannot inherit a dead session's seat (a reused pid would) and cannot
-# leak a file-per-render under a shell wrapper (a per-render-ephemeral pid would):
-# one file per session, stable for its life. Permissive (STARTSEAT="") when the
-# session id or seat is unknown. Assumes the first render happens under the startup
-# seat — renders fire ~1s after launch, far tighter than any rotation cadence.
-# Caveat: a session alive past the 14-day housekeeping sweep loses this cache and
-# re-captures the then-current seat; low-impact (needs a >14-day session AND a
-# rotation during its life), same latent property as the procstart cache.
+# The payload carries no seat id and a process's auth is fixed at launch, so we
+# capture the CURRENT seat on this incarnation's FIRST render and cache it, then
+# every later render compares the live seat to it (usage_windows_stale).
+#
+# The cache file is keyed by session_id ($sid) and its line is `<procstart>\t<seat>`.
+# Both keys matter:
+#   • session_id keys the FILE — unique per session, so (unlike a pid key) it can't
+#     inherit a dead session's seat, and (unlike a per-render-ephemeral pid under a
+#     shell wrapper) it's one file per session, not one per render.
+#   • procstart TAGS the entry — because `claude --resume`/`--continue` REUSES the
+#     session_id across runs, so the file survives into a new process. Comparing the
+#     cached procstart to this process's PROCSTART detects that: a resumed
+#     incarnation (new launch epoch) mismatches and re-captures the now-current seat,
+#     rather than reading the prior run's rotated-away seat and hiding its own live
+#     windows as "—".
+#
+# On a cache HIT the file is rewritten (same content) to refresh its mtime, so the
+# 14-day housekeeping sweep only reaps a DEAD session's file — a live long session
+# keeps a fresh mtime and never loses its (unrecoverable) startup seat. Permissive
+# (STARTSEAT="") when seat / sid / procstart can't be resolved. Assumes the first
+# render is under the startup seat (renders fire ~1s after launch, far under any
+# rotation cadence).
 resolve_startseat() {
   [ -n "${_SS_DONE:-}" ] && return
   _SS_DONE=1
   STARTSEAT=""
   { [ -n "$acct_seat" ] && [ -n "$sid" ]; } || return
   case "$sid" in *"/"*) return ;; esac            # unusable as a filename → permissive
-  local _ssf="$HOME/.claude/.statusline-procseat-${sid}" _cseat=""
-  [ -r "$_ssf" ] && IFS= read -r _cseat < "$_ssf"
-  if [ -n "$_cseat" ]; then STARTSEAT="$_cseat"; return; fi
-  STARTSEAT="$acct_seat"                           # first render: capture the startup seat
-  printf '%s\n' "$acct_seat" > "$_ssf" 2>/dev/null
+  resolve_procstart
+  [ "$PROCSTART" -gt 0 ] 2>/dev/null || return     # need an incarnation stamp → permissive
+  local _ssf="$HOME/.claude/.statusline-procseat-${sid}" _cps="" _cseat=""
+  [ -r "$_ssf" ] && IFS=$'\t' read -r _cps _cseat < "$_ssf"
+  if [ "$_cps" = "$PROCSTART" ] && [ -n "$_cseat" ]; then
+    STARTSEAT="$_cseat"
+    printf '%s\t%s\n' "$PROCSTART" "$_cseat" > "$_ssf" 2>/dev/null   # refresh mtime, content unchanged
+    return
+  fi
+  STARTSEAT="$acct_seat"                            # first render / resumed incarnation: capture
+  printf '%s\t%s\n' "$PROCSTART" "$acct_seat" > "$_ssf" 2>/dev/null
 }
 
 # All gauges render at width 10. Each gauge's filled prefixes are precomputed
