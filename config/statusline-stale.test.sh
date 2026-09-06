@@ -39,27 +39,25 @@ pcheck "startup unknown"          "b:new" ""      fresh   # permissive (first re
 pcheck "both unknown"             ""      ""      fresh
 
 # ── Part 2: full-script integration (resolve_startseat + render) ─────────────
-# resolve_startseat keys its cache on $PPID = the process that runs `bash $SCRIPT`.
-# The script MUST be run directly (never inside $(...), which forks a subshell and
-# changes $PPID) so its $PPID == this test's $$; then a pre-seeded procstart cache
-# forces PROCSTART and a pre-seeded procseat cache forces the startup seat, both
-# under the same key. Output goes to a file (again: no command substitution).
-PP=$$
-PAYLOAD='{"model":{"display_name":"Opus","id":"o"},"rate_limits":{"five_hour":{"used_percentage":83,"resets_at":4102444800},"seven_day":{"used_percentage":15,"resets_at":4102444800}},"context_window":{"used_percentage":39}}'
+# resolve_startseat keys its cache on the payload's session_id ($sid) — unique per
+# session, never recycled — so a pre-seeded .statusline-procseat-<sid> forces the
+# captured startup seat regardless of pid. The script is run directly with file
+# redirection (never inside $(...)), and output is ANSI-stripped for matching.
+SID="test-sid-abc123"
+PAYLOAD='{"session_id":"'"$SID"'","model":{"display_name":"Opus","id":"o"},"rate_limits":{"five_hour":{"used_percentage":83,"resets_at":4102444800},"seven_day":{"used_percentage":15,"resets_at":4102444800}},"context_window":{"used_percentage":39}}'
 CURSEAT="aaaa:bbbb"   # what ~/.claude.json (the live seat) will say
 RH=""; RENDER=""      # set by render_to: temp HOME + ANSI-stripped statusline output
 
-render_to() { # $1 = contents for .statusline-procseat-$PP ("" = no cache file)
+render_to() { # $1 = seat to seed into .statusline-procseat-$SID ("" = no cache file)
   RH="$(mktemp -d)"; mkdir -p "$RH/.claude"
   printf '{"oauthAccount":{"emailAddress":"x@evinced.com","organizationType":"claude_max","accountUuid":"aaaa","organizationUuid":"bbbb"}}' > "$RH/.claude.json"
-  printf '1700000000\n' > "$RH/.claude/.statusline-procstart-$PP"   # force PROCSTART=1700000000
-  [ -n "$1" ] && printf '%b' "$1" > "$RH/.claude/.statusline-procseat-$PP"
+  [ -n "$1" ] && printf '%s\n' "$1" > "$RH/.claude/.statusline-procseat-$SID"
   local out="$RH/out"
-  HOME="$RH" bash "$SCRIPT" <<<"$PAYLOAD" > "$out" 2>/dev/null   # NOT $() — keep $PPID == $$
+  HOME="$RH" bash "$SCRIPT" <<<"$PAYLOAD" > "$out" 2>/dev/null
   RENDER="$(sed $'s/\033\[[0-9;]*m//g' "$out")"
 }
 
-icheck() { # name  procseat-cache-contents  expect(stale|live)
+icheck() { # name  seeded-startup-seat  expect(stale|live)
   local name="$1" cache="$2" want="$3" want_pat got
   render_to "$cache"
   if [ "$want" = "stale" ]; then want_pat='5H —'; else want_pat='5H .*83%'; fi
@@ -70,22 +68,26 @@ icheck() { # name  procseat-cache-contents  expect(stale|live)
   rm -rf "$RH"
 }
 
-# Cache says this process started under a DIFFERENT seat (procstart matches) → stale.
-icheck "rotated: cached seat differs"  '1700000000\tcccc:dddd\n' stale
-# Cache says this process started under the CURRENT seat (procstart matches) → live.
-icheck "current: cached seat matches"  '1700000000\taaaa:bbbb\n' live
+# Cached startup seat differs from the live seat → rotated away → stale.
+icheck "rotated: cached seat differs"  "cccc:dddd" stale
+# Cached startup seat == live seat → this session is on the current seat → live.
+icheck "current: cached seat matches"  "aaaa:bbbb" live
 # No cache yet (first render): captures current seat → live (and writes the cache).
-icheck "first render captures + live"  ''                         live
-# PID reuse: cached procstart does NOT match → line ignored, current seat re-captured → live.
-icheck "pid reuse self-invalidates"    '1699999999\tcccc:dddd\n' live
+icheck "first render captures + live"  ""          live
 
-# First render must persist the per-pid seat cache so later renders are stable.
+# Payload without a session_id → no cache key → permissive (show the numbers).
+_saved_payload="$PAYLOAD"
+PAYLOAD='{"model":{"display_name":"Opus","id":"o"},"rate_limits":{"five_hour":{"used_percentage":83,"resets_at":4102444800},"seven_day":{"used_percentage":15,"resets_at":4102444800}},"context_window":{"used_percentage":39}}'
+icheck "no session_id → permissive"    ""          live
+PAYLOAD="$_saved_payload"
+
+# First render must persist the per-session seat cache so later renders are stable.
 render_to ""
-if IFS=$'\t' read -r cps cseat < "$RH/.claude/.statusline-procseat-$PP" 2>/dev/null \
-   && [ "$cps" = "1700000000" ] && [ "$cseat" = "$CURSEAT" ]; then
-  echo "  ok   first render writes <procstart>\\t<seat> cache"
+if IFS= read -r cseat < "$RH/.claude/.statusline-procseat-$SID" 2>/dev/null \
+   && [ "$cseat" = "$CURSEAT" ]; then
+  echo "  ok   first render writes the <seat> cache keyed by session_id"
 else
-  echo "  FAIL first render did not write the expected seat cache (got: '${cps:-}' / '${cseat:-}')"; FAIL=1
+  echo "  FAIL first render did not write the expected seat cache (got: '${cseat:-}')"; FAIL=1
 fi
 rm -rf "$RH"
 

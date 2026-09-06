@@ -267,31 +267,31 @@ usage_windows_stale() {
   [ "$1" != "$2" ]
 }
 
-# Seat this process authenticated to at startup → sets STARTSEAT ("" when unknown).
+# Seat this session authenticated to at startup → sets STARTSEAT ("" when unknown).
 #
-# The payload carries no seat id and a process's auth is fixed at launch, so we
-# capture the CURRENT seat on this pid's FIRST render and cache it, then every
-# later render compares the live seat to it (usage_windows_stale). Keyed by the
-# claude pid ($PPID — Claude Code execs the statusline directly), mirroring the
-# resolve_procstart cache. The cached line is `<procstart>\t<seat>`: pairing the
-# seat with the launch epoch makes a reused PID self-invalidating — a new process
-# on a recycled pid resolves a different PROCSTART, so the stale line is ignored
-# and the current seat re-captured, rather than inheriting a dead process's seat
-# and false-flagging. Permissive (STARTSEAT="") when the seat or procstart can't
-# be resolved. Assumes the first render happens under the startup seat — renders
-# fire ~1s after launch, far tighter than any rotation cadence.
+# The payload carries no seat id and a session's auth is fixed at launch, so we
+# capture the CURRENT seat on this session's FIRST render and cache it, then every
+# later render compares the live seat to it (usage_windows_stale). Keyed by
+# session_id ($sid) — UNIQUE per Claude Code session and never recycled, so unlike
+# a pid key it cannot inherit a dead session's seat (a reused pid would) and cannot
+# leak a file-per-render under a shell wrapper (a per-render-ephemeral pid would):
+# one file per session, stable for its life. Permissive (STARTSEAT="") when the
+# session id or seat is unknown. Assumes the first render happens under the startup
+# seat — renders fire ~1s after launch, far tighter than any rotation cadence.
+# Caveat: a session alive past the 14-day housekeeping sweep loses this cache and
+# re-captures the then-current seat; low-impact (needs a >14-day session AND a
+# rotation during its life), same latent property as the procstart cache.
 resolve_startseat() {
   [ -n "${_SS_DONE:-}" ] && return
   _SS_DONE=1
   STARTSEAT=""
-  [ -n "$acct_seat" ] || return
-  resolve_procstart
-  [ "$PROCSTART" -gt 0 ] 2>/dev/null || return   # can't validate the cache → permissive
-  local _ssf="$HOME/.claude/.statusline-procseat-${PPID}" _cps="" _cseat=""
-  [ -r "$_ssf" ] && IFS=$'\t' read -r _cps _cseat < "$_ssf"
-  if [ "$_cps" = "$PROCSTART" ] && [ -n "$_cseat" ]; then STARTSEAT="$_cseat"; return; fi
-  STARTSEAT="$acct_seat"                          # first render (or reused pid): capture
-  printf '%s\t%s\n' "$PROCSTART" "$acct_seat" > "$_ssf" 2>/dev/null
+  { [ -n "$acct_seat" ] && [ -n "$sid" ]; } || return
+  case "$sid" in *"/"*) return ;; esac            # unusable as a filename → permissive
+  local _ssf="$HOME/.claude/.statusline-procseat-${sid}" _cseat=""
+  [ -r "$_ssf" ] && IFS= read -r _cseat < "$_ssf"
+  if [ -n "$_cseat" ]; then STARTSEAT="$_cseat"; return; fi
+  STARTSEAT="$acct_seat"                           # first render: capture the startup seat
+  printf '%s\n' "$acct_seat" > "$_ssf" 2>/dev/null
 }
 
 # All gauges render at width 10. Each gauge's filled prefixes are precomputed

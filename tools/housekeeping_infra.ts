@@ -206,7 +206,7 @@ export function findStaleCheckpointFiles(
 }
 
 // Per-run / per-session statusline state files live directly under ~/.claude
-// (`.statusline-procstart-<pid>` + `.statusline-procseat-<pid>` written by the
+// (`.statusline-procstart-<pid>` + `.statusline-procseat-<sid>` written by the
 // statusline renderer, `.statusline-lastreply-<sid>`, `.statusline-prompt-<sid>`
 // written by the UserPromptSubmit hook, `.statusline-stop-<sid>` written by the
 // Stop hook). One accretes per Claude Code process / session, so they pile up over
