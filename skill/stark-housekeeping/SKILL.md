@@ -31,7 +31,7 @@ Audits and cleans up project state: closes stale issues, deletes merged branches
 
 ## Constants
 
-Detect repo (or use `--repo` override): parse `org/repo` from `git remote get-url origin`. The `TOOLS` path (`${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools`) is set locally in Phase 5 where it is used.
+Detect repo (or use `--repo` override): parse `org/repo` from `git remote get-url origin`.
 
 ---
 
@@ -150,12 +150,6 @@ Issues closed: {N}  (Phase parents: {n}, PR-referenced: {n}, Plan parents: {n}, 
 Branches deleted: {N}  (Local: {n}, Remote: {n})
 Worktrees cleaned: {N}
 Dangling symlinks removed: {N}
-Session files removed: {N}
-Checkpoint files removed: {N}
-Stale locks removed: {N}
-Logs rotated: {N}
-Validation logs removed: {N}
-Artifacts archived: {N} files into {M} archives
 
 Remaining open issues: {N}  {for each: #{number} — {title} ({labels})}
 Orphaned plan labels: {N}  {for each: plan:{slug} ({n} closed issues)}
@@ -167,35 +161,17 @@ Unreleased commits: {N} since {last_tag}
 
 ---
 
-## Phase 5: Infrastructure Cleanup
+## Phase 5: Infrastructure Cleanup — moved to `idun clean`
+
+Machine-state hygiene of the `~/.claude/code-review` tree (stale sessions,
+checkpoints, locks, statusline state, log rotation) and the `~/.claude`
+asset-symlink recovery now live in **`idun clean`**, the sole sweeper of that
+state. **This skill no longer invokes it** — it stays scoped to repo/GitHub
+hygiene (Phases 1–4). Run the machine-state sweep yourself, separately:
 
 ```bash
-TOOLS="${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/tools"
-INFRA_JSON=$(node "$TOOLS/housekeeping_infra.ts" \
-  ${DRY_RUN:+--dry-run} --json)
+idun clean [--dry-run]
 ```
-
-The tool runs all seven sub-phases in one pass, returning a receipt the skill
-renders into the Phase 4 summary block:
-
-| Sub-phase | Target | Threshold |
-|-----------|--------|-----------|
-| 5.1 | `~/.claude/code-review/sessions/*.json` | 30 days |
-| 5.2 | `~/.claude/code-review/sessions/**/checkpoint-*.md` | 7 days |
-| 5.3 | Stale `.lock` files in `~/.claude/code-review/` and `/tmp/` | `tools/lock_helpers_lib.ts::isLockStale` (TTL + PID alive + start_time match) |
-| 5.3b | Per-run/session statusline state under `~/.claude` (`.statusline-procstart-*`, `.statusline-lastreply-*`) | 14 days. Single-file caches (`.statusline-git-dirty-cache`, `.statusline-account-cache`) excluded — they self-refresh, never multiply. |
-| 5.4 | `healer.jsonl`, `preflight.jsonl`, `approach-contracts.jsonl` | keep last 1000 lines |
-| 5.5 | `~/.claude/code-review/logs/*.stderr` | 14 days |
-| 5.6 | `~/.claude/code-review/history/autopilot/` | tar.gz files older than 30 days, grouped by YYYY-MM into `~/.claude/code-review/archives/` |
-| 5.7 | stark-skills asset symlinks under `~/.claude` (`ASSET_SYMLINKS`, 10 entries) | Declarative desired-state, so this phase is the **recovery step** for a rebuilt `~/.claude`. **Provision** when the link is absent; **repoint** when it is dangling or its target carries a renamed segment (`STALE_SEGMENT_RENAMES`, e.g. `Code/Playground/`→`Code/21Stark/`). Never clobbers a real file/dir at the link path, never invents a missing canonical target (reported in `errors`), never deletes a link. Provisioned entries carry `provisioned: true`. |
-
-Receipt: `{ dryRun, sessionsRemoved[], checkpointsRemoved[],
-staleLocksRemoved[], statuslineStateRemoved[], validationLogsRemoved[], logsRotated[],
-artifactsArchived[{archive, files[]}], symlinksRepaired[{path, from, to}],
-errors[] }`. Exit code is non-zero
-only when `errors` is non-empty (e.g. an unlink permission error). Tar
-archive creation verifies via `tar -tzf` before unlinking originals; on
-verification failure the originals are left in place and `errors` notes it.
 
 ---
 
