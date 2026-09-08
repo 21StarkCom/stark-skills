@@ -825,6 +825,59 @@ if _on cache && [ -n "$cache_warm" ]; then
   fi
 fi
 
+# Daemon health — a green/yellow/red circle per watched daemon, on the telemetry
+# line. idun + alfred are FORK-FREE (idun's state-file lastPoll; alfred's pid lock
+# read + the kill -0 BUILTIN); launchd jobs (frigg-cache-sync) cost one
+# `launchctl list <label>` fork. Circles are `\U` escapes expanded by the final
+# printf %b, matching the 🔥 gauge above. Gated by the `daemons` segment toggle.
+if _on daemons; then
+  _G='\U0001f7e2' _Y='\U0001f7e1' _Rd='\U0001f534'   # 🟢 🟡 🔴
+  _dseg=""
+  _dapp() { [ -z "$_dseg" ] && _dseg="$1" || _dseg="${_dseg} $1"; }
+
+  # alfred: pid in ~/.local/state/alfred/alfredd.lock; liveness via kill -0 (builtin,
+  # no fork). 🟢 alive · 🔴 lock missing or pid dead.
+  _almark="$_Rd"; _alf="$HOME/.local/state/alfred/alfredd.lock"
+  if [ -r "$_alf" ]; then
+    _alpid=""; IFS= read -r _alpid < "$_alf" 2>/dev/null || true
+    [ -n "$_alpid" ] && kill -0 "$_alpid" 2>/dev/null && _almark="$_G"
+  fi
+  _dapp "${DIM}alfred${R}${_almark}"
+
+  # idun: lastPoll {at, ok} from the daemon state file. Reuse the slurp from the
+  # 5H/7D read above; re-slurp fork-free if that block didn't run (no acct_seat). A
+  # FRESH lastPoll.at proves the process is alive (it just wrote), so `at` gates
+  # liveness and `ok` gates health: 🟢 fresh + ok · 🟡 fresh but last poll FAILED
+  # (e.g. HTTP 429 rate-limit — alive, degraded) or moderately behind · 🔴 lastPoll
+  # frozen past IDUN_STALE (not writing → dead) or the file is missing.
+  IDUN_OK=300 IDUN_STALE=1800
+  [ -z "${_ds:-}" ] && [ -r "$_dsf" ] && { IFS= read -r -d '' _ds < "$_dsf" 2>/dev/null || true; }
+  _idmark="$_Rd"
+  if [ -n "${_ds:-}" ]; then
+    _lpok=""; [[ $_ds =~ \"lastPoll\":[[:space:]]*\{[^}]*\"ok\":[[:space:]]*(true|false) ]] && _lpok="${BASH_REMATCH[1]}"
+    _lpat=""; [[ $_ds =~ \"lastPoll\":[[:space:]]*\{[^}]*\"at\":[[:space:]]*([0-9]+) ]] && _lpat="${BASH_REMATCH[1]}"
+    _lpage=$(( NOW - ${_lpat:-0} ))
+    if [ -n "$_lpat" ] && [ "$_lpage" -le "$IDUN_OK" ] 2>/dev/null; then
+      [ "$_lpok" = "true" ] && _idmark="$_G" || _idmark="$_Y"   # fresh: ok→green, failed poll→yellow
+    elif [ -n "$_lpat" ] && [ "$_lpage" -le "$IDUN_STALE" ] 2>/dev/null; then
+      _idmark="$_Y"                                             # writing but behind → degraded
+    fi
+  fi
+  _dapp "${DIM}idun${R}${_idmark}"
+
+  # frigg-cache-sync: launchd job → one `launchctl list <label>` fork. 🟢 running
+  # (has a PID) or last run exited 0 · 🔴 last exit nonzero, or not loaded.
+  _fgmark="$_Rd"; _fgout="$(launchctl list com.21stark.frigg-cache-sync 2>/dev/null)"
+  if [ -n "$_fgout" ]; then
+    _fgpid=""; [[ $_fgout =~ \"PID\"[[:space:]]*=[[:space:]]*([0-9]+) ]] && _fgpid="${BASH_REMATCH[1]}"
+    _fgex="";  [[ $_fgout =~ \"LastExitStatus\"[[:space:]]*=[[:space:]]*([0-9]+) ]] && _fgex="${BASH_REMATCH[1]}"
+    { [ -n "$_fgpid" ] || [ "${_fgex:-1}" = "0" ]; } && _fgmark="$_G"
+  fi
+  _dapp "${DIM}frigg-sync${R}${_fgmark}"
+
+  seg3 "${DIM}\U0001f6e0${R} ${_dseg}"
+fi
+
 if [ -n "$l3" ]; then
   printf "%b\n" "${out}\n${l2}\n${l3}"
 else
