@@ -206,17 +206,18 @@ export function findStaleCheckpointFiles(
 }
 
 // Per-run / per-session statusline state files live directly under ~/.claude
-// (`.statusline-procstart-<pid>` + `.statusline-procseat-<sid>` written by the
-// statusline renderer, `.statusline-lastreply-<sid>`, `.statusline-prompt-<sid>`
-// written by the UserPromptSubmit hook, `.statusline-stop-<sid>` written by the
-// Stop hook). One accretes per Claude Code process / session, so they pile up over
-// time. They are tiny and self-rebuild on the next render / hook fire, so anything
-// untouched for a while is safe to drop. (`.statusline-lastreply-<sid>` is no
-// longer written — line 3's status segment now derives idle-time from the Stop
-// stamp — but the prefix stays here to sweep files left by older statusline
-// versions.) The single-file caches (`.statusline-git-dirty-cache`,
-// `.statusline-account-cache`) are deliberately excluded — they self-refresh in
-// place and never multiply.
+// (`.statusline-procstart-<pid>` written by the statusline renderer,
+// `.statusline-prompt-<sid>` written by the UserPromptSubmit hook,
+// `.statusline-stop-<sid>` written by the Stop hook). One accretes per Claude Code
+// process / session, so they pile up over time. They are tiny and self-rebuild on
+// the next render / hook fire, so anything untouched for a while is safe to drop.
+// (Two prefixes are no longer written but stay in the sweep to reap files older
+// versions left behind: `.statusline-lastreply-<sid>` — line 3's status segment now
+// derives idle-time from the Stop stamp — and `.statusline-procseat-<sid>` — the
+// launch-seat staleness gate it fed was retired in STARK-2807 when the 5H/7D render
+// moved to the idun daemon's live poll.) The single-file caches
+// (`.statusline-git-dirty-cache`, `.statusline-account-cache`) are deliberately
+// excluded — they self-refresh in place and never multiply.
 export function findStaleStatuslineStateFiles(
   claudeDir: string,
   maxAgeDays: number,
