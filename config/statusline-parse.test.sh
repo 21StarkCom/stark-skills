@@ -20,7 +20,7 @@ type parse_payload >/dev/null 2>&1 || { echo "FAIL: could not extract parse_payl
 
 VARS=(cwd model model_id used_pct ctx_size vim_mode session_name effort thinking
       agent_name out_style week_pct week_reset five_pct five_reset over_200k sid
-      api_dur_ms s_added s_removed pr_number pr_state cache_warm cache_hit)
+      api_dur_ms s_added s_removed pr_number pr_state cache_warm)
 
 jq_parse() { # the EXACT filter statusline-command.sh used before the bash rewrite
   jq -r '{
@@ -38,8 +38,7 @@ jq_parse() { # the EXACT filter statusline-command.sh used before the bash rewri
     api_dur_ms:(.cost.total_api_duration_ms // ""),
     s_added:(.cost.total_lines_added // ""), s_removed:(.cost.total_lines_removed // ""),
     pr_number:(.pr.number // ""), pr_state:(.pr.review_state // ""),
-    cache_warm:(if ((.prompt_cache // {})|has("warm")) then (.prompt_cache.warm|tostring) else "" end),
-    cache_hit:(.prompt_cache.hit_ratio // "")
+    cache_warm:(if ((.prompt_cache // {})|has("warm")) then (.prompt_cache.warm|tostring) else "" end)
   } | to_entries[] | "\(.key)=\(.value|tostring)"' <<<"$1"
 }
 

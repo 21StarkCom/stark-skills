@@ -70,11 +70,10 @@ parse_payload() {
   pr_number=""; [[ $_pr =~ \"number$Nr ]]       && pr_number="${BASH_REMATCH[1]}"
   pr_state="";  [[ $_pr =~ \"review_state$Sr ]] && pr_state="${BASH_REMATCH[1]}"
 
-  # Prompt-cache health — payload `prompt_cache`. Read keys straight from $j:
-  # their names are unique in the payload, and the block carries a nested
-  # miss_causes:{} that would defeat the flat-parent capture used above.
+  # Prompt-cache warmth — payload `prompt_cache`. The `warm` key is unique in the
+  # payload, so read it straight from $j. (Only warmth is surfaced now, as the Cache
+  # health circle on line 3; the hit-ratio gauge was retired.)
   cache_warm=""; [[ $j =~ \"warm\":(true|false) ]] && cache_warm="${BASH_REMATCH[1]}"
-  cache_hit="";  [[ $j =~ \"hit_ratio$Nr ]]        && cache_hit="${BASH_REMATCH[1]}"
 
   _sd=""; [[ $j =~ \"seven_day\":\{([^{}]*)\} ]] && _sd="${BASH_REMATCH[1]}"
   week_pct="";   [[ $_sd =~ \"used_percentage$Nr ]] && week_pct="${BASH_REMATCH[1]}"
@@ -254,22 +253,6 @@ mkbar() { # pct gradarray → sets BAR: railed █ bar, filled cells fading ligh
   BAR="${_BORD}▐${R}${_fb[filled]}${DIM}${_E10:0:10-filled}${_BORD}▌${R}"
 }
 
-_O10="○○○○○○○○○○"
-mkdots() { # pct → sets BAR: railless ● gauge. Each pip carries its OWN colour on a
-  # fixed per-position ramp — red (#e05a4a, cell 0 / low) → blue (#4da5dc, cell 9 /
-  # full), so the gradient shows at every fill level and the fill front tracks health.
-  # Empty slots are dim ○. Fork-free (one 10-iter loop, no per-cell subshell).
-  local pct=$1 filled i r g b out=""
-  (( pct > 100 )) && pct=100; (( pct < 0 )) && pct=0
-  filled=$(( (pct * 10 + 50) / 100 )); (( filled > 10 )) && filled=10
-  for (( i = 0; i < filled; i++ )); do
-    r=$(( 224 + ( 77 - 224) * i / 9 ))
-    g=$((  90 + (165 -  90) * i / 9 ))
-    b=$((  74 + (220 -  74) * i / 9 ))
-    out+="\033[38;2;${r};${g};${b}m●"
-  done
-  BAR="${out}${DIM}${_O10:0:10-filled}${R}"
-}
 
 gradient() { # text [palette] → sets GRAD: per-account color sweep
   # Static spatial gradient across the label. A 60s `refreshInterval` (settings.json)
@@ -738,7 +721,7 @@ if _on code_churn; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 3: session clocks — now+age · 👤 since-enter · 🤖 since-reply · 🔥 cache
+# Line 3: session clocks — now+age · 👤 since-enter · 🤖 since-reply · 🛠 daemon+cache health
 # (now leads; 👤 marks the human's Enter, 🤖 the agent's last reply.)
 # ═════════════════════════════════════════════════════════════════════════
 # "Now (age)" = current wall clock plus session age (NOW − process start),
@@ -806,74 +789,79 @@ if _on session_times; then
   fi
 fi
 
-# Prompt-cache health (payload `prompt_cache`) on the telemetry line: warm shows
-# the hit ratio as a percent, cold shows a dimmed marker. Ratio→percent is
-# fork-free integer math on the "0.xxx" digits (round half-up).
-if _on cache && [ -n "$cache_warm" ]; then
-  if [ "$cache_warm" = "true" ]; then
-    _cpct=0
-    case "$cache_hit" in
-      1|1.*) _cpct=100 ;;
-      0.*)   _cf="${cache_hit#0.}000"
-             _cpct=$(( 10#${_cf:0:1}*10 + 10#${_cf:1:1} ))
-             (( 10#${_cf:2:1} >= 5 )) && (( _cpct++ )) ;;
-    esac
-    mkdots "$_cpct"
-    seg3 "\U0001f525 ${BAR}${DIM} ${_cpct}%${R}"   # warm: hit-ratio circle gauge (per-pip red→blue gradient)
-  else
-    seg3 "${DIM}\U0001f9ca cold${R}"            # cache cold
-  fi
-fi
-
-# Daemon health — a green/yellow/red circle per watched daemon, on the telemetry
-# line. idun + alfred are FORK-FREE (idun's state-file lastPoll; alfred's pid lock
-# read + the kill -0 BUILTIN); launchd jobs (frigg-cache-sync) cost one
-# `launchctl list <label>` fork. Circles are `\U` escapes expanded by the final
-# printf %b, matching the 🔥 gauge above. Gated by the `daemons` segment toggle.
+# Daemon + cache health — a green/yellow/red circle per watched daemon on the
+# telemetry line (🛠 prefix, entries ` | `-separated like the rest of line 3),
+# with prompt-cache warmth folded in as a "Cache" circle. Circles are `\U` escapes
+# expanded by the final printf %b. Fork budget: idun's poll-health and cache warmth
+# are FORK-FREE (state file / payload); alfred's pid liveness uses the kill -0
+# BUILTIN (no fork); only the launchd job (frigg-cache-sync) costs one
+# `launchctl list <label>` fork. Gated by the `daemons` segment toggle.
 if _on daemons; then
   _G='\U0001f7e2' _Y='\U0001f7e1' _Rd='\U0001f534'   # 🟢 🟡 🔴
   _dseg=""
-  _dapp() { [ -z "$_dseg" ] && _dseg="$1" || _dseg="${_dseg} $1"; }
+  _dapp() { [ -z "$_dseg" ] && _dseg="$1" || _dseg="${_dseg}${SEP}$1"; }
 
   # alfred: pid in ~/.local/state/alfred/alfredd.lock; liveness via kill -0 (builtin,
-  # no fork). 🟢 alive · 🔴 lock missing or pid dead.
+  # no fork). 🟢 alive · 🔴 lock missing or pid dead. KNOWN LIMITATION: alfredd leaves
+  # the last holder's pid in the lock after it exits (rewritten only on next acquire),
+  # so if the OS recycles that pid to a live process, kill -0 reads a dead daemon as
+  # 🟢. The authoritative signal is the flock, but probing it needs a fork (and breaks
+  # the controlled-HOME test), so this accepts the rare stale-pid false-green.
   _almark="$_Rd"; _alf="$HOME/.local/state/alfred/alfredd.lock"
   if [ -r "$_alf" ]; then
     _alpid=""; IFS= read -r _alpid < "$_alf" 2>/dev/null || true
     [ -n "$_alpid" ] && kill -0 "$_alpid" 2>/dev/null && _almark="$_G"
   fi
-  _dapp "${DIM}alfred${R}${_almark}"
+  _dapp "${DIM}Alfred${R} ${_almark}"
 
-  # idun: lastPoll {at, ok} from the daemon state file. Reuse the slurp from the
-  # 5H/7D read above; re-slurp fork-free if that block didn't run (no acct_seat). A
-  # FRESH lastPoll.at proves the process is alive (it just wrote), so `at` gates
-  # liveness and `ok` gates health: 🟢 fresh + ok · 🟡 fresh but last poll FAILED
-  # (e.g. HTTP 429 rate-limit — alive, degraded) or moderately behind · 🔴 lastPoll
-  # frozen past IDUN_STALE (not writing → dead) or the file is missing.
-  IDUN_OK=300 IDUN_STALE=1800
+  # idun: lastPoll {at, ok} from the daemon state file (reuse the 5H/7D slurp;
+  # re-slurp fork-free if that block didn't run). A FRESH lastPoll.at proves the
+  # process is alive (it just wrote), so `at` gates liveness and `ok` gates health:
+  # 🟢 fresh + ok · 🟡 fresh but the poll FAILED (e.g. HTTP 429 — alive, degraded),
+  # behind, or present-but-not-polling (pollSecs=0 writes no lastPoll) · 🔴 lastPoll
+  # frozen past IDUN_STALE (not writing → dead) or no file. IDUN_OK tracks idun's own
+  # staleness ceiling (pollSecs*3 ≈ 90s at the 30s default); 120s keeps a slim
+  # anti-flap margin without masking a freeze for minutes.
+  IDUN_OK=120 IDUN_STALE=1800
   [ -z "${_ds:-}" ] && [ -r "$_dsf" ] && { IFS= read -r -d '' _ds < "$_dsf" 2>/dev/null || true; }
   _idmark="$_Rd"
   if [ -n "${_ds:-}" ]; then
     _lpok=""; [[ $_ds =~ \"lastPoll\":[[:space:]]*\{[^}]*\"ok\":[[:space:]]*(true|false) ]] && _lpok="${BASH_REMATCH[1]}"
     _lpat=""; [[ $_ds =~ \"lastPoll\":[[:space:]]*\{[^}]*\"at\":[[:space:]]*([0-9]+) ]] && _lpat="${BASH_REMATCH[1]}"
-    _lpage=$(( NOW - ${_lpat:-0} ))
-    if [ -n "$_lpat" ] && [ "$_lpage" -le "$IDUN_OK" ] 2>/dev/null; then
-      [ "$_lpok" = "true" ] && _idmark="$_G" || _idmark="$_Y"   # fresh: ok→green, failed poll→yellow
-    elif [ -n "$_lpat" ] && [ "$_lpage" -le "$IDUN_STALE" ] 2>/dev/null; then
-      _idmark="$_Y"                                             # writing but behind → degraded
+    if [ -n "$_lpat" ]; then
+      _lpage=$(( NOW - _lpat ))
+      if [ "$_lpage" -le "$IDUN_OK" ] 2>/dev/null; then
+        [ "$_lpok" = "true" ] && _idmark="$_G" || _idmark="$_Y"   # fresh: ok→green, failed poll→yellow
+      elif [ "$_lpage" -le "$IDUN_STALE" ] 2>/dev/null; then
+        _idmark="$_Y"                                             # writing but behind → degraded
+      fi
+    else
+      _idmark="$_Y"                          # file present, no lastPoll (polling disabled) → alive, degraded
     fi
   fi
-  _dapp "${DIM}idun${R}${_idmark}"
+  _dapp "${DIM}Idun${R} ${_idmark}"
 
   # frigg-cache-sync: launchd job → one `launchctl list <label>` fork. 🟢 running
-  # (has a PID) or last run exited 0 · 🔴 last exit nonzero, or not loaded.
+  # (PID), last run exited 0, or loaded-but-not-yet-run (no PID and no LastExitStatus,
+  # a healthy freshly-loaded periodic job) · 🔴 last exit nonzero, or not loaded
+  # (launchctl prints nothing).
   _fgmark="$_Rd"; _fgout="$(launchctl list com.21stark.frigg-cache-sync 2>/dev/null)"
   if [ -n "$_fgout" ]; then
     _fgpid=""; [[ $_fgout =~ \"PID\"[[:space:]]*=[[:space:]]*([0-9]+) ]] && _fgpid="${BASH_REMATCH[1]}"
     _fgex="";  [[ $_fgout =~ \"LastExitStatus\"[[:space:]]*=[[:space:]]*([0-9]+) ]] && _fgex="${BASH_REMATCH[1]}"
-    { [ -n "$_fgpid" ] || [ "${_fgex:-1}" = "0" ]; } && _fgmark="$_G"
+    if [ -n "$_fgpid" ]; then _fgmark="$_G"                          # running
+    elif [ -z "$_fgex" ] || [ "$_fgex" = "0" ]; then _fgmark="$_G"  # loaded-never-run, or last exit 0
+    fi                                                              # else: nonzero exit → 🔴 (default)
   fi
-  _dapp "${DIM}frigg-sync${R}${_fgmark}"
+  _dapp "${DIM}Frigg${R} ${_fgmark}"
+
+  # Cache: prompt-cache warmth (payload prompt_cache), folded into the row as a
+  # circle. 🟢 warm · 🔴 cold. Fork-free. Gated by the `cache` toggle so it can be
+  # dropped independently; absent when the payload carries no prompt_cache.
+  if _on cache && [ -n "$cache_warm" ]; then
+    [ "$cache_warm" = "true" ] && _camark="$_G" || _camark="$_Rd"
+    _dapp "${DIM}Cache${R} ${_camark}"
+  fi
 
   seg3 "${DIM}\U0001f6e0${R} ${_dseg}"
 fi
