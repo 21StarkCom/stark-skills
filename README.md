@@ -98,12 +98,6 @@ Start and end your work sessions with consistent context loading and cleanup.
 |-------|-------------|-------------|
 | [`/stark-init-docs`](skill/stark-init-docs/SKILL.md) | Scaffold docs structure (ADRs, runbooks, etc.) | When starting a new project or adding docs to an existing one. Modes: template, backfill, upgrade, clean. |
 
-### Project Management
-
-| Skill | What it does | When to use |
-|-------|-------------|-------------|
-| [`/stark-housekeeping`](skill/stark-housekeeping/SKILL.md) | Audit stale issues, merged branches, and worktree remnants | When the repo or project board needs a cleanup pass. Supports dry-run and aggressive modes. |
-
 ---
 
 ## Typical Workflows
@@ -121,12 +115,6 @@ Start and end your work sessions with consistent context loading and cleanup.
 
 ```
 /stark-review 42                    # PR review: 1 agent × triage-selected domains
-```
-
-### Monthly maintenance
-
-```
-/stark-housekeeping                 # close stale issues, prune dead branches
 ```
 
 ---

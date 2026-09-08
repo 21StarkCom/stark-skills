@@ -80,7 +80,6 @@ const SUPPORT_FILES = [
   "tools/failure_classifier_lib.ts",
   "tools/gemini_utils_lib.ts",
   "tools/healer_canary_lib.ts",
-  "tools/housekeeping_infra.ts",
   "tools/iac_review.ts",
   "tools/iac_review_lib.ts",
   "tools/jury.ts",
@@ -128,7 +127,7 @@ test("Codex runtime override inventory is exact", () => {
   // make it a tautology.
   assert.equal(
     expected.length,
-    58,
+    56,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });
@@ -188,13 +187,6 @@ test("Codex runtime instructions never target Claude-owned state", () => {
     assert.doesNotMatch(body, /~\/\.claude\/code-review|\$HOME\/\.claude\/code-review|"\.claude"\s*,\s*"code-review"/,
       `Claude state path leaked into ${rel}`);
   }
-
-  const housekeeping = fs.readFileSync(
-    path.join(CODEX_ROOT, "skill/stark-housekeeping/SKILL.md"),
-    "utf8",
-  );
-  assert.match(housekeeping, /~\/\.stark\/code-review/);
-  assert.doesNotMatch(housekeeping, /~\/\.claude/);
 });
 
 test("Codex user-facing output uses dollar skill invocation", () => {
