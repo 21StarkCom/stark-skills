@@ -87,6 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - models: the default Claude model is now **`claude-opus-5[1m]`** (Opus 5, 1M context) everywhere it was `claude-opus-4-8` — `models.claude.model_id`, the review-doc wing/fixer, copilot/agent_claude/claude_utils dispatch defaults, `red_team.verify.model`, `red_team.fold.model`, the skill-description optimizer, the automation-fleet model, and the sentinel preflight probe. `global/config.json` gains matching `model_rates` ($5/$25 per MTok) and `model_limits` (1M context, 64K max output — read off a live `claude -p --output-format json` run) entries for both `claude-opus-5[1m]` and `claude-opus-5`; the `claude-opus-4-8` rate entry stays so historical run costs still resolve. Red-team provider labels emit `anthropic-claude-opus-5`, with the old label kept in the legacy classification allowlist so already-annotated artifacts don't fail the gate. `--fable` still runs the doc-review lead on `claude-fable-5`.
 
 ### Removed
+<!-- stark-gh:pr-merge pr=951 runId=951 -->
+- Removed the stark-skills copy of the `~/.claude/code-review` housekeeping sweeps; `idun clean` is now the sole sweeper of that state.
 <!-- stark-gh:pr-merge pr=940 runId=940 -->
 - Retired the `/stark-gh-user` skill; `idun user`/`idun user gh` is a strict superset for the PAT swap.
 <!-- stark-gh:pr-merge pr=924 runId=08ad88d3-2cae-4588-b586-10664ba9f989 -->
