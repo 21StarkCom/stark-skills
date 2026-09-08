@@ -584,17 +584,39 @@ acct_label=""
 # is needed.
 #
 # Fork-free: slurp the file, slice the current seat's object by its `"<seat>": {`
-# opener, regex the four numbers out of the flat (brace-free) object body. The
-# `== *"<seat>": {*` guard is load-bearing — a missing seat leaves the WHOLE file
-# in $_blk, and the first-`}` cut would then surface some OTHER seat's numbers.
-d5_pct="" d7_pct=""
+# opener, regex the numbers out of the flat (brace-free) object body. Three guards:
+#   • the `== *"<seat>": {*` presence check is load-bearing — a missing seat leaves
+#     the WHOLE file in $_blk, and the first-`}` cut would then surface some OTHER
+#     seat's numbers (one account can hold seats in two orgs at once).
+#   • the seat key is lowercased to match idun, which stores perSeat keys lowercased
+#     (idun daemon.ts: active.toLowerCase()). Real Claude UUIDs are already lowercase,
+#     so this is belt-and-suspenders against an uppercase-hex accountUuid.
+#   • a FRESHNESS gate on the seat's own stampedAt. The daemon only polls its ACTIVE
+#     seat, so an entry goes stale once that seat stops being polled — a dead/asleep
+#     daemon, or a seat that is current in ~/.claude.json but not the one idun drives.
+#     A stale entry must NOT be painted as live: that is the confident-wrong-number
+#     failure this whole redesign killed (the live state file already carries entries
+#     days stale). So blank the daemon side when NOW - stampedAt > DAEMON_TTL → dim
+#     "—". DAEMON_TTL is a fixed ceiling, NOT idun's exact pollSecs*3 (pollSecs isn't
+#     in the state file): generous enough that a healthy active seat (stampedAt
+#     refreshes every poll, seconds old) never false-negatives, tight enough that a
+#     frozen daemon stops lying within minutes. Errs toward "—" when liveness is
+#     unprovable, matching idun's own reader intent (daemon.ts cmdReading).
+DAEMON_TTL=300
+d5_pct="" d5_reset="" d7_pct="" d7_reset=""
 _dsf="$HOME/.claude/.idun-daemon-state.json"
 if [ -n "$acct_seat" ] && [ -r "$_dsf" ]; then
+  _dseat="${acct_seat,,}"
   _ds=""; IFS= read -r -d '' _ds < "$_dsf" 2>/dev/null || true
-  if [[ $_ds == *"\"$acct_seat\": {"* ]]; then
-    _blk="${_ds#*\"$acct_seat\": \{}"; _blk="${_blk%%\}*}"
-    [[ $_blk =~ \"fivePct\":[[:space:]]*(-?[0-9]+) ]] && d5_pct="${BASH_REMATCH[1]}"
-    [[ $_blk =~ \"weekPct\":[[:space:]]*(-?[0-9]+) ]] && d7_pct="${BASH_REMATCH[1]}"
+  if [[ $_ds == *"\"$_dseat\": {"* ]]; then
+    _blk="${_ds#*\"$_dseat\": \{}"; _blk="${_blk%%\}*}"
+    _dstamp=""; [[ $_blk =~ \"stampedAt\":[[:space:]]*([0-9]+) ]] && _dstamp="${BASH_REMATCH[1]}"
+    if [ -n "$_dstamp" ] && [ "$(( NOW - _dstamp ))" -le "$DAEMON_TTL" ] 2>/dev/null; then
+      [[ $_blk =~ \"fivePct\":[[:space:]]*(-?[0-9]+) ]]  && d5_pct="${BASH_REMATCH[1]}"
+      [[ $_blk =~ \"fiveReset\":[[:space:]]*([0-9]+) ]]  && d5_reset="${BASH_REMATCH[1]}"
+      [[ $_blk =~ \"weekPct\":[[:space:]]*(-?[0-9]+) ]]  && d7_pct="${BASH_REMATCH[1]}"
+      [[ $_blk =~ \"weekReset\":[[:space:]]*([0-9]+) ]]  && d7_reset="${BASH_REMATCH[1]}"
+    fi
   fi
 fi
 
@@ -611,17 +633,19 @@ seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 # Both are shown so a post-rotation divergence is visible instead of hidden; each
 # side is a dim "—" when its source is absent (no payload rate_limits, or the
 # daemon has no fresh entry for this seat). Each percent is severity-colored on
-# its own value. _fpct/_wpct stay computed here: the snapshot WRITE below reads them.
+# its own value. A bare reset countdown trails the pair, preferring the daemon's
+# reset (the current seat) and falling back to the payload's when the daemon has no
+# entry. _fpct/_wpct stay computed here: the snapshot WRITE below reads them.
 _ratepct() { # payload_raw daemon_int → sets RP "(P%/D%)", each side severity-colored
-  local pr="$1" dr="$2" ps ds
+  local pr="$1" dr="$2" ps ds _rp
   if [ -n "$pr" ]; then printf -v _rp '%.0f' "$pr"; tcolor "$_rp" 80 50; ps="${TC}${_rp}%${R}"; else ps="${DIM}—${R}"; fi
   if [ -n "$dr" ]; then tcolor "$dr" 80 50; ds="${TC}${dr}%${R}"; else ds="${DIM}—${R}"; fi
   RP="${DIM}(${R}${ps}${DIM}/${R}${ds}${DIM})${R}"
 }
 printf -v _fpct '%.0f' "${five_pct:-0}"
-_ratepct "$five_pct" "$d5_pct"; seg2 "${FIVEHR_COL}5H${R} ${RP}"
+_ratepct "$five_pct" "$d5_pct"; fmt_remain "${d5_reset:-$five_reset}" ""; seg2 "${FIVEHR_COL}5H${R} ${RP}${FR}"
 printf -v _wpct '%.0f' "${week_pct:-0}"
-_ratepct "$week_pct" "$d7_pct"; seg2 "${DAY_COL}7D${R} ${RP}"
+_ratepct "$week_pct" "$d7_pct"; fmt_remain "${d7_reset:-$week_reset}" ""; seg2 "${DAY_COL}7D${R} ${RP}${FR}"
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
