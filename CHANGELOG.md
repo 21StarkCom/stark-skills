@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=950 runId=950 -->
+- Statusline 5H/7D gauges now render payload and idun-daemon readings side by side (`5H (payload%/daemon%)`), replacing the old restart-required staleness dash.
 <!-- stark-gh:pr-merge pr=947 runId=947 -->
 - `/stark-author`: operator-first Stage-1 restructure — 3-question human gate, no file/interface quizzing, mandatory 3-layer intent read-back before sign-off.
 <!-- stark-gh:pr-merge pr=946 runId=946 -->
