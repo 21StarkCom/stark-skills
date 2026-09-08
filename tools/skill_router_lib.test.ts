@@ -137,7 +137,7 @@ test("computeSuggestions: returns suggestions wrapped in the documented shape", 
 });
 
 test("computeSuggestions: surfaces context-mapped skill when never used", () => {
-  // 'session' → 'stark-housekeeping'. With empty usage, the skill has
+  // 'session' → 'stark-handover'. With empty usage, the skill has
   // never been used so cooldown can't apply and it must surface.
   const result = computeSuggestions({
     context: "session",
@@ -146,14 +146,14 @@ test("computeSuggestions: surfaces context-mapped skill when never used", () => 
     now: new Date("2026-05-18T12:00:00Z"),
   });
   assert.equal(result.suggestions.length, 1);
-  assert.equal(result.suggestions[0].skill, "stark-housekeeping");
+  assert.equal(result.suggestions[0].skill, "stark-handover");
   assert.equal(result.suggestions[0].last_used, null);
 });
 
 test("computeSuggestions: suppressed skills don't surface AND bump _suppressed_count", () => {
   const result = computeSuggestions({
     context: "session",
-    cfg: { ...DEFAULT_SKILL_ACTIVATION, suppressed_skills: ["stark-housekeeping"] },
+    cfg: { ...DEFAULT_SKILL_ACTIVATION, suppressed_skills: ["stark-handover"] },
     usage: {},
     now: new Date("2026-05-18T12:00:00Z"),
   });
@@ -167,7 +167,7 @@ test("computeSuggestions: skips skill that's in usage AND within cooldown", () =
     context: "session",
     cfg: { ...DEFAULT_SKILL_ACTIVATION, cooldown_hours: 24 },
     usage: {
-      by_skill: { "stark-housekeeping": 1 },
+      by_skill: { "stark-handover": 1 },
       generated_at: isoZ(new Date("2026-05-18T11:00:00Z")),
     },
     now: new Date("2026-05-18T12:00:00Z"),
@@ -181,13 +181,13 @@ test("computeSuggestions: surfaces skill again past cooldown", () => {
     context: "session",
     cfg: { ...DEFAULT_SKILL_ACTIVATION, cooldown_hours: 24 },
     usage: {
-      by_skill: { "stark-housekeeping": 1 },
+      by_skill: { "stark-handover": 1 },
       generated_at: isoZ(new Date("2026-05-16T12:00:00Z")),
     },
     now: new Date("2026-05-18T12:00:00Z"),
   });
   assert.equal(result.suggestions.length, 1);
-  assert.equal(result.suggestions[0].skill, "stark-housekeeping");
+  assert.equal(result.suggestions[0].skill, "stark-handover");
   // last_used should be populated when the skill was in by_skill
   assert.equal(result.suggestions[0].last_used, "2026-05-16T12:00:00Z");
 });
@@ -204,7 +204,7 @@ test("computeSuggestions: surfaces skill that's never been used regardless of co
     now: new Date("2026-05-18T12:00:00Z"),
   });
   assert.equal(result.suggestions.length, 1);
-  assert.equal(result.suggestions[0].skill, "stark-housekeeping");
+  assert.equal(result.suggestions[0].skill, "stark-handover");
   assert.equal(result.suggestions[0].last_used, null);
 });
 
@@ -270,7 +270,7 @@ test("computeSuggestions: handles invalid generated_at gracefully (treats as sta
     context: "session",
     cfg: DEFAULT_SKILL_ACTIVATION,
     usage: {
-      by_skill: { "stark-housekeeping": 1 },
+      by_skill: { "stark-handover": 1 },
       generated_at: "not-a-real-timestamp",
     },
     now: new Date("2026-05-18T12:00:00Z"),

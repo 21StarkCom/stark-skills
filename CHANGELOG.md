@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=953 runId=953 -->
+- Buried /stark-housekeeping (The Sexton); live sweeps migrate to idun, dead Phase 5 steps dropped, router session context repointed to stark-handover.
 <!-- stark-gh:pr-merge pr=952 runId=952 -->
 - Statusline: add green/yellow/red daemon-health circles (idun/alfred/frigg) plus a Cache warmth circle to the line-3 telemetry tail.
 <!-- stark-gh:pr-merge pr=950 runId=950 -->

@@ -32,7 +32,7 @@ export const VALID_CONTEXTS: ReadonlySet<Context> = new Set<Context>([
 export const CONTEXT_SKILLS: Readonly<Record<Context, readonly string[]>> = {
   review: ["stark-review-improvement"],
   implementation: ["stark-init-docs"],
-  session: ["stark-housekeeping"],
+  session: ["stark-handover"],
   debug: ["stark-review"],
 };
 
