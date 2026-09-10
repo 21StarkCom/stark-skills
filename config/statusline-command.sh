@@ -496,7 +496,31 @@ _on agent && [ -n "$agent_name" ] && seg "${TEAL}\U0001f916 ${agent_name}${R}"
 _on out_style && [ -n "$out_style" ] && [ "$out_style" != "default" ] && \
   [ "$out_style" != "Default" ] && seg "${DIM}\U0001f3a8 ${out_style}${R}"
 
-_on session_name && [ -n "$session_name" ] && seg "${DIM}${session_name}${R}"
+# Bound work ticket (STARK-4405): alfred is the sole writer of
+# ~/.claude/.statusline-task-<sid>, one line "<id>\t<title>", mirroring the session's
+# bound ticket (task use / task new --bind write it, task unbind clears it). Show
+# "<id> · <title>" in place of the session_name segment; fall back to the session
+# name when unbound (no file). Fork-free — one file read, sid sanitized to the same
+# [a-zA-Z0-9_-] set the writer and the prompt/stop hooks use so the filename agrees.
+_task_id="" _task_title=""
+if [ -n "$sid" ]; then
+  _tsid="${sid//[^a-zA-Z0-9_-]/}"; _tsid="${_tsid:-default}"
+  _tf="$HOME/.claude/.statusline-task-${_tsid}"
+  if [ -r "$_tf" ]; then
+    IFS= read -r _tl < "$_tf" 2>/dev/null || true
+    _task_id="${_tl%%$'\t'*}"
+    [ "$_task_id" != "$_tl" ] && _task_title="${_tl#*$'\t'}"
+  fi
+fi
+if _on session_name && [ -n "$_task_id" ]; then
+  if [ -n "$_task_title" ]; then
+    seg "${SAP}${_task_id}${DIM} · ${PEACH}${_task_title}${R}"
+  else
+    seg "${SAP}${_task_id}${R}"
+  fi
+elif _on session_name && [ -n "$session_name" ]; then
+  seg "${DIM}${session_name}${R}"
+fi
 _on vim_mode && [ -n "$vim_mode" ] && { [ "$vim_mode" = "NORMAL" ] && seg "${YEL}N${R}" || seg "${DIM}I${R}"; }
 
 # ═════════════════════════════════════════════════════════════════════════

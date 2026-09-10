@@ -118,5 +118,40 @@ check "multi-seat: picks current, not neighbours" "$PAYLOAD_LIMITS" "$(daemon_st
 # numbers MUST NOT be painted as live — daemon side shows "—".
 check "stale daemon entry → —" "$PAYLOAD_LIMITS" "$(daemon_state aaaa:bbbb "$STALE")" "5H (83%/—)" "7D (15%/—)"
 
+# ── Bound-ticket segment (STARK-4405) ────────────────────────────────────────
+# alfred mirrors the session's bound ticket to ~/.claude/.statusline-task-<sid>
+# as "<id>\t<title>". The statusline shows "<id> · <title>" in place of the
+# session_name segment, and falls back to the session name when unbound (no file).
+TAB=$'\t'
+PAYLOAD_TASK='{"model":{"display_name":"Opus","id":"o"},"context_window":{"used_percentage":39},"session_id":"sessabc","session_name":"my-worktree"}'
+
+# Seed $HOME/.claude/.statusline-task-<sid> (sid from the payload) then render.
+render_with_task() { # $1=payload  $2=task-file-content ("" = no file) → sets RENDER
+  local RH out sid; RH="$(mktemp -d)"; mkdir -p "$RH/.claude"
+  printf '{"oauthAccount":{"emailAddress":"x@evinced.com","organizationType":"claude_max","accountUuid":"aaaa","organizationUuid":"bbbb"}}' > "$RH/.claude.json"
+  sid="$(sed -n 's/.*"session_id":"\([^"]*\)".*/\1/p' <<<"$1")"
+  [ -n "$2" ] && printf '%s' "$2" > "$RH/.claude/.statusline-task-${sid}"
+  out="$RH/out"; HOME="$RH" bash "$SCRIPT" <<<"$1" > "$out" 2>/dev/null
+  RENDER="$(sed $'s/\033\[[0-9;]*m//g' "$out")"
+  rm -rf "$RH"
+}
+
+checkT() { # name  want-substring  notwant-substring ("" to skip the absence check)
+  if grep -qF "$2" <<<"$RENDER" && { [ -z "$3" ] || ! grep -qF "$3" <<<"$RENDER"; }; then
+    echo "  ok   $1"
+  else
+    printf '  FAIL %-42s want:%q not:%q\n    got line1: %s\n' "$1" "$2" "$3" "$(sed -n 1p <<<"$RENDER")"
+    FAIL=1
+  fi
+}
+
+render_with_task "$PAYLOAD_TASK" "STARK-4405${TAB}render bound task title"
+checkT "bound ticket shows id · title"        "STARK-4405 · render bound task title" ""
+checkT "bound ticket replaces session name"   "STARK-4405"  "my-worktree"
+render_with_task "$PAYLOAD_TASK" ""
+checkT "unbound falls back to session name"    "my-worktree" "STARK-4405"
+render_with_task "$PAYLOAD_TASK" "STARK-4405${TAB}"
+checkT "title-less mirror shows id only"        "STARK-4405"  " · "
+
 [ "$FAIL" -eq 0 ] && echo "ALL PASS" || echo "FAILURES"
 exit "$FAIL"
