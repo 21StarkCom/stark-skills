@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+<!-- stark-gh:pr-merge pr=954 runId=954 -->
+- Statusline shows the bound alfred ticket (`<id> · <title>`) in the session-name spot, falling back to the session name when unbound.
 <!-- stark-gh:pr-merge pr=953 runId=953 -->
 - Buried /stark-housekeeping (The Sexton); live sweeps migrate to idun, dead Phase 5 steps dropped, router session context repointed to stark-handover.
 <!-- stark-gh:pr-merge pr=952 runId=952 -->
