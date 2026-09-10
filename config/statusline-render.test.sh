@@ -152,6 +152,11 @@ render_with_task "$PAYLOAD_TASK" ""
 checkT "unbound falls back to session name"    "my-worktree" "STARK-4405"
 render_with_task "$PAYLOAD_TASK" "STARK-4405${TAB}"
 checkT "title-less mirror shows id only"        "STARK-4405"  " · "
+# A literal backslash in the (untrusted) title must NOT be re-interpreted by the
+# final printf %b: without the escape, "a\nb" would inject a newline (and "\c" would
+# blank the rest of the statusline). It must render byte-for-byte.
+render_with_task "$PAYLOAD_TASK" "STARK-4405${TAB}a\\nb"
+checkT "backslash in title is not %b-interpreted" 'STARK-4405 · a\nb' ''
 
 [ "$FAIL" -eq 0 ] && echo "ALL PASS" || echo "FAILURES"
 exit "$FAIL"

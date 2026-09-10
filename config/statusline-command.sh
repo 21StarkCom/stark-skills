@@ -508,6 +508,10 @@ if [ -n "$sid" ]; then
   _tf="$HOME/.claude/.statusline-task-${_tsid}"
   if [ -r "$_tf" ]; then
     IFS= read -r _tl < "$_tf" 2>/dev/null || true
+    # The whole line is emitted through the final printf %b, so a literal backslash
+    # in this untrusted ticket title would be re-interpreted (\n breaks the line, \c
+    # blanks the rest of the statusline). Escape backslashes so %b renders them raw.
+    _tl="${_tl//\\/\\\\}"
     _task_id="${_tl%%$'\t'*}"
     [ "$_task_id" != "$_tl" ] && _task_title="${_tl#*$'\t'}"
   fi
