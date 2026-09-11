@@ -12,10 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Statusline shows the bound alfred ticket (`<id> · <title>`) in the session-name spot, falling back to the session name when unbound.
 <!-- stark-gh:pr-merge pr=953 runId=953 -->
 - Buried /stark-housekeeping (The Sexton); live sweeps migrate to idun, dead Phase 5 steps dropped, router session context repointed to stark-handover.
-<!-- stark-gh:pr-merge pr=952 runId=952 -->
-- Statusline: add green/yellow/red daemon-health circles (idun/alfred/frigg) plus a Cache warmth circle to the line-3 telemetry tail.
 <!-- stark-gh:pr-merge pr=950 runId=950 -->
-- Statusline 5H/7D gauges now render payload and idun-daemon readings side by side (`5H (payload%/daemon%)`), replacing the old restart-required staleness dash.
+- Statusline 5H/7D gauges render a usage bar per window, filled by the idun-daemon live reading of the current seat and falling back to the frozen payload when the daemon has no fresh entry — replacing the old restart-required staleness dash.
 <!-- stark-gh:pr-merge pr=947 runId=947 -->
 - `/stark-author`: operator-first Stage-1 restructure — 3-question human gate, no file/interface quizzing, mandatory 3-layer intent read-back before sign-off.
 <!-- stark-gh:pr-merge pr=946 runId=946 -->
@@ -90,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/stark-handoff`** — prompt-file handoffs for fresh executors (STARK-197, PR #857): four verbs (`write`/`list`/`use`/`launch`), five types over three skeletons (execution / investigation / inquiry) with the shared six-element spine and the 9-check rubric as `references/` templates; storage root `STARK_HANDOFF_ROOT` env > `handoff.root` config > `~/Code/Handoffs`; greppable header comment drives `list`/bare-`use` repo filtering; `launch` dispatches headless `claude -p` (stdin closed, backgrounded, timestamped log, `acceptEdits`, never skip-permissions) and refuses inquiry types, headerless files, and ambiguous repo matches. The tools smoke test now resolves every skill's `references/*.md` links, permanently; `runtime_overrides.test.ts` gained a `CLAUDE_ONLY_SKILLS` allowlist (stark-handoff ships deliberately without a Codex variant); the bare "handoff" trigger word was reclaimed from both `stark-handover` variants, which now route prompt-file asks to `/stark-handoff`.
 
 ### Changed
+<!-- idun:pr-merge pr=955 runId=955 -->
+- Streamlined statusline layout: dropped line 1/3 clutter, 5H/7D now render as daemon-first live usage bars with payload fallback instead of a dual payload/daemon pair.
 - models: the default Claude model is now **`claude-opus-5[1m]`** (Opus 5, 1M context) everywhere it was `claude-opus-4-8` — `models.claude.model_id`, the review-doc wing/fixer, copilot/agent_claude/claude_utils dispatch defaults, `red_team.verify.model`, `red_team.fold.model`, the skill-description optimizer, the automation-fleet model, and the sentinel preflight probe. `global/config.json` gains matching `model_rates` ($5/$25 per MTok) and `model_limits` (1M context, 64K max output — read off a live `claude -p --output-format json` run) entries for both `claude-opus-5[1m]` and `claude-opus-5`; the `claude-opus-4-8` rate entry stays so historical run costs still resolve. Red-team provider labels emit `anthropic-claude-opus-5`, with the old label kept in the legacy classification allowlist so already-annotated artifacts don't fail the gate. `--fable` still runs the doc-review lead on `claude-fable-5`.
 
 ### Removed

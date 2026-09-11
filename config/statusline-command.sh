@@ -15,7 +15,7 @@
 #     result is TTL-cached (4s) keyed on repo root — bursty event-driven
 #     re-renders are fork-free
 #   • gauge bars substring a pre-built fill string — no per-cell loop
-#   • helpers return via printf -v globals (TC/FN/FD/FR/GRAD) — no $(...) subshells
+#   • helpers return via printf -v globals (TC/FD/FR/GRAD) — no $(...) subshells
 
 # ── Extract all fields (pure bash, no jq fork) ───────────────────────────
 # The statusline runs on every 1s refresh across every open window, so the
@@ -28,7 +28,7 @@
 # payload matrix by config/statusline-parse.test.sh (run in CI via
 # tools/statusline_parse.test.ts).
 parse_payload() {
-  local j="$1" _m _eff _vim _ag _os _sd _fh _rest _pr
+  local j="$1" _m _eff _vim _ag _sd _fh _rest _pr
   local Sr='":"([^"]*)"' Nr='":(-?[0-9][0-9.eE+-]*)'   # string / number key-tails
 
   # cwd: workspace.current_dir, else top-level cwd (jq's // only falls through
@@ -40,8 +40,6 @@ parse_payload() {
   session_name=""; [[ $j =~ \"session_name$Sr ]] && session_name="${BASH_REMATCH[1]}"
   sid="";          [[ $j =~ \"session_id$Sr ]]   && sid="${BASH_REMATCH[1]}"
 
-  ctx_size="";   [[ $j =~ \"context_window_size$Nr ]]   && ctx_size="${BASH_REMATCH[1]}"
-  api_dur_ms=""; [[ $j =~ \"total_api_duration_ms$Nr ]] && api_dur_ms="${BASH_REMATCH[1]}"
   s_added="";    [[ $j =~ \"total_lines_added$Nr ]]     && s_added="${BASH_REMATCH[1]}"
   s_removed="";  [[ $j =~ \"total_lines_removed$Nr ]]   && s_removed="${BASH_REMATCH[1]}"
 
@@ -49,7 +47,6 @@ parse_payload() {
   # then read the field from it (order-independent within the parent).
   _m=""; [[ $j =~ \"model\":\{([^{}]*)\} ]] && _m="${BASH_REMATCH[1]}"
   model="";    [[ $_m =~ \"display_name$Sr ]] && model="${BASH_REMATCH[1]}"
-  model_id=""; [[ $_m =~ \"id$Sr ]]           && model_id="${BASH_REMATCH[1]}"
 
   _eff=""; [[ $j =~ \"effort\":\{([^{}]*)\} ]] && _eff="${BASH_REMATCH[1]}"
   effort=""; [[ $_eff =~ \"level$Sr ]] && effort="${BASH_REMATCH[1]}"
@@ -57,11 +54,7 @@ parse_payload() {
   vim_mode=""; [[ $_vim =~ \"mode$Sr ]] && vim_mode="${BASH_REMATCH[1]}"
   _ag=""; [[ $j =~ \"agent\":\{([^{}]*)\} ]] && _ag="${BASH_REMATCH[1]}"
   agent_name=""; [[ $_ag =~ \"name$Sr ]] && agent_name="${BASH_REMATCH[1]}"
-  _os=""; [[ $j =~ \"output_style\":\{([^{}]*)\} ]] && _os="${BASH_REMATCH[1]}"
-  out_style=""; [[ $_os =~ \"name$Sr ]] && out_style="${BASH_REMATCH[1]}"
 
-  # thinking: "" unless a thinking object carries an "enabled" bool
-  thinking=""; [[ $j =~ \"thinking\":\{[^{}]*\"enabled\":(true|false) ]] && thinking="${BASH_REMATCH[1]}"
   over_200k=false; [[ $j =~ \"exceeds_200k_tokens\":(true|false) ]] && over_200k="${BASH_REMATCH[1]}"
 
   # PR for this branch — payload `pr` block (present only when one exists). Flat
@@ -69,11 +62,6 @@ parse_payload() {
   _pr=""; [[ $j =~ \"pr\":\{([^{}]*)\} ]] && _pr="${BASH_REMATCH[1]}"
   pr_number=""; [[ $_pr =~ \"number$Nr ]]       && pr_number="${BASH_REMATCH[1]}"
   pr_state="";  [[ $_pr =~ \"review_state$Sr ]] && pr_state="${BASH_REMATCH[1]}"
-
-  # Prompt-cache warmth — payload `prompt_cache`. The `warm` key is unique in the
-  # payload, so read it straight from $j. (Only warmth is surfaced now, as the Cache
-  # health circle on line 3; the hit-ratio gauge was retired.)
-  cache_warm=""; [[ $j =~ \"warm\":(true|false) ]] && cache_warm="${BASH_REMATCH[1]}"
 
   _sd=""; [[ $j =~ \"seven_day\":\{([^{}]*)\} ]] && _sd="${BASH_REMATCH[1]}"
   week_pct="";   [[ $_sd =~ \"used_percentage$Nr ]] && week_pct="${BASH_REMATCH[1]}"
@@ -115,15 +103,15 @@ _on() { [[ "$_skip" != *" $1 "* ]]; }
 R="\033[0m" DIM="\033[38;5;245m"
 PEACH="\033[38;5;216m" YEL="\033[38;5;229m" GRN="\033[38;5;150m"
 SAP="\033[38;5;117m"   RED="\033[38;5;211m" TEAL="\033[38;5;158m"
-MAR="\033[38;5;217m"   MAUVE="\033[38;5;141m" SKY="\033[38;5;117m"
+MAR="\033[38;5;217m"   MAUVE="\033[38;5;141m"
 CTX_COL="\033[38;2;77;165;220m"    # #4da5dc — CTX label (context gauge)
 FIVEHR_COL="\033[38;2;237;117;78m" # #ed754e — 5H label (5-hour window gauge)
 DAY_COL="\033[38;2;229;114;74m"    # #e5724a — 7D label (7-day window gauge)
 SEP=" ${DIM}|${R} "
 
-# CTX bar fill — fades a light tint (cell 0) → saturated hue (cell 9) across the
+# Usage-bar fill — fades a light tint (cell 0) → saturated hue (cell 9) across the
 # 10 cells, depth growing with fill. Prefixes are precomputed once (see build_grad).
-# (The 5H/7D gauges no longer draw a bar — they render (payload/daemon) percents.)
+# Shared by all three usage gauges (CTX, 5H, 7D).
 build_grad() { # arrname r0 g0 b0 r1 g1 b1 → global array of 11 filled-cell prefixes
   local -n _a="$1"; local r0=$2 g0=$3 b0=$4 r1=$5 g1=$6 b1=$7 i r g b acc=""
   _a=("")
@@ -135,7 +123,7 @@ build_grad() { # arrname r0 g0 b0 r1 g1 b1 → global array of 11 filled-cell pr
     _a+=("$acc")
   done
 }
-build_grad _CTX_FB 223 177  96 160  53  47   # #dfb160 → #a0352f — CTX (gold→crimson)
+build_grad _USAGE_FB 223 177  96 160  53  47   # #dfb160 → #a0352f — usage bars (gold→crimson)
 
 # Cache wall-clock once; bash printf-builtin avoids a `date +%s` fork on
 # each call site (rate segs, session-start).
@@ -169,17 +157,6 @@ fmt_age() { # seconds → sets FA: "<1m" | "Xm" | "H:MM" — session-age scale
   if [ "$1" -lt 60 ]; then FA="<1m"
   elif [ "$1" -lt 3600 ]; then FA="$(( $1 / 60 ))m"
   else printf -v FA '%d:%02d' $(( $1 / 3600 )) $(( ($1 % 3600) / 60 )); fi
-}
-
-fmt_n() { # token count → sets FN: "1.2k" / "145k" / "1.5M"
-  local n=${1:-0}
-  if [ "$n" -ge 1000000 ] 2>/dev/null; then
-    printf -v FN '%d.%dM' $((n / 1000000)) $(( (n % 1000000) / 100000 ))
-  elif [ "$n" -ge 1000 ] 2>/dev/null; then
-    printf -v FN '%d.%dk' $((n / 1000)) $(( (n % 1000) / 100 ))
-  else
-    printf -v FN '%d' "$n"
-  fi
 }
 
 fmt_remain() { # reset_epoch [time_emoji] → sets FR: " ⏳ XdYh" or " XdYh" (emoji arg "") or ""
@@ -439,7 +416,7 @@ if [ -n "$_root" ]; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 1: repo · branch · PR · model · operational
+# Line 1: repo · branch · PR · operational
 # ═════════════════════════════════════════════════════════════════════════
 out=""
 if _on repo_name && [ -n "$repo_name" ]; then
@@ -467,34 +444,8 @@ if _on pr && [ -n "$pr_number" ]; then
   seg "${_prc}\U0001f500 #${pr_number} ${_prg}${R}"
 fi
 
-# Model: keep the version, shorten " (1M context)" → " 1M" —
-# pure-bash regex replaces a sed fork.
-if _on model && [ -n "$model" ]; then
-  m="$model"
-  [[ $m =~ ^(.*)\ \(([0-9]+[KMG])\ context\)(.*)$ ]] && m="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
-  seg "${SAP}${m}${R}"
-fi
-
-# Reasoning effort — Lo / Me / Hi / Xh / Mx — grouped with model since
-# it materially affects both output token volume and cost.
-if _on effort && [ -n "$effort" ]; then
-  case "$effort" in
-    low)    _ec="$DIM";   _el="Lo";;
-    medium) _ec="$DIM";   _el="Me";;
-    high)   _ec="$YEL";   _el="Hi";;
-    xhigh)  _ec="$PEACH"; _el="Xh";;
-    max)    _ec="$RED";   _el="Mx";;
-    *)      _ec="$DIM";   _el="${effort:0:2}";;
-  esac
-  seg "${_ec}${_el}${R}"
-fi
-
 # Active subagent (--agent foo or via agent settings).
 _on agent && [ -n "$agent_name" ] && seg "${TEAL}\U0001f916 ${agent_name}${R}"
-
-# Non-default output style (Explanatory / Learning / custom user style).
-_on out_style && [ -n "$out_style" ] && [ "$out_style" != "default" ] && \
-  [ "$out_style" != "Default" ] && seg "${DIM}\U0001f3a8 ${out_style}${R}"
 
 # Bound work ticket (STARK-4405): alfred is the sole writer of
 # ~/.claude/.statusline-task-<sid>, one line "<id>\t<title>", mirroring the session's
@@ -589,10 +540,10 @@ acct_label=""
 # seat key resolved above. Unlike the stdin payload — frozen to the seat THIS
 # process authenticated to at launch, so wrong after a mid-session /login or
 # `idun cc` rotation — the daemon figure always tracks the CURRENT live seat. So
-# the gauges below render BOTH side by side (payload / daemon): a post-rotation
-# divergence is visible rather than hidden behind a dash, and no launch-seat
-# staleness gate (the retired resolve_startseat / usage_windows_stale machinery)
-# is needed.
+# the gauges below use the daemon reading as their PRIMARY value and fall back to
+# the frozen payload only when the daemon has no fresh entry: the live number
+# survives a rotation without a restart, and no launch-seat staleness gate (the
+# retired resolve_startseat / usage_windows_stale machinery) is needed.
 #
 # Fork-free: slurp the file, slice the current seat's object by its `"<seat>": {`
 # opener, regex the numbers out of the flat (brace-free) object body. Three guards:
@@ -635,28 +586,41 @@ fi
 # without the field renders as 0% rather than hiding the gauge. Not seat-pinned
 # (context is this process's own live state), so the staleness gate never applies.
 printf -v ctx '%.0f' "${used_pct:-0}"
-tcolor "$ctx" 80 50; mkbar "$ctx" _CTX_FB
+tcolor "$ctx" 80 50; mkbar "$ctx" _USAGE_FB
 seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 
-# 5H + 7D rate-limit windows, rendered as (payload / daemon):
+# 5H + 7D rate-limit windows — a usage bar per window (like CTX above), filled by
+# the idun daemon's live poll of the CURRENT seat when present, else this process's
+# payload reading:
+#   daemon  = idun's live poll of the CURRENT seat (survives a mid-session rotation)
 #   payload = this process's launch reading, frozen to the seat it started under
-#   daemon  = idun's live poll of the CURRENT seat (survives mid-session rotation)
-# Both are shown so a post-rotation divergence is visible instead of hidden; each
-# side is a dim "—" when its source is absent (no payload rate_limits, or the
-# daemon has no fresh entry for this seat). Each percent is severity-colored on
-# its own value. A bare reset countdown trails the pair, preferring the daemon's
-# reset (the current seat) and falling back to the payload's when the daemon has no
-# entry. _fpct/_wpct stay computed here: the snapshot WRITE below reads them.
-_ratepct() { # payload_raw daemon_int → sets RP "(P%/D%)", each side severity-colored
-  local pr="$1" dr="$2" ps ds _rp
-  if [ -n "$pr" ]; then printf -v _rp '%.0f' "$pr"; tcolor "$_rp" 80 50; ps="${TC}${_rp}%${R}"; else ps="${DIM}—${R}"; fi
-  if [ -n "$dr" ]; then tcolor "$dr" 80 50; ds="${TC}${dr}%${R}"; else ds="${DIM}—${R}"; fi
-  RP="${DIM}(${R}${ps}${DIM}/${R}${ds}${DIM})${R}"
+# The daemon is the PRIMARY source because it tracks the live seat; the payload is
+# the FALLBACK, since a still-running process's payload figures belong to the
+# rotated-away seat after a /login or `idun cc` switch. A daemon value < 0 (idun's
+# "no data" sentinel) is treated as absent so it falls back too. The bar + percent
+# are severity-colored on the shown value, and the reset countdown that trails is
+# read from the SAME source as the shown value (never mixed — a payload percent must
+# not sit beside the daemon's reset, and the "—" dash must carry no countdown). Only
+# when NEITHER source has a value does the bar render dim-empty with "—". _fpct/_wpct
+# stay the PAYLOAD values — the snapshot WRITE below persists this process's own
+# launch-seat reading, never the daemon's.
+_ratebar() { # daemon_pct payload_raw daemon_reset payload_reset labelcol label → seg2 a usage bar
+  local dr="$1" pr="$2" drst="$3" prst="$4" col="$5" lbl="$6" val="" rst=""
+  if   [ -n "$dr" ] && [ "$dr" -ge 0 ] 2>/dev/null; then val="$dr"; rst="$drst"
+  elif [ -n "$pr" ]; then printf -v val '%.0f' "$pr"; rst="$prst"; fi
+  fmt_remain "$rst" ""            # reset follows the shown value's source ("" → no countdown)
+  if [ -n "$val" ]; then
+    tcolor "$val" 80 50; mkbar "$val" _USAGE_FB
+    seg2 "${col}${lbl}${R} ${BAR} ${TC}${val}%${R}${FR}"
+  else
+    mkbar 0 _USAGE_FB
+    seg2 "${col}${lbl}${R} ${BAR} ${DIM}—${R}${FR}"
+  fi
 }
 printf -v _fpct '%.0f' "${five_pct:-0}"
-_ratepct "$five_pct" "$d5_pct"; fmt_remain "${d5_reset:-$five_reset}" ""; seg2 "${FIVEHR_COL}5H${R} ${RP}${FR}"
+_ratebar "$d5_pct" "$five_pct" "$d5_reset" "$five_reset" "$FIVEHR_COL" "5H"
 printf -v _wpct '%.0f' "${week_pct:-0}"
-_ratepct "$week_pct" "$d7_pct"; fmt_remain "${d7_reset:-$week_reset}" ""; seg2 "${DAY_COL}7D${R} ${RP}${FR}"
+_ratebar "$d7_pct" "$week_pct" "$d7_reset" "$week_reset" "$DAY_COL" "7D"
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
@@ -712,9 +676,10 @@ _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 # becomes now, so every already-running process is excluded until restart.
 #
 # (The 5H/7D RENDER above no longer gates on launch-seat staleness at all — it
-# reads the idun daemon's live poll of the current seat and shows it beside the
-# payload. This snapshot WRITE keeps its own marker guard because it still seeds
-# those daemon figures: a stale process must not file the wrong seat's percentages.)
+# fills each bar from the idun daemon's live poll of the current seat, falling back
+# to the payload only when the daemon has no fresh entry. This snapshot WRITE keeps
+# its own marker guard because it still seeds those daemon figures: a stale process
+# must not file the wrong seat's percentages.)
 _scf="$HOME/.claude/.statusline-seat-current"
 _cur_seat="" _cur_since=""
 [ -r "$_scf" ] && IFS=$'\t' read -r _cur_seat _cur_since < "$_scf"
@@ -749,8 +714,8 @@ if _on code_churn; then
 fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# Line 3: session clocks — now+age · 👤 since-enter · 🤖 since-reply · 🛠 daemon+cache health
-# (now leads; 👤 marks the human's Enter, 🤖 the agent's last reply.)
+# Line 3: session clocks + model/effort — now+age · 👤 since-enter · 🤖 since-reply · model · effort
+# (now leads; 👤 marks the human's Enter, 🤖 the agent's last reply; model + effort trail.)
 # ═════════════════════════════════════════════════════════════════════════
 # "Now (age)" = current wall clock plus session age (NOW − process start),
 # scaled by fmt_age (Xs / Xm / H:MM). Process start = when the Claude Code
@@ -817,81 +782,25 @@ if _on session_times; then
   fi
 fi
 
-# Daemon + cache health — a green/yellow/red circle per watched daemon on the
-# telemetry line (🛠 prefix, entries ` | `-separated like the rest of line 3),
-# with prompt-cache warmth folded in as a "Cache" circle. Circles are `\U` escapes
-# expanded by the final printf %b. Fork budget: idun's poll-health and cache warmth
-# are FORK-FREE (state file / payload); alfred's pid liveness uses the kill -0
-# BUILTIN (no fork); only the launchd job (frigg-cache-sync) costs one
-# `launchctl list <label>` fork. Gated by the `daemons` segment toggle.
-if _on daemons; then
-  _G='\U0001f7e2' _Y='\U0001f7e1' _Rd='\U0001f534'   # 🟢 🟡 🔴
-  _dseg=""
-  _dapp() { [ -z "$_dseg" ] && _dseg="$1" || _dseg="${_dseg}${SEP}$1"; }
-
-  # alfred: pid in ~/.local/state/alfred/alfredd.lock; liveness via kill -0 (builtin,
-  # no fork). 🟢 alive · 🔴 lock missing or pid dead. KNOWN LIMITATION: alfredd leaves
-  # the last holder's pid in the lock after it exits (rewritten only on next acquire),
-  # so if the OS recycles that pid to a live process, kill -0 reads a dead daemon as
-  # 🟢. The authoritative signal is the flock, but probing it needs a fork (and breaks
-  # the controlled-HOME test), so this accepts the rare stale-pid false-green.
-  _almark="$_Rd"; _alf="$HOME/.local/state/alfred/alfredd.lock"
-  if [ -r "$_alf" ]; then
-    _alpid=""; IFS= read -r _alpid < "$_alf" 2>/dev/null || true
-    [ -n "$_alpid" ] && kill -0 "$_alpid" 2>/dev/null && _almark="$_G"
-  fi
-  _dapp "${DIM}Alfred${R} ${_almark}"
-
-  # idun: lastPoll {at, ok} from the daemon state file (reuse the 5H/7D slurp;
-  # re-slurp fork-free if that block didn't run). A FRESH lastPoll.at proves the
-  # process is alive (it just wrote), so `at` gates liveness and `ok` gates health:
-  # 🟢 fresh + ok · 🟡 fresh but the poll FAILED (e.g. HTTP 429 — alive, degraded),
-  # behind, or present-but-not-polling (pollSecs=0 writes no lastPoll) · 🔴 lastPoll
-  # frozen past IDUN_STALE (not writing → dead) or no file. IDUN_OK tracks idun's own
-  # staleness ceiling (pollSecs*3 ≈ 90s at the 30s default); 120s keeps a slim
-  # anti-flap margin without masking a freeze for minutes.
-  IDUN_OK=120 IDUN_STALE=1800
-  [ -z "${_ds:-}" ] && [ -r "$_dsf" ] && { IFS= read -r -d '' _ds < "$_dsf" 2>/dev/null || true; }
-  _idmark="$_Rd"
-  if [ -n "${_ds:-}" ]; then
-    _lpok=""; [[ $_ds =~ \"lastPoll\":[[:space:]]*\{[^}]*\"ok\":[[:space:]]*(true|false) ]] && _lpok="${BASH_REMATCH[1]}"
-    _lpat=""; [[ $_ds =~ \"lastPoll\":[[:space:]]*\{[^}]*\"at\":[[:space:]]*([0-9]+) ]] && _lpat="${BASH_REMATCH[1]}"
-    if [ -n "$_lpat" ]; then
-      _lpage=$(( NOW - _lpat ))
-      if [ "$_lpage" -le "$IDUN_OK" ] 2>/dev/null; then
-        [ "$_lpok" = "true" ] && _idmark="$_G" || _idmark="$_Y"   # fresh: ok→green, failed poll→yellow
-      elif [ "$_lpage" -le "$IDUN_STALE" ] 2>/dev/null; then
-        _idmark="$_Y"                                             # writing but behind → degraded
-      fi
-    else
-      _idmark="$_Y"                          # file present, no lastPoll (polling disabled) → alive, degraded
-    fi
-  fi
-  _dapp "${DIM}Idun${R} ${_idmark}"
-
-  # frigg-cache-sync: launchd job → one `launchctl list <label>` fork. 🟢 running
-  # (PID), last run exited 0, or loaded-but-not-yet-run (no PID and no LastExitStatus,
-  # a healthy freshly-loaded periodic job) · 🔴 last exit nonzero, or not loaded
-  # (launchctl prints nothing).
-  _fgmark="$_Rd"; _fgout="$(launchctl list com.21stark.frigg-cache-sync 2>/dev/null)"
-  if [ -n "$_fgout" ]; then
-    _fgpid=""; [[ $_fgout =~ \"PID\"[[:space:]]*=[[:space:]]*([0-9]+) ]] && _fgpid="${BASH_REMATCH[1]}"
-    _fgex="";  [[ $_fgout =~ \"LastExitStatus\"[[:space:]]*=[[:space:]]*([0-9]+) ]] && _fgex="${BASH_REMATCH[1]}"
-    if [ -n "$_fgpid" ]; then _fgmark="$_G"                          # running
-    elif [ -z "$_fgex" ] || [ "$_fgex" = "0" ]; then _fgmark="$_G"  # loaded-never-run, or last exit 0
-    fi                                                              # else: nonzero exit → 🔴 (default)
-  fi
-  _dapp "${DIM}Frigg${R} ${_fgmark}"
-
-  # Cache: prompt-cache warmth (payload prompt_cache), folded into the row as a
-  # circle. 🟢 warm · 🔴 cold. Fork-free. Gated by the `cache` toggle so it can be
-  # dropped independently; absent when the payload carries no prompt_cache.
-  if _on cache && [ -n "$cache_warm" ]; then
-    [ "$cache_warm" = "true" ] && _camark="$_G" || _camark="$_Rd"
-    _dapp "${DIM}Cache${R} ${_camark}"
-  fi
-
-  seg3 "${DIM}\U0001f6e0${R} ${_dseg}"
+# Model + reasoning effort — the tail of line 3 (independent of session_times).
+# Model keeps its version, shortening " (1M context)" → " 1M" (pure-bash regex,
+# no sed fork). Effort renders Lo / Me / Hi / Xh / Mx; both materially affect
+# output token volume and cost.
+if _on model && [ -n "$model" ]; then
+  m="$model"
+  [[ $m =~ ^(.*)\ \(([0-9]+[KMG])\ context\)(.*)$ ]] && m="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+  seg3 "${SAP}${m}${R}"
+fi
+if _on effort && [ -n "$effort" ]; then
+  case "$effort" in
+    low)    _ec="$DIM";   _el="Lo";;
+    medium) _ec="$DIM";   _el="Me";;
+    high)   _ec="$YEL";   _el="Hi";;
+    xhigh)  _ec="$PEACH"; _el="Xh";;
+    max)    _ec="$RED";   _el="Mx";;
+    *)      _ec="$DIM";   _el="${effort:0:2}";;
+  esac
+  seg3 "${_ec}${_el}${R}"
 fi
 
 if [ -n "$l3" ]; then

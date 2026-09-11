@@ -42,38 +42,30 @@ export function segmentsJsonPath(): string {
 export interface Segment {
   id: string;
   label: string;
-  line: 1 | 2;
+  line: 1 | 2 | 3;
   description: string;
 }
 
+// Every id here is a toggle the shipped `config/statusline-command.sh` actually
+// gates on via `_on <id>` — no phantoms. The CTX / 5H / 7D gauges are deliberately
+// absent: the script always renders them (no `_on` guard), so they are not
+// toggleable. `line` is the physical line the segment writes to (1 repo/branch/PR,
+// 2 account/gauges, 3 session clocks + model/effort).
 export const SEGMENTS: Segment[] = [
-  { id: "repo_name", label: "Repo Name", line: 1, description: "Git remote repository name" },
-  { id: "wt_name", label: "Worktree", line: 1, description: "Worktree directory name" },
+  { id: "repo_name", label: "Repo Name", line: 1, description: "Git remote repository (or cwd) name" },
+  { id: "wt_name", label: "Worktree", line: 1, description: "Linked-worktree directory name" },
   { id: "git_branch", label: "Git Branch", line: 1, description: "Current branch name" },
-  { id: "git_dirty", label: "Dirty State", line: 1, description: "Changed/untracked counts + diff" },
-  { id: "model", label: "Model", line: 1, description: "Claude model display name" },
-  { id: "effort", label: "Reasoning Effort", line: 1, description: "Lo / Me / Hi / Xh / Mx — affects output volume + cost" },
-  { id: "thinking", label: "Extended Thinking", line: 1, description: "💭 when extended thinking is on (~2-4x output cost)" },
+  { id: "git_dirty", label: "Dirty State", line: 1, description: "Changed/untracked counts + diff (needs git_branch on)" },
+  { id: "pr", label: "Open PR", line: 1, description: "PR number + review-state glyph for this branch" },
   { id: "agent", label: "Active Agent", line: 1, description: "Subagent name (--agent or settings)" },
-  { id: "out_style", label: "Output Style", line: 1, description: "Non-default output style (Explanatory / Learning / custom)" },
-  { id: "inflight", label: "Inflight Count", line: 1, description: "In-flight tool calls" },
-  { id: "longest_tool", label: "Longest Tool", line: 1, description: "Longest running tool + time" },
-  { id: "last_tool", label: "Last Tool", line: 1, description: "Most recent tool + elapsed" },
-  { id: "q_pending", label: "Queue Pending", line: 1, description: "Pending telemetry items (>5)" },
-  { id: "q_dead", label: "Dead Letters", line: 1, description: "Dead letter queue count" },
-  { id: "session_name", label: "Session Name", line: 1, description: "Named session identifier" },
+  { id: "session_name", label: "Session / Ticket", line: 1, description: "Bound ticket (id · title) or session name" },
   { id: "vim_mode", label: "Vim Mode", line: 1, description: "Vim N/I mode indicator" },
-  { id: "api_ratio", label: "API Ratio", line: 1, description: "API vs wall time %" },
-  { id: "ctx_usage", label: "Context Usage", line: 2, description: "Context window % used" },
-  { id: "tokens", label: "Token Flow (per turn)", line: 2, description: "Last API call: fresh → cache-read (hit%) → output" },
-  { id: "cost", label: "Session Cost", line: 2, description: "Real cost (cost.total_cost_usd) + per-hour burn rate" },
-  { id: "cost_rate", label: "Burn Rate", line: 2, description: "Append per-hour rate to cost segment (sub-toggle)" },
-  { id: "session_dur", label: "Session Duration", line: 2, description: "Total elapsed session time" },
-  { id: "five_hour_rl", label: "5h Rate Limit", line: 2, description: "5-hour rate limit % + reset" },
-  { id: "weekly_rl", label: "Weekly Limit", line: 2, description: "7-day rate limit % + reset" },
+  { id: "account", label: "Account", line: 2, description: "Logged-in account label + per-account gradient" },
   { id: "tier_warn", label: "1M-tier Warning", line: 2, description: "Flag when exceeds_200k_tokens (Opus 2x pricing)" },
-  { id: "tokens_total", label: "Tokens (cumulative)", line: 2, description: "Session-wide totals (off by default; re-counts cached input each turn)" },
-  { id: "code_churn", label: "Code Churn", line: 2, description: "Lines added/removed" },
+  { id: "code_churn", label: "Code Churn", line: 2, description: "Lines added/removed this session" },
+  { id: "session_times", label: "Session Clocks", line: 3, description: "Now + age · since-enter (👤) · since-reply (🤖)" },
+  { id: "model", label: "Model", line: 3, description: "Claude model display name" },
+  { id: "effort", label: "Reasoning Effort", line: 3, description: "Lo / Me / Hi / Xh / Mx — affects output volume + cost" },
 ];
 
 export const VALID_IDS: ReadonlySet<string> = new Set(SEGMENTS.map((s) => s.id));
@@ -84,25 +76,6 @@ export const VALID_IDS: ReadonlySet<string> = new Set(SEGMENTS.map((s) => s.id))
 
 export type SegmentStates = Record<string, boolean>;
 
-/**
- * Migrate renamed segment keys so existing user configs keep their intent.
- *
- * `tokens` used to mean "cumulative session totals" — that role is now
- * `tokens_total`, and `tokens` has been repurposed as "per-turn token
- * flow". Carry a stale `tokens` value over to `tokens_total` (only when
- * `tokens_total` isn't already set), then drop the stale `tokens` key.
- */
-export function migrateConfig(onDisk: Record<string, boolean>): Record<string, boolean> {
-  if (Object.prototype.hasOwnProperty.call(onDisk, "tokens")) {
-    const prior = onDisk.tokens;
-    delete onDisk.tokens;
-    if (!Object.prototype.hasOwnProperty.call(onDisk, "tokens_total")) {
-      onDisk.tokens_total = prior;
-    }
-  }
-  return onDisk;
-}
-
 export function loadConfig(): SegmentStates {
   const states: SegmentStates = {};
   for (const s of SEGMENTS) states[s.id] = true;
@@ -111,7 +84,7 @@ export function loadConfig(): SegmentStates {
   if (fs.existsSync(file)) {
     try {
       const onDisk = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, boolean>;
-      Object.assign(states, migrateConfig(onDisk));
+      Object.assign(states, onDisk);
     } catch {
       // malformed config — fall back to all-enabled defaults
     }

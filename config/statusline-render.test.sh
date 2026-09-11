@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
-# Integration test for statusline-command.sh's 5H/7D dual-source render.
+# Integration test for statusline-command.sh's 5H/7D usage-bar render.
 #
 # The rate-limit windows in the stdin payload are frozen to the seat this `claude`
 # process authenticated to at launch, so after a mid-session /login or `idun cc`
 # rotation they belong to a rotated-away seat. STARK-2807 dropped the launch-seat
 # staleness gate in favor of reading the idun daemon's LIVE poll of the current seat
-# (~/.claude/.idun-daemon-state.json) and rendering both side by side: `5H (P%/D%)`
-# where P = payload (launch, frozen) and D = daemon (current, live).
+# (~/.claude/.idun-daemon-state.json). Each window renders as a usage bar filled from
+# that daemon reading when present+fresh, falling back to the frozen payload only
+# when the daemon has no usable value for this seat.
 #
 # This drives the WHOLE script under a controlled $HOME with a seeded daemon-state
-# file and asserts the render. Two load-bearing invariants: (1) the SEAT-KEY GUARD —
-# the daemon figure must come from THIS seat's object, and a seat absent from the
-# state renders "—", never a neighbour's number (the `== *"<seat>": {*` guard); and
-# (2) the FRESHNESS GATE — a present-but-stale entry (stampedAt older than DAEMON_TTL:
-# a dead daemon, or a seat idun stopped polling) must render "—", not its frozen
-# numbers, or the redesign reintroduces the confident-wrong-number failure it killed.
+# file and asserts the rendered percent per window. Three load-bearing invariants:
+# (1) the SEAT-KEY GUARD — the daemon figure must come from THIS seat's object, and a
+# seat absent from the state falls back to the payload, never a neighbour's number
+# (the `== *"<seat>": {*` guard); (2) the FRESHNESS GATE — a present-but-stale entry
+# (stampedAt older than DAEMON_TTL: a dead daemon, or a seat idun stopped polling)
+# falls back too, never painting its frozen number as live; and (3) the < 0 SENTINEL
+# — idun's "no data" value is treated as absent. Any of the three, if broken, paints
+# the WRONG number, which asserting the correct per-seat value here catches.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/statusline-command.sh"
@@ -81,6 +84,23 @@ daemon_state_multi() {
 JSON
 }
 
+# Sentinel state: the current seat is fresh but reports fivePct=-1 / weekPct=-1
+# (idun's "no data"), which the reader must treat as absent → fall back to payload.
+daemon_state_neg() { # $1 = seat key
+  cat <<JSON
+{
+  "startedAt": 1,
+  "perSeat": {
+    "$1": {
+      "seatKey": "$1", "email": "x@evinced.com",
+      "fivePct": -1, "fiveReset": 4102444800, "weekPct": -1, "weekReset": 4102444800, "stampedAt": $FRESH
+    }
+  },
+  "lastPoll": { "at": $FRESH, "ok": true, "detail": "" }
+}
+JSON
+}
+
 render() { # $1 = payload  $2 = daemon-state file content ("" = no file) → sets RENDER
   local RH out; RH="$(mktemp -d)"; mkdir -p "$RH/.claude"
   printf '{"oauthAccount":{"emailAddress":"x@evinced.com","organizationType":"claude_max","accountUuid":"aaaa","organizationUuid":"bbbb"}}' > "$RH/.claude.json"
@@ -90,33 +110,46 @@ render() { # $1 = payload  $2 = daemon-state file content ("" = no file) → set
   rm -rf "$RH"
 }
 
-check() { # name  render-input-payload  daemon-content  want5  want7  (literal substrings)
+# Extract the 5H and 7D segments (each `|`-delimited) and assert the expected percent
+# lands in the RIGHT one. Because the bar is filled from the daemon reading when
+# usable and the payload otherwise, asserting the correct number in the correct
+# window doubles as the seat-guard / freshness / sentinel proof: a leaked neighbour,
+# an ungated stale entry, or an un-rejected sentinel would put the WRONG number there
+# and fail the match. 36/53 = daemon, 83/15 = payload, decoys = 11/22 & 99/88.
+check() { # name  payload  daemon-content  want5  want7  (percent substrings, e.g. " 36%")
   local name="$1"; render "$2" "$3"
-  if grep -qF "$4" <<<"$RENDER" && grep -qF "$5" <<<"$RENDER"; then
+  local seg5 seg7
+  seg5="$(grep -oE '5H [^|]*' <<<"$RENDER" | head -1)"
+  seg7="$(grep -oE '7D [^|]*' <<<"$RENDER" | head -1)"
+  if [[ $seg5 == *"$4"* ]] && [[ $seg7 == *"$5"* ]]; then
     echo "  ok   $name"
   else
-    printf '  FAIL %-40s want: %q + %q\n    got: %s\n' "$name" "$4" "$5" \
-      "$(grep -oE '5H [^|]*\| 7D [^|]*' <<<"$RENDER" | head -1)"
+    printf '  FAIL %-40s want: 5H~%q 7D~%q\n    got: 5H=%q 7D=%q\n' "$name" "$4" "$5" "$seg5" "$seg7"
     FAIL=1
   fi
 }
 
-# Both sources present → payload / daemon, each its own number.
-check "both present"          "$PAYLOAD_LIMITS"   "$(daemon_state aaaa:bbbb)" "5H (83%/36%)" "7D (15%/53%)"
-# Payload has no rate_limits → payload side "—", daemon side live.
-check "payload absent"        "$PAYLOAD_NOLIMITS" "$(daemon_state aaaa:bbbb)" "5H (—/36%)"   "7D (—/53%)"
-# No daemon file at all → daemon side "—", payload side shown.
-check "daemon file missing"   "$PAYLOAD_LIMITS"   ""                          "5H (83%/—)"   "7D (15%/—)"
-# THE GUARD: daemon file present but keyed ONLY under a DIFFERENT seat. The current
-# seat (aaaa:bbbb) is absent, so the daemon side MUST be "—" — never zzzz's 36/53.
-check "cross-seat guard: absent seat → —" "$PAYLOAD_LIMITS" "$(daemon_state zzzz:wwww)" "5H (83%/—)" "7D (15%/—)"
-# THE GUARD, part 2: the current seat sits BETWEEN two decoys with distinct numbers.
-# The slice must pick aaaa:bbbb's 36/53 — never first:seat's 11/22 or zzzz:wwww's 99/88.
-check "multi-seat: picks current, not neighbours" "$PAYLOAD_LIMITS" "$(daemon_state_multi)" "5H (83%/36%)" "7D (15%/53%)"
+# Daemon present + fresh → its live number fills the bar (payload is the fallback,
+# not shown).
+check "daemon present → daemon value"   "$PAYLOAD_LIMITS"   "$(daemon_state aaaa:bbbb)" " 36%" " 53%"
+# Payload has no rate_limits, daemon present → daemon still fills the bar.
+check "payload absent, daemon present"  "$PAYLOAD_NOLIMITS" "$(daemon_state aaaa:bbbb)" " 36%" " 53%"
+# No daemon file at all → fall back to the payload's frozen number.
+check "daemon missing → payload"        "$PAYLOAD_LIMITS"   ""                          " 83%" " 15%"
+# SEAT GUARD: daemon file present but keyed ONLY under a DIFFERENT seat. The current
+# seat (aaaa:bbbb) is absent, so the bar falls back to the payload (83/15) — a leak
+# would show zzzz's 36/53.
+check "cross-seat absent → payload"     "$PAYLOAD_LIMITS" "$(daemon_state zzzz:wwww)"  " 83%" " 15%"
+# SEAT GUARD 2: the current seat sits BETWEEN two decoys. The slice must pick
+# aaaa:bbbb's 36/53 — never first:seat's 11/22 or zzzz:wwww's 99/88.
+check "multi-seat picks current"        "$PAYLOAD_LIMITS" "$(daemon_state_multi)"      " 36%" " 53%"
 # FRESHNESS GATE: the current seat is present but its stampedAt is older than
-# DAEMON_TTL (a dead/asleep daemon, or a seat idun stopped polling). Its frozen
-# numbers MUST NOT be painted as live — daemon side shows "—".
-check "stale daemon entry → —" "$PAYLOAD_LIMITS" "$(daemon_state aaaa:bbbb "$STALE")" "5H (83%/—)" "7D (15%/—)"
+# DAEMON_TTL. Its frozen number MUST NOT paint the bar — fall back to the payload.
+check "stale daemon → payload"          "$PAYLOAD_LIMITS" "$(daemon_state aaaa:bbbb "$STALE")" " 83%" " 15%"
+# SENTINEL: a daemon value < 0 (idun "no data") is treated as absent → payload fallback.
+check "daemon <0 sentinel → payload"    "$PAYLOAD_LIMITS" "$(daemon_state_neg aaaa:bbbb)" " 83%" " 15%"
+# NEITHER source has a value → dim-empty bar with an em-dash, no percent.
+check "both absent → dash"              "$PAYLOAD_NOLIMITS" ""                          "—"   "—"
 
 # ── Bound-ticket segment (STARK-4405) ────────────────────────────────────────
 # alfred mirrors the session's bound ticket to ~/.claude/.statusline-task-<sid>
