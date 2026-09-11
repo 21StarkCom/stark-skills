@@ -15,7 +15,7 @@
 #     result is TTL-cached (4s) keyed on repo root — bursty event-driven
 #     re-renders are fork-free
 #   • gauge bars substring a pre-built fill string — no per-cell loop
-#   • helpers return via printf -v globals (TC/FN/FD/FR/GRAD) — no $(...) subshells
+#   • helpers return via printf -v globals (TC/FD/FR/GRAD) — no $(...) subshells
 
 # ── Extract all fields (pure bash, no jq fork) ───────────────────────────
 # The statusline runs on every 1s refresh across every open window, so the
@@ -108,7 +108,7 @@ _on() { [[ "$_skip" != *" $1 "* ]]; }
 R="\033[0m" DIM="\033[38;5;245m"
 PEACH="\033[38;5;216m" YEL="\033[38;5;229m" GRN="\033[38;5;150m"
 SAP="\033[38;5;117m"   RED="\033[38;5;211m" TEAL="\033[38;5;158m"
-MAR="\033[38;5;217m"   MAUVE="\033[38;5;141m" SKY="\033[38;5;117m"
+MAR="\033[38;5;217m"   MAUVE="\033[38;5;141m"
 CTX_COL="\033[38;2;77;165;220m"    # #4da5dc — CTX label (context gauge)
 FIVEHR_COL="\033[38;2;237;117;78m" # #ed754e — 5H label (5-hour window gauge)
 DAY_COL="\033[38;2;229;114;74m"    # #e5724a — 7D label (7-day window gauge)
@@ -162,17 +162,6 @@ fmt_age() { # seconds → sets FA: "<1m" | "Xm" | "H:MM" — session-age scale
   if [ "$1" -lt 60 ]; then FA="<1m"
   elif [ "$1" -lt 3600 ]; then FA="$(( $1 / 60 ))m"
   else printf -v FA '%d:%02d' $(( $1 / 3600 )) $(( ($1 % 3600) / 60 )); fi
-}
-
-fmt_n() { # token count → sets FN: "1.2k" / "145k" / "1.5M"
-  local n=${1:-0}
-  if [ "$n" -ge 1000000 ] 2>/dev/null; then
-    printf -v FN '%d.%dM' $((n / 1000000)) $(( (n % 1000000) / 100000 ))
-  elif [ "$n" -ge 1000 ] 2>/dev/null; then
-    printf -v FN '%d.%dk' $((n / 1000)) $(( (n % 1000) / 100 ))
-  else
-    printf -v FN '%d' "$n"
-  fi
 }
 
 fmt_remain() { # reset_epoch [time_emoji] → sets FR: " ⏳ XdYh" or " XdYh" (emoji arg "") or ""
