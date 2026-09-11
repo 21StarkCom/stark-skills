@@ -12,8 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Statusline shows the bound alfred ticket (`<id> · <title>`) in the session-name spot, falling back to the session name when unbound.
 <!-- stark-gh:pr-merge pr=953 runId=953 -->
 - Buried /stark-housekeeping (The Sexton); live sweeps migrate to idun, dead Phase 5 steps dropped, router session context repointed to stark-handover.
-<!-- stark-gh:pr-merge pr=952 runId=952 -->
-- Statusline: add green/yellow/red daemon-health circles (idun/alfred/frigg) plus a Cache warmth circle to the line-3 telemetry tail.
 <!-- stark-gh:pr-merge pr=950 runId=950 -->
 - Statusline 5H/7D gauges now render payload and idun-daemon readings side by side (`5H (payload%/daemon%)`), replacing the old restart-required staleness dash.
 <!-- stark-gh:pr-merge pr=947 runId=947 -->
