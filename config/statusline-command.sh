@@ -109,9 +109,11 @@ FIVEHR_COL="\033[38;2;237;117;78m" # #ed754e — 5H label (5-hour window gauge)
 DAY_COL="\033[38;2;229;114;74m"    # #e5724a — 7D label (7-day window gauge)
 SEP=" ${DIM}|${R} "
 
-# Usage-bar fill — fades a light tint (cell 0) → saturated hue (cell 9) across the
-# 10 cells, depth growing with fill. Prefixes are precomputed once (see build_grad).
-# Shared by all three usage gauges (CTX, 5H, 7D).
+# Usage-bar fill — each gauge fades a light tint (cell 0) → its OWN saturated hue
+# (cell 9) across the 10 cells, depth growing with fill. Prefixes are precomputed
+# once per gauge (see build_grad). Each bar carries a hue from its label's family so
+# the three gauges are distinguishable at a glance: CTX blue, 5H amber, 7D red (the
+# 5H/7D labels are near-identical warm oranges; the bars split them amber vs crimson).
 build_grad() { # arrname r0 g0 b0 r1 g1 b1 → global array of 11 filled-cell prefixes
   local -n _a="$1"; local r0=$2 g0=$3 b0=$4 r1=$5 g1=$6 b1=$7 i r g b acc=""
   _a=("")
@@ -123,7 +125,9 @@ build_grad() { # arrname r0 g0 b0 r1 g1 b1 → global array of 11 filled-cell pr
     _a+=("$acc")
   done
 }
-build_grad _USAGE_FB 223 177  96 160  53  47   # #dfb160 → #a0352f — usage bars (gold→crimson)
+build_grad _CTX_FB   156 205 240  26  92 138   # #9ccdf0 → #1a5c8a — CTX (light→deep blue)
+build_grad _FIVEH_FB 245 201 160 200  90  30   # #f5c9a0 → #c85a1e — 5H (light→deep amber)
+build_grad _SEVEN_FB 240 165 143 158  34  51   # #f0a58f → #9e2233 — 7D (light→crimson)
 
 # Cache wall-clock once; bash printf-builtin avoids a `date +%s` fork on
 # each call site (rate segs, session-start).
@@ -586,7 +590,7 @@ fi
 # without the field renders as 0% rather than hiding the gauge. Not seat-pinned
 # (context is this process's own live state), so the staleness gate never applies.
 printf -v ctx '%.0f' "${used_pct:-0}"
-tcolor "$ctx" 80 50; mkbar "$ctx" _USAGE_FB
+tcolor "$ctx" 80 50; mkbar "$ctx" _CTX_FB
 seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 
 # 5H + 7D rate-limit windows — a usage bar per window (like CTX above), filled by
@@ -604,23 +608,23 @@ seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 # when NEITHER source has a value does the bar render dim-empty with "—". _fpct/_wpct
 # stay the PAYLOAD values — the snapshot WRITE below persists this process's own
 # launch-seat reading, never the daemon's.
-_ratebar() { # daemon_pct payload_raw daemon_reset payload_reset labelcol label → seg2 a usage bar
-  local dr="$1" pr="$2" drst="$3" prst="$4" col="$5" lbl="$6" val="" rst=""
+_ratebar() { # daemon_pct payload_raw daemon_reset payload_reset labelcol label gradarr → seg2 a usage bar
+  local dr="$1" pr="$2" drst="$3" prst="$4" col="$5" lbl="$6" grad="$7" val="" rst=""
   if   [ -n "$dr" ] && [ "$dr" -ge 0 ] 2>/dev/null; then val="$dr"; rst="$drst"
   elif [ -n "$pr" ]; then printf -v val '%.0f' "$pr"; rst="$prst"; fi
   fmt_remain "$rst" ""            # reset follows the shown value's source ("" → no countdown)
   if [ -n "$val" ]; then
-    tcolor "$val" 80 50; mkbar "$val" _USAGE_FB
+    tcolor "$val" 80 50; mkbar "$val" "$grad"
     seg2 "${col}${lbl}${R} ${BAR} ${TC}${val}%${R}${FR}"
   else
-    mkbar 0 _USAGE_FB
+    mkbar 0 "$grad"
     seg2 "${col}${lbl}${R} ${BAR} ${DIM}—${R}${FR}"
   fi
 }
 printf -v _fpct '%.0f' "${five_pct:-0}"
-_ratebar "$d5_pct" "$five_pct" "$d5_reset" "$five_reset" "$FIVEHR_COL" "5H"
+_ratebar "$d5_pct" "$five_pct" "$d5_reset" "$five_reset" "$FIVEHR_COL" "5H" _FIVEH_FB
 printf -v _wpct '%.0f' "${week_pct:-0}"
-_ratebar "$d7_pct" "$week_pct" "$d7_reset" "$week_reset" "$DAY_COL" "7D"
+_ratebar "$d7_pct" "$week_pct" "$d7_reset" "$week_reset" "$DAY_COL" "7D" _SEVEN_FB
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
