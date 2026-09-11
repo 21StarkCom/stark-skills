@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- stark-gh:pr-merge pr=953 runId=953 -->
 - Buried /stark-housekeeping (The Sexton); live sweeps migrate to idun, dead Phase 5 steps dropped, router session context repointed to stark-handover.
 <!-- stark-gh:pr-merge pr=950 runId=950 -->
-- Statusline 5H/7D gauges now render payload and idun-daemon readings side by side (`5H (payload%/daemon%)`), replacing the old restart-required staleness dash.
+- Statusline 5H/7D gauges render a usage bar per window, filled by the idun-daemon live reading of the current seat and falling back to the frozen payload when the daemon has no fresh entry — replacing the old restart-required staleness dash.
 <!-- stark-gh:pr-merge pr=947 runId=947 -->
 - `/stark-author`: operator-first Stage-1 restructure — 3-question human gate, no file/interface quizzing, mandatory 3-layer intent read-back before sign-off.
 <!-- stark-gh:pr-merge pr=946 runId=946 -->

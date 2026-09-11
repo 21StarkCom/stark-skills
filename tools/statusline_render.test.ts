@@ -1,12 +1,14 @@
-// CI wrapper for the statusline 5H/7D dual-source render regression test.
+// CI wrapper for the statusline 5H/7D usage-bar render regression test.
 //
 // The real assertions live in config/statusline-render.test.sh, which drives the
 // whole config/statusline-command.sh under a controlled $HOME with a seeded idun
-// daemon-state file and asserts the `5H (payload%/daemon%)` render (STARK-2807).
-// The load-bearing invariant is the seat-key guard: the daemon figure must come from
-// the current seat's own object, and a seat absent from the state renders "—" rather
-// than a neighbouring seat's number. This runs that harness under `npm test` so a
-// future edit is caught in CI, not on Aryeh's status line.
+// daemon-state file and asserts the rendered percent per window (STARK-2807): each
+// window is a usage bar filled from the daemon's live poll of the current seat when
+// present+fresh, falling back to the frozen payload otherwise. The load-bearing
+// invariant is the seat-key guard: the daemon figure must come from the current
+// seat's own object, and a seat absent from the state falls back to the payload
+// rather than leaking a neighbouring seat's number. This runs that harness under
+// `npm test` so a future edit is caught in CI, not on Aryeh's status line.
 
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";

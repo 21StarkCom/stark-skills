@@ -28,7 +28,7 @@
 # payload matrix by config/statusline-parse.test.sh (run in CI via
 # tools/statusline_parse.test.ts).
 parse_payload() {
-  local j="$1" _m _eff _vim _ag _os _sd _fh _rest _pr
+  local j="$1" _m _eff _vim _ag _sd _fh _rest _pr
   local Sr='":"([^"]*)"' Nr='":(-?[0-9][0-9.eE+-]*)'   # string / number key-tails
 
   # cwd: workspace.current_dir, else top-level cwd (jq's // only falls through
@@ -614,14 +614,17 @@ seg2 "${CTX_COL}CTX${R} ${BAR} ${TC}${ctx}%${R}"
 # the FALLBACK, since a still-running process's payload figures belong to the
 # rotated-away seat after a /login or `idun cc` switch. A daemon value < 0 (idun's
 # "no data" sentinel) is treated as absent so it falls back too. The bar + percent
-# are severity-colored on the shown value; a bare reset countdown trails, preferring
-# the daemon's reset. Only when NEITHER source has a value does the bar render
-# dim-empty with "—". _fpct/_wpct stay the PAYLOAD values — the snapshot WRITE below
-# persists this process's own launch-seat reading, never the daemon's.
-_ratebar() { # daemon_int payload_raw labelcol label → seg2 a usage bar (daemon-else-payload)
-  local dr="$1" pr="$2" col="$3" lbl="$4" val=""
-  if   [ -n "$dr" ] && [ "$dr" -ge 0 ] 2>/dev/null; then val="$dr"
-  elif [ -n "$pr" ]; then printf -v val '%.0f' "$pr"; fi
+# are severity-colored on the shown value, and the reset countdown that trails is
+# read from the SAME source as the shown value (never mixed — a payload percent must
+# not sit beside the daemon's reset, and the "—" dash must carry no countdown). Only
+# when NEITHER source has a value does the bar render dim-empty with "—". _fpct/_wpct
+# stay the PAYLOAD values — the snapshot WRITE below persists this process's own
+# launch-seat reading, never the daemon's.
+_ratebar() { # daemon_pct payload_raw daemon_reset payload_reset labelcol label → seg2 a usage bar
+  local dr="$1" pr="$2" drst="$3" prst="$4" col="$5" lbl="$6" val="" rst=""
+  if   [ -n "$dr" ] && [ "$dr" -ge 0 ] 2>/dev/null; then val="$dr"; rst="$drst"
+  elif [ -n "$pr" ]; then printf -v val '%.0f' "$pr"; rst="$prst"; fi
+  fmt_remain "$rst" ""            # reset follows the shown value's source ("" → no countdown)
   if [ -n "$val" ]; then
     tcolor "$val" 80 50; mkbar "$val" _USAGE_FB
     seg2 "${col}${lbl}${R} ${BAR} ${TC}${val}%${R}${FR}"
@@ -631,9 +634,9 @@ _ratebar() { # daemon_int payload_raw labelcol label → seg2 a usage bar (daemo
   fi
 }
 printf -v _fpct '%.0f' "${five_pct:-0}"
-fmt_remain "${d5_reset:-$five_reset}" ""; _ratebar "$d5_pct" "$five_pct" "$FIVEHR_COL" "5H"
+_ratebar "$d5_pct" "$five_pct" "$d5_reset" "$five_reset" "$FIVEHR_COL" "5H"
 printf -v _wpct '%.0f' "${week_pct:-0}"
-fmt_remain "${d7_reset:-$week_reset}" ""; _ratebar "$d7_pct" "$week_pct" "$DAY_COL" "7D"
+_ratebar "$d7_pct" "$week_pct" "$d7_reset" "$week_reset" "$DAY_COL" "7D"
 
 _on tier_warn && [ "$over_200k" = "true" ] && seg2 "${RED}⚠️ 1M-tier${R}"
 
