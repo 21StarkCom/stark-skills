@@ -40,8 +40,6 @@ parse_payload() {
   session_name=""; [[ $j =~ \"session_name$Sr ]] && session_name="${BASH_REMATCH[1]}"
   sid="";          [[ $j =~ \"session_id$Sr ]]   && sid="${BASH_REMATCH[1]}"
 
-  ctx_size="";   [[ $j =~ \"context_window_size$Nr ]]   && ctx_size="${BASH_REMATCH[1]}"
-  api_dur_ms=""; [[ $j =~ \"total_api_duration_ms$Nr ]] && api_dur_ms="${BASH_REMATCH[1]}"
   s_added="";    [[ $j =~ \"total_lines_added$Nr ]]     && s_added="${BASH_REMATCH[1]}"
   s_removed="";  [[ $j =~ \"total_lines_removed$Nr ]]   && s_removed="${BASH_REMATCH[1]}"
 
@@ -49,7 +47,6 @@ parse_payload() {
   # then read the field from it (order-independent within the parent).
   _m=""; [[ $j =~ \"model\":\{([^{}]*)\} ]] && _m="${BASH_REMATCH[1]}"
   model="";    [[ $_m =~ \"display_name$Sr ]] && model="${BASH_REMATCH[1]}"
-  model_id=""; [[ $_m =~ \"id$Sr ]]           && model_id="${BASH_REMATCH[1]}"
 
   _eff=""; [[ $j =~ \"effort\":\{([^{}]*)\} ]] && _eff="${BASH_REMATCH[1]}"
   effort=""; [[ $_eff =~ \"level$Sr ]] && effort="${BASH_REMATCH[1]}"
@@ -58,8 +55,6 @@ parse_payload() {
   _ag=""; [[ $j =~ \"agent\":\{([^{}]*)\} ]] && _ag="${BASH_REMATCH[1]}"
   agent_name=""; [[ $_ag =~ \"name$Sr ]] && agent_name="${BASH_REMATCH[1]}"
 
-  # thinking: "" unless a thinking object carries an "enabled" bool
-  thinking=""; [[ $j =~ \"thinking\":\{[^{}]*\"enabled\":(true|false) ]] && thinking="${BASH_REMATCH[1]}"
   over_200k=false; [[ $j =~ \"exceeds_200k_tokens\":(true|false) ]] && over_200k="${BASH_REMATCH[1]}"
 
   # PR for this branch — payload `pr` block (present only when one exists). Flat

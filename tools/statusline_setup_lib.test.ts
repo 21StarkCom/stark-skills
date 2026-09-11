@@ -12,7 +12,6 @@ import {
   applyToggle,
   installStatusline,
   loadConfig,
-  migrateConfig,
   renderList,
   saveConfig,
   SEGMENTS,
@@ -39,32 +38,10 @@ function withHome<T>(home: string, fn: () => T): T {
 // Registry sanity
 // ---------------------------------------------------------------------------
 
-test("SEGMENTS: 27 segments, ids unique, all on line 1 or 2", () => {
-  assert.equal(SEGMENTS.length, 27);
-  assert.equal(VALID_IDS.size, 27);
-  for (const s of SEGMENTS) assert.ok(s.line === 1 || s.line === 2);
-});
-
-// ---------------------------------------------------------------------------
-// migrateConfig
-// ---------------------------------------------------------------------------
-
-test("migrateConfig: stale `tokens` carries over to `tokens_total`", () => {
-  const migrated = migrateConfig({ tokens: false, model: true });
-  assert.equal(migrated.tokens_total, false);
-  assert.equal("tokens" in migrated, false);
-  assert.equal(migrated.model, true);
-});
-
-test("migrateConfig: existing `tokens_total` is not overwritten", () => {
-  const migrated = migrateConfig({ tokens: false, tokens_total: true });
-  assert.equal(migrated.tokens_total, true);
-  assert.equal("tokens" in migrated, false);
-});
-
-test("migrateConfig: no `tokens` key → unchanged", () => {
-  const migrated = migrateConfig({ model: false });
-  assert.deepEqual(migrated, { model: false });
+test("SEGMENTS: 14 segments, ids unique, all on line 1/2/3", () => {
+  assert.equal(SEGMENTS.length, 14);
+  assert.equal(VALID_IDS.size, 14);
+  for (const s of SEGMENTS) assert.ok(s.line === 1 || s.line === 2 || s.line === 3);
 });
 
 // ---------------------------------------------------------------------------
@@ -75,7 +52,7 @@ test("loadConfig: no file → every segment enabled", () => {
   const home = tmp();
   try {
     const states = withHome(home, () => loadConfig());
-    assert.equal(Object.keys(states).length, 27);
+    assert.equal(Object.keys(states).length, 14);
     assert.ok(Object.values(states).every((v) => v === true));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -116,9 +93,9 @@ test("saveConfig → loadConfig round-trips", () => {
   try {
     withHome(home, () => {
       const states = loadConfig();
-      states.cost = false;
+      states.code_churn = false;
       saveConfig(states);
-      assert.equal(loadConfig().cost, false);
+      assert.equal(loadConfig().code_churn, false);
     });
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -134,11 +111,11 @@ test("applyToggle: disables a comma-separated set and persists", () => {
   try {
     withHome(home, () => {
       const states = loadConfig();
-      const r = applyToggle(states, "model, cost", false);
+      const r = applyToggle(states, "model, code_churn", false);
       assert.equal(r.ok, true);
       const reloaded = loadConfig();
       assert.equal(reloaded.model, false);
-      assert.equal(reloaded.cost, false);
+      assert.equal(reloaded.code_churn, false);
       assert.equal(reloaded.vim_mode, true);
     });
   } finally {

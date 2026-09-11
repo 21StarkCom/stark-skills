@@ -18,24 +18,21 @@ command -v jq >/dev/null || { echo "SKIP: jq not installed"; exit 0; }
 eval "$(sed -n '/^parse_payload() {/,/^}/p' "$SCRIPT")"
 type parse_payload >/dev/null 2>&1 || { echo "FAIL: could not extract parse_payload from $SCRIPT"; exit 1; }
 
-VARS=(cwd model model_id used_pct ctx_size vim_mode session_name effort thinking
+VARS=(cwd model used_pct vim_mode session_name effort
       agent_name week_pct week_reset five_pct five_reset over_200k sid
-      api_dur_ms s_added s_removed pr_number pr_state)
+      s_added s_removed pr_number pr_state)
 
 jq_parse() { # the EXACT filter statusline-command.sh used before the bash rewrite
   jq -r '{
     cwd:(.workspace.current_dir // .cwd // ""), model:(.model.display_name // ""),
-    model_id:(.model.id // ""), used_pct:(.context_window.used_percentage // ""),
-    ctx_size:(.context_window.context_window_size // ""), vim_mode:(.vim.mode // ""),
+    used_pct:(.context_window.used_percentage // ""), vim_mode:(.vim.mode // ""),
     session_name:(.session_name // ""), effort:(.effort.level // ""),
-    thinking:(if ((.thinking // {})|has("enabled")) then (.thinking.enabled|tostring) else "" end),
     agent_name:(.agent.name // ""),
     week_pct:(.rate_limits.seven_day.used_percentage // ""),
     week_reset:(.rate_limits.seven_day.resets_at // ""),
     five_pct:(.rate_limits.five_hour.used_percentage // ""),
     five_reset:(.rate_limits.five_hour.resets_at // ""),
     over_200k:(.exceeds_200k_tokens // false), sid:(.session_id // ""),
-    api_dur_ms:(.cost.total_api_duration_ms // ""),
     s_added:(.cost.total_lines_added // ""), s_removed:(.cost.total_lines_removed // ""),
     pr_number:(.pr.number // ""), pr_state:(.pr.review_state // "")
   } | to_entries[] | "\(.key)=\(.value|tostring)"' <<<"$1"
