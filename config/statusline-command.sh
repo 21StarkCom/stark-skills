@@ -111,8 +111,9 @@ SEP=" ${DIM}|${R} "
 
 # Usage-bar fill — each gauge fades a light tint (cell 0) → its OWN saturated hue
 # (cell 9) across the 10 cells, depth growing with fill. Prefixes are precomputed
-# once per gauge (see build_grad). Each bar carries the hue of its label so the three
-# gauges are distinguishable at a glance: CTX blue, 5H amber, 7D red.
+# once per gauge (see build_grad). Each bar carries a hue from its label's family so
+# the three gauges are distinguishable at a glance: CTX blue, 5H amber, 7D red (the
+# 5H/7D labels are near-identical warm oranges; the bars split them amber vs crimson).
 build_grad() { # arrname r0 g0 b0 r1 g1 b1 → global array of 11 filled-cell prefixes
   local -n _a="$1"; local r0=$2 g0=$3 b0=$4 r1=$5 g1=$6 b1=$7 i r g b acc=""
   _a=("")
