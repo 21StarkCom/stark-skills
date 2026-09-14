@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { GruStore, readyReason } from "./gru_lib.ts";
-import { canonicalRepository, discover, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, discover, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -119,6 +119,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       case "recover": emit(store.recover(id, identity, revision, flag("task"), flag("token"))); break;
       case "continue": emit(store.continueWorker(id, identity, revision, flag("task"), flag("token"))); break;
       case "reconnect": {
+        validateReconnect(task());
         const reserved = store.beginReconnect(id, identity, revision, flag("task"), flag("token"));
         emit(reserved);
         await reconnectWorker(reserved.tasks.find(t => t.spec.id === flag("task"))!);

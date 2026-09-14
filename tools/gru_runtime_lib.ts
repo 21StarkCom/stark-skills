@@ -49,8 +49,11 @@ export function observations(run: Run, discovery: Discovery, sessions: SavedSess
     const peer = task.worker && discovery.peers.find(p => p.id === task.worker!.id &&
       (p.threadId || p.sessionId) === task.worker!.session && p.agent === task.spec.provider);
     // "stale" is not proof of death. Absence from discovery is not proof either.
+    // Normalize the worktree the same way attach() did (path.resolve): a benign
+    // path-representation drift from Hermod must not demote a live worker to "unknown".
     const live = !discovery.incomplete && peer?.liveness === "live" &&
-      peer.surfaceId === task.worker?.surface && peer.cwd === task.worker?.worktree;
+      peer.surfaceId === task.worker?.surface && typeof peer.cwd === "string" &&
+      path.resolve(peer.cwd) === path.resolve(task.worker!.worktree);
     const saved = sessions.filter(s => s.sessionId === task.worker?.session && s.agent === task.spec.provider);
     const dead = !discovery.incomplete && !live && !peer && saved.length === 1 && saved[0].alive === false &&
       saved[0].surfaceId === task.worker?.surface && Number.isSafeInteger(saved[0].pid);
@@ -64,21 +67,7 @@ export async function observeWorkers(run: Run, call: Command = command): Promise
   const [peers, saved] = await Promise.all([discover(call), checked(call, ["hermod", "sessions", "--all", "--json"])]);
   const sessions = JSON.parse(saved);
   if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
-  const result = observations(run, peers, sessions.sessions);
-  for (const task of run.tasks) {
-    const pid = task.worker?.pid;
-    if (!peers.incomplete && result[task.spec.id].liveness === "unknown" && Number.isSafeInteger(pid) && pid! > 1 &&
-      !peers.peers.some(p => (p.threadId || p.sessionId) === task.worker?.session && p.pid !== pid)) {
-      try { process.kill(pid!, 0); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
-          result[task.spec.id].liveness = "dead";
-          result[task.spec.id].evidence = [`Recorded Hermod worker PID ${pid}: ESRCH; complete peer reconciliation`];
-        }
-      }
-    }
-  }
-  return result;
+  return observations(run, peers, sessions.sessions);
 }
 export async function interruptWorker(task: Assignment, call: Command = command): Promise<void> {
   if (task.phase !== "stopping" || !task.worker) throw new Error("stop and identify the worker before interrupting it");
@@ -103,12 +92,17 @@ export async function retireWorker(task: Assignment, call: Command = command): P
   // Surface closure preserves the session worktree. close-session removes it.
   await checked(call, ["hermod", "close", actual.surface, "--workspace", actual.workspace]);
 }
-export async function reconnectWorker(task: Assignment, call: Command = command): Promise<void> {
-  if (!task.reconnect?.pending || !task.worker) throw new Error("reserve a bounded reconnect before contacting Hermod");
+export function validateReconnect(task: Assignment): void {
+  if (!task.worker) throw new Error("reconnect requires a recorded worker");
   const worker = task.worker;
   // Both tokens become shell arguments inside Hermod's explicit resume command.
   // Actual runtime sessions use UUIDs. Refuse anything requiring shell interpretation.
   if (!/^[0-9a-f-]{36}$/i.test(worker.session) || !/^[0-9a-f-]{36}$/i.test(worker.surface)) throw new Error("reconnect requires stable session and surface UUIDs");
+}
+export async function reconnectWorker(task: Assignment, call: Command = command): Promise<void> {
+  validateReconnect(task);
+  if (!task.reconnect?.pending) throw new Error("reserve a bounded reconnect before contacting Hermod");
+  const worker = task.worker!;
   const cmd = worker.provider === "codex" ? `codex resume ${worker.session}` : `claude --resume ${worker.session}`;
   await checked(call, ["hermod", "respawn", worker.surface, "--workspace", worker.workspace, "--command", cmd], worker.worktree);
   // Submission is deliberately not a successful reconnect verdict.

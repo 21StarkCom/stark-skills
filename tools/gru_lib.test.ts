@@ -154,7 +154,10 @@ test("duplicate intake is idempotent and late ready reports cannot revoke integr
   const token = run.tasks[0].token!;
   const ack = () => store.report("demo", "leader-one", run.revision, "one", token,
     "session-one", "ack", run.tasks[0].spec.doneWhen, "message-one");
-  run = ack(); run = ack();
+  run = ack();
+  const acknowledgedRevision = run.revision;
+  run = ack();
+  assert.equal(run.revision, acknowledgedRevision);
   assert.equal(run.received.length, 1);
   run = report(store, run, "one", "ready");
   run = store.integrate("demo", "leader-one", run.revision, "one", token, "a".repeat(40));
@@ -187,7 +190,25 @@ test("old liveness cannot authorize recovery and stopping cannot be undone by re
   run = observe(store, run, "dead");
   run = store.beginReconnect("demo", "leader-one", run.revision, "one", token);
   run = store.stop("demo", "leader-one", run.revision);
+  run = observe(store, run, "dead");
+  assert.throws(() => store.stopped("demo", "leader-one", run.revision, "one", token), /unsettled startup/);
   run = observe(store, run, "live");
   assert.throws(() => store.finishReconnect("demo", "leader-one", run.revision, "one", token), /fresh live/);
   assert.equal(store.read("demo").mode, "stopping");
+});
+
+test("recovery retains the former session identity for its resumable assignment", t => {
+  const { store } = fixture(t);
+  let run = start(store, observe(store, store.create(config())), "one");
+  const token = run.tasks[0].token!;
+  run = observe(store, run, "dead");
+  run = store.beginReconnect("demo", "leader-one", run.revision, "one", token);
+  run = observe(store, run, "live");
+  run = store.finishReconnect("demo", "leader-one", run.revision, "one", token);
+  run = observe(store, run, "dead");
+  run = store.recover("demo", "leader-one", run.revision, "one", token);
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  run = store.reserve("demo", "leader-one", run.revision, "two");
+  assert.throws(() => store.attach("demo", "leader-one", run.revision, "two", run.tasks[1].token!,
+    { ...worker("two"), surface: worker("one").surface }), /already owned/);
 });

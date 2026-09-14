@@ -145,6 +145,10 @@ This consumes recovery budget before Hermod receives the request.
 An uncertain reconnect remains reserved and cannot be repeated.
 Old process death cannot prove a new startup failed.
 Require a live observation before settling the reconnect reservation.
+A transport error does not prove that no startup occurred.
+Keep that reservation while repairing the recorded Hermod session.
+Escalate unresolved startup outcomes rather than refunding retries or replacing workers.
+Gru validates session identifiers before reserving a reconnect.
 Retain its existing session and worktree when reconnection succeeds.
 Preserve uncertain launch and merge outcomes before further dispatch.
 Replace workers only after authoritatively observing old execution termination.
@@ -165,6 +169,9 @@ Do not use worktree-removing lifecycle paths when preserving sessions.
 Retire idle completed workers to free concurrency for dependent tasks.
 `retire` closes only the observed owned surface and preserves its worktree.
 Reconcile after closure; remaining unknown execution still occupies capacity.
+Old process death cannot finish cancellation while a restart remains unsettled.
+Saved session identities remain owned across replacement attempts.
+Hermod must provide termination evidence; local PID absence is insufficient.
 
 ## Status and acceptance
 

@@ -198,14 +198,19 @@ export class GruStore {
     this.db.prepare("INSERT INTO runs (id,body) VALUES (?,?)").run(config.id, JSON.stringify(run));
     return run;
   }
-  private transaction(id: string, leader: string, revision: number, fn: (run: Run) => void): Run {
+  private transaction(id: string, leader: string, revision: number, fn: (run: Run) => void | boolean): Run {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const run = this.read(id);
       requireValue(run.config.leader === leader, "stale leader; resume and reconcile before writing");
       requireValue(run.revision === revision, `stale revision; expected ${run.revision}`);
-      fn(run); run.revision++;
-      this.db.prepare("UPDATE runs SET body=? WHERE id=?").run(JSON.stringify(run), id);
+      // A no-op transition (fn returns false) must not bump the revision or rewrite
+      // state: an idempotent replay would otherwise invalidate the leader's held
+      // revision. Every real mutation returns void and persists.
+      if (fn(run) !== false) {
+        run.revision++;
+        this.db.prepare("UPDATE runs SET body=? WHERE id=?").run(JSON.stringify(run), id);
+      }
       this.db.exec("COMMIT");
       return run;
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
@@ -259,7 +264,7 @@ export class GruStore {
   report(id: string, leader: string, revision: number, taskId: string, token: string,
     session: string, kind: "ack" | "progress" | "blocked" | "ready" | "complete", message: string, messageId?: string): Run {
     return this.transaction(id, leader, revision, run => {
-      if (messageId && run.received.includes(messageId)) return;
+      if (messageId && run.received.includes(messageId)) return false;
       const task = this.task(run, taskId, token);
       requireValue(run.mode === "running" && active(task) && task.phase !== "stopping", "task cannot accept work reports");
       requireValue(task.worker?.session === session, "report session does not own assignment");
@@ -346,9 +351,7 @@ export class GruStore {
       requireValue(task.reconnect?.pending, "no reconnect operation pending");
       requireValue(run.mode === "running" && fresh(task.observation) && task.observation?.liveness === "live" && Date.parse(task.observation.observedAt) >= Date.parse(task.reconnect.startedAt), "fresh live reconnect outcome required; old process death does not settle startup");
       task.reconnect.pending = false;
-      if (task.observation.liveness === "live") {
-        task.phase = task.reconnect.phase; task.stoppedFrom = undefined;
-      }
+      task.phase = task.reconnect.phase; task.stoppedFrom = undefined;
       this.event(run, "reconnect-observed", task.observation.liveness, taskId);
     });
   }
@@ -408,6 +411,7 @@ export class GruStore {
       const task = this.task(run, taskId, token);
       requireValue(task.phase === "stopping" && (task.observation?.liveness === "dead" ||
         (task.observation?.liveness === "live" && task.observation.activity === "idle")), "termination or an idle interrupted worker must be observed before stopping completes");
+      requireValue(!task.reconnect?.pending || task.observation?.liveness === "live", "unsettled startup cannot be stopped using old process death");
       requireValue(fresh(task.observation), "worker evidence is stale; reconcile again");
       task.phase = "stopped";
       // Worktree and ticket stay reserved for this resumable engagement.

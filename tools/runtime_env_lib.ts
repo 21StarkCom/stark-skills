@@ -189,9 +189,8 @@ export async function buildAgentEnv(
     env["CLAUDE_PLUGIN_ROOT"] = pluginRoot;
   }
 
-  // Model auth for the claude agent: subscription mode (default) leaves
-  // ANTHROPIC_API_KEY absent so the CLI uses the logged-in account's OAuth
-  // credentials; api mode injects it from ANTHROPIC_AGENTS. See claude_auth_lib.ts.
+  // Claude uses the logged-in account's subscription. Remove both API credential
+  // variables so inherited values cannot enable metered billing. See claude_auth_lib.ts.
   if (agent === "claude") {
     applyClaudeAuth(env);
   }

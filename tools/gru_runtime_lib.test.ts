@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { canonicalRepository, observations, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, observations, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
 import type { Assignment, Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
@@ -23,12 +23,22 @@ const response = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), 
 test("Hermod discovery omissions and stale hooks never prove death", () => {
   const d = { peers: [peer()], observedAt: new Date().toISOString(), incomplete: false };
   assert.equal(observations(run(), d).task.liveness, "live");
+  assert.equal(observations(run(), { ...d, peers: [{ ...peer(), cwd: "/worktree/" }] }).task.liveness, "live");
+  assert.equal(observations(run(), { ...d, peers: [{ ...peer(), cwd: undefined }] }).task.liveness, "unknown");
   assert.equal(observations(run(), { ...d, incomplete: true }).task.liveness, "unknown");
   assert.equal(observations(run(), { ...d, peers: [] }).task.liveness, "unknown");
   assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale" }] }).task.liveness, "unknown");
   const saved = [{ sessionId: "session", agent: "codex", surfaceId: "surface", pid: 42, alive: false }];
   assert.equal(observations(run(), { ...d, peers: [] }, saved).task.liveness, "dead");
   assert.equal(observations(run(), d, saved).task.liveness, "live");
+});
+
+test("local PID absence cannot override incomplete Hermod identity evidence", async () => {
+  const r = run(); r.tasks[0].worker!.pid = 999999999;
+  const result = await observeWorkers(r, async argv => response(argv[1] === "sessions"
+    ? { sessions: [], totalMatches: 0 }
+    : { peers: [], observedAt: new Date().toISOString(), incomplete: false }));
+  assert.equal(result.task.liveness, "unknown");
 });
 
 test("dispatch packet uses the selected runtime and retains the full objective and limits", () => {
