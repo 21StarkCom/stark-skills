@@ -193,7 +193,7 @@ export async function buildAgentEnv(
   // ANTHROPIC_API_KEY absent so the CLI uses the logged-in account's OAuth
   // credentials; api mode injects it from ANTHROPIC_AGENTS. See claude_auth_lib.ts.
   if (agent === "claude") {
-    applyClaudeAuth(env, { require: true });
+    applyClaudeAuth(env);
   }
 
   // GH_TOKEN: inject the bot token only for review operations.

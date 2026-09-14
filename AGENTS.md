@@ -65,6 +65,10 @@ All skills live in `skill/*/SKILL.md`. Full per-skill detail — arguments, fail
 | `/simple-gate [spec-path]` | Walk the human sign-off gate in short, jargon-free language; Codex uses structured choices when available and a one-question conversational fallback otherwise. |
 | `/stark-session [start\|end]` | Briefing on start, cleanup on end. |
 | `/stark-handover [save\|resume\|status]` | Cross-`/clear` continuity under `~/Code/Handovers/`. |
+| `/team-leader-agent start\|status\|resume\|stop` | **Gru**, the active Minion leader. Explicit concurrency/recovery limits, durable ownership, Hermod transport, Alfred tickets, verified integration. Codex uses `$team-leader-agent` from its native override. |
+| `/team-minion-agent` | Gru's worker intake, reporting, and integration contract. Separate Claude and Codex variants. |
+
+Gru preserves session worktrees when retiring completed workers. Lifecycle changes require fresh Hermod observations; unknown startup outcomes remain reserved.
 | `/stark-bury <corpse>` | Retire code into the Náströnd graveyard — a subsystem of a living repo, or a whole repo. Footprint verification, interment PR **before** any deletion, deletion PR, optional sealed dump + table drop. The fleet's only destructive ritual: five non-negotiable laws, operator-gated at every prod mutation. The Codex override is model-discoverable; Claude and Codex variants share the same mutation gates. |
 | `/stark-fresh-eyes <doc>` | One-shot zero-context review of a doc before it ships. One dispatch per revision, never a round 2. |
 | `/stark-memory [--project <slug>\|--all] [--dry-run] [--apply]` | Keep Claude auto-memory under the load/recall caps: `memory_tidy.ts` measures each `MEMORY.md` + topic file (200 lines/25KB index, 200 lines/4KB per file) and flags cross-repo facts; Claude shortens index lines, splits over-cap files, moves foreign-repo facts to their own memory dir. **Dry-run is the default; `--apply` writes.** |
