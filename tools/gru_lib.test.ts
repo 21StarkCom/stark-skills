@@ -46,6 +46,21 @@ test("DAG and authority validation reject missing limits, cycles, duplicated own
   ]) { const c = config(); change(c); assert.throws(() => parseEngagement(c)); }
 });
 
+test("SQLite database and WAL sidecars stay private under a permissive umask", t => {
+  const saved = process.umask(0);
+  try {
+    const { store, file } = fixture(t);
+    store.create(config());
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const mode = fs.statSync(file + suffix).mode & 0o777;
+      t.diagnostic(`state.sqlite${suffix}: ${mode.toString(8)}`);
+      assert.equal(mode, 0o600);
+    }
+  } finally {
+    process.umask(saved);
+  }
+});
+
 test("a launch reservation survives reopening and cannot be duplicated", t => {
   const { store, file } = fixture(t);
   let run = observe(store, store.create(config()));
@@ -146,6 +161,27 @@ test("an interrupted idle worker resumes without a new launch or assignment", t 
   assert.equal(run.tasks[0].attempts, 1);
   assert.equal(run.tasks[0].worker?.session, "session-one");
   assert.equal(run.tasks[0].token, token);
+});
+
+test("a late launch can attach during cancellation without restarting dispatch", t => {
+  const { store } = fixture(t);
+  let run = observe(store, store.create(config()));
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  const token = run.tasks[0].token!;
+  run = store.stop("demo", "leader-one", run.revision);
+  assert.throws(() => store.stopped("demo", "leader-one", run.revision, "one", token), /termination/);
+  run = store.attach("demo", "leader-one", run.revision, "one", token, worker("one"));
+  assert.equal(run.mode, "stopping");
+  assert.equal(run.tasks[0].phase, "stopping");
+  assert.throws(() => store.attach("demo", "leader-one", run.revision, "one", token, worker("one")), /no pending/);
+  run = observe(store, run, "live");
+  run = store.stopped("demo", "leader-one", run.revision, "one", token);
+  assert.equal(run.mode, "stopped");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = observe(store, run, "live");
+  run = store.continueWorker("demo", "leader-two", run.revision, "one", token);
+  assert.equal(run.tasks[0].phase, "intake");
+  assert.equal(run.tasks[0].attempts, 1);
 });
 
 test("duplicate intake is idempotent and late ready reports cannot revoke integration ownership", t => {

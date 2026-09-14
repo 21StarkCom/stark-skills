@@ -183,24 +183,32 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   await git(["fetch", "origin", `refs/heads/${pr.base.ref}`]);
   const baseTip = await git(["rev-parse", "FETCH_HEAD"]);
   await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);
+  // Squash merges do not make the reviewed head reachable from the base.
+  await git(["fetch", "origin", `refs/pull/${prNumber}/head`]);
+  if (await git(["rev-parse", "FETCH_HEAD"]) !== pr.head.sha) throw new Error("fetched PR head differs from the reviewed head");
   await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);
   fs.mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
   const verifyTree = path.join(evidenceDir, `worktree-${task.token}`);
   // Existing evidence remains untouched. A fresh directory prevents stale build products passing.
   await git(["worktree", "add", "--detach", verifyTree, baseTip]);
-  const checks: CompletionEvidence["checks"] = [];
-  for (let i = 0; i < task.spec.checks.length; i++) {
-    const argv = task.spec.checks[i];
-    const result = await call(argv, verifyTree);
-    const log = path.join(evidenceDir, `check-${task.token}-${i}.log`);
-    fs.writeFileSync(log, JSON.stringify({ argv, cwd: verifyTree, head: baseTip, ...result }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-    if (result.code !== 0) throw new Error(`independent check failed; evidence: ${log}`);
-    checks.push({ argv, exitCode: result.code, log });
+  try {
+    const checks: CompletionEvidence["checks"] = [];
+    for (let i = 0; i < task.spec.checks.length; i++) {
+      const argv = task.spec.checks[i];
+      const result = await call(argv, verifyTree);
+      const log = path.join(evidenceDir, `check-${task.token}-${i}.log`);
+      fs.writeFileSync(log, JSON.stringify({ argv, cwd: verifyTree, head: baseTip, ...result }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+      if (result.code !== 0) throw new Error(`independent check failed; evidence: ${log}`);
+      checks.push({ argv, exitCode: result.code, log });
+    }
+    const ticket = JSON.parse(await checked(call, ["alfred", "task", "show", task.spec.ticket, "--json"], repoDir));
+    if (ticket.item?.ref?.custom_id !== task.spec.ticket || ticket.comments_read !== true || !Array.isArray(ticket.comments)) throw new Error("Alfred ticket evidence incomplete");
+    const proof = { head: pr.head.sha, base: task.integrationBase, merge: pr.merge_commit_sha,
+      pr: pr.html_url, review: review.html_url, checks, verifiedAt: new Date().toISOString(), ticketState: ticket.item.state };
+    fs.writeFileSync(path.join(evidenceDir, `completion-${task.token}.json`), JSON.stringify({ ...proof, verifiedMain: baseTip, prRecord: pr, reviewRecord: review }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    return proof;
+  } finally {
+    // Only this invocation's disposable checkout is removed; evidence remains.
+    await git(["worktree", "remove", "--force", verifyTree]);
   }
-  const ticket = JSON.parse(await checked(call, ["alfred", "task", "show", task.spec.ticket, "--json"], repoDir));
-  if (ticket.item?.ref?.custom_id !== task.spec.ticket || ticket.comments_read !== true || !Array.isArray(ticket.comments)) throw new Error("Alfred ticket evidence incomplete");
-  const proof = { head: pr.head.sha, base: task.integrationBase, merge: pr.merge_commit_sha,
-    pr: pr.html_url, review: review.html_url, checks, verifiedAt: new Date().toISOString(), ticketState: ticket.item.state };
-  fs.writeFileSync(path.join(evidenceDir, `completion-${task.token}.json`), JSON.stringify({ ...proof, verifiedMain: baseTip, prRecord: pr, reviewRecord: review }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
-  return proof;
 }

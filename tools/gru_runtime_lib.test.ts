@@ -100,6 +100,7 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   must(["git", "commit", "-m", "Intentionally failing behavior"], repoDir);
   must(["git", "push", "origin", "main"], repoDir);
   const sha = must(["git", "rev-parse", "HEAD"], repoDir);
+  must(["git", "push", "origin", "HEAD:refs/pull/1/head"], repoDir);
   const task = assignment(); task.spec.repo = repoDir; task.integrationBase = sha;
   const pr = { merged: true, merged_at: new Date().toISOString(), merge_commit_sha: sha,
     head: { sha, repo: { full_name: "owner/repo" } }, base: { ref: "main", repo: { full_name: "owner/repo" } }, html_url: "https://github.com/owner/repo/pull/1" };
@@ -115,6 +116,8 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   const observed = JSON.parse(fs.readFileSync(path.join(dir, "failed-check", failedLogs[0]), "utf8"));
   assert.equal(observed.code, 7);
   assert.notEqual(observed.cwd, task.spec.worktree);
+  assert.equal(fs.existsSync(observed.cwd), false);
+  assert.ok(!must(["git", "worktree", "list", "--porcelain"], repoDir).includes("worktree-token"));
   reviewHead = "b".repeat(40);
   await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "stale-review"), call), /does not cover/);
   assert.equal(fs.existsSync(path.join(dir, "stale-review")), false);
@@ -123,10 +126,42 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   must(["git", "commit", "-m", "Fix behavior"], repoDir);
   must(["git", "push", "origin", "main"], repoDir);
   const fixed = must(["git", "rev-parse", "HEAD"], repoDir);
+  must(["git", "push", "origin", "HEAD:refs/pull/1/head"], repoDir);
   pr.head.sha = fixed; pr.merge_commit_sha = fixed; reviewHead = fixed;
   const proof = await verifyCompletion(task, 1, 1, path.join(dir, "passing-check"), call);
   assert.equal(proof.merge, fixed);
   assert.equal(proof.head, fixed);
   assert.equal(proof.checks[0].exitCode, 0);
   assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /behavior verified/);
+  assert.equal(fs.existsSync(path.join(dir, "passing-check", "worktree-token")), false);
+
+  // The verification clone cannot see the reviewed head through the squash.
+  must(["git", "checkout", "-b", "candidate"], repoDir);
+  fs.writeFileSync(path.join(repoDir, "feature.txt"), "squashed feature");
+  must(["git", "add", "feature.txt"], repoDir);
+  must(["git", "commit", "-m", "Feature head"], repoDir);
+  const candidate = must(["git", "rev-parse", "HEAD"], repoDir);
+  must(["git", "push", "origin", "HEAD:refs/pull/1/head"], repoDir);
+  must(["git", "checkout", "main"], repoDir);
+  must(["git", "merge", "--squash", "candidate"], repoDir);
+  must(["git", "commit", "-m", "Squash feature"], repoDir);
+  must(["git", "push", "origin", "main"], repoDir);
+  const merged = must(["git", "rev-parse", "HEAD"], repoDir);
+  const verifier = path.join(dir, "separate-clone");
+  must(["git", "clone", "--no-local", "--single-branch", "--branch", "main", origin, verifier]);
+  assert.notEqual(exec(["git", "cat-file", "-e", candidate], verifier).code, 0);
+  task.spec.repo = verifier; task.integrationBase = fixed;
+  pr.head.sha = candidate; pr.merge_commit_sha = merged; reviewHead = candidate;
+  // Task-owned commands may provision ignored dependencies before testing.
+  task.spec.checks = [
+    [process.execPath, "-e", "require('fs').writeFileSync('prepared-dependency', 'ready')"],
+    [process.execPath, "-e", "require('assert').equal(require('fs').readFileSync('prepared-dependency','utf8'), 'ready')"],
+    [process.execPath, "verify.cjs"],
+  ];
+  const squashProof = await verifyCompletion(task, 1, 1, path.join(dir, "squashed"), call);
+  assert.equal(squashProof.head, candidate);
+  assert.equal(squashProof.merge, merged);
+  assert.equal(squashProof.checks.length, 3);
+  assert.equal(fs.existsSync(path.join(dir, "squashed", "worktree-token")), false);
+  assert.ok(!must(["git", "worktree", "list", "--porcelain"], verifier).includes("worktree-token"));
 });

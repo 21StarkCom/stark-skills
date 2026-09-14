@@ -252,12 +252,16 @@ export class GruStore {
   attach(id: string, leader: string, revision: number, taskId: string, token: string, worker: Worker): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
-      requireValue(run.mode === "running" && task.phase === "reserved", "no pending launch to attach");
+      const stoppingLaunch = run.mode === "stopping" && task.phase === "stopping" &&
+        task.stoppedFrom === "reserved" && !task.worker;
+      requireValue((run.mode === "running" && task.phase === "reserved") || stoppingLaunch, "no pending launch to attach");
       for (const key of ["id", "session", "surface", "workspace", "worktree"] as const) requireValue(nonempty(worker[key]), `worker ${key} is required`);
       requireValue(worker.provider === task.spec.provider, "provider substitution refused");
       requireValue(path.resolve(worker.worktree) === path.resolve(task.spec.worktree), "worker worktree mismatch");
       this.own(run, task, [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`]);
-      task.worker = structuredClone(worker); task.phase = "intake";
+      task.worker = structuredClone(worker);
+      if (stoppingLaunch) task.stoppedFrom = "intake";
+      else task.phase = "intake";
       this.event(run, "attached", worker.id, taskId);
     });
   }

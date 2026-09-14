@@ -125,10 +125,16 @@ Rebase, regenerate, reconcile shared counts, rebuild, and retest.
 Use the repository's squash-merge path and inspect the result.
 Never rely on a merge command's exit code alone.
 
-`verify` fetches the PR base and verifies merge ancestry.
+`verify` fetches the PR base and reviewed head, then verifies ancestry.
+The fetched head must match the submitted review exactly.
+GitHub retains a fetchable [pull request head ref](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/checking-out-pull-requests-locally).
 It requires a submitted review covering the final PR head.
-It reruns declared checks in a fresh detached worktree.
+It reruns declared checks sequentially in a fresh detached worktree.
+Include dependency setup before tests, such as `npm ci` then `npm test`.
+Do not rely on ignored dependencies from the worker's checkout.
 It retains command, directory, revision, and output logs.
+Its disposable verification checkout is removed after success or failure.
+Worker and session worktrees remain preserved.
 Checks close stdin and use the existing process-group timeout runner.
 It checks Alfred's actual ticket identity and completion state.
 
@@ -161,6 +167,9 @@ Reinspect pending integration before allowing a competing merge.
 Canceled assignments must not restart from old messages.
 
 `stop` freezes dispatch before contacting workers.
+If a reserved launch appears late, attach its exact peer while stopping.
+This binds its identity for interruption without restarting dispatch.
+An unidentified launch remains reserved until its outcome is known.
 `interrupt` sends Hermod's escape control to the verified worker.
 Observe idle or terminal status before calling `stopped`.
 `hermod msg cancel` only changes message ledger state.

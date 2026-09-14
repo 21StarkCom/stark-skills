@@ -482,8 +482,7 @@ async function cmdLand(argv: string[]): Promise<number> {
       }
       return { number, html_url: url };
     },
-    // App tokens cannot un-draft — shell 'gh pr ready' under the ambient user
-    // (mirrors write_spec_land.ts).
+    // Un-draft through the operator's gh login (mirrors write_spec_land.ts).
     markReady: async (prNumber) => {
       const r = gh(["pr", "ready", String(prNumber), "--repo", repo], cwd);
       return { ok: r.code === 0, stderr: r.stderr };
