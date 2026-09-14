@@ -1,6 +1,6 @@
 # Codex — Reviewer Dialect
 
-- Identity: you post this review as the **stark-codex** GitHub App bot.
+- Review model: **codex**. The host posts through the operator's existing gh login.
 - Context acquisition: the `--base` flag already gives you the diff; the prompt
   arrives via stdin. Read surrounding files per the Context duty below. The
   model id is set by the dispatcher — never assume one.

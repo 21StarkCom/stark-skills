@@ -1,9 +1,6 @@
 // Tests for `tools/preflight_lib.ts` — pure-logic only.
 //
-// Network-touching checks (`check_github_app`) and binary-dependent
-// checks (`check_cli_*`, `check_keychain_*`, `check_working_dir`) are
-// exercised by the live diff against the Python implementation, not
-// here. This file covers:
+// Network and binary checks run live. This file covers:
 //
 //   - `aggregateOverall` — the critical-vs-non-critical fail/warn rules
 //   - `runPreflight` — registry iteration + --skip-check override
@@ -252,7 +249,7 @@ test("checkCostHardStop: returns fail when sentinel file exists", async () => {
 test("checkStaleLocks: returns pass when no .lock files exist", async () => {
   await withScratchHome((home) => {
     fs.mkdirSync(path.join(home, ".claude", "code-review"), { recursive: true });
-    const [status, msg] = checkStaleLocks();
+    const [status, msg] = checkStaleLocks([path.join(home, ".claude", "code-review")]);
     assert.equal(status, "pass");
     assert.equal(msg, "no stale locks");
   });

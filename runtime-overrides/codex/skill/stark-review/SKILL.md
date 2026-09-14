@@ -110,9 +110,9 @@ CONFIG_ROOT="$(pwd)"
 
 ### 2. Verify read access and provision the worktree
 
-Use the caller's existing `gh` authentication for read access. Do not mint a
-provider-specific posting token in the wrapper. The dispatcher owns posting
-credentials, and reaches that path only after explicit `--post` consent.
+Use the operator's existing `gh` login as `aryeh-stark` for reads and reviews.
+The dispatcher posts only after explicit `--post` consent.
+Model attribution appears in the review text.
 
 ```bash
 gh auth status

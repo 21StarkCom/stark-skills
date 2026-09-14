@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Detects duplicated boilerplate across SKILL.md files (preflight, dispatch
-// failure handling, GH App token export, multi-agent posting block) and
+// failure handling, script constants) and
 // reports byte savings opportunities. Patterns are checked against the
 // canonical extracted version under `standards/` — if a skill already
 // links to that doc, the inline copy is treated as already-extracted.
@@ -19,8 +19,6 @@ import {
 export type DietPatternId =
   | "inline-preflight"
   | "inline-dispatch-failure"
-  | "inline-gh-app-token-export"
-  | "inline-multi-agent-posting"
   | "inline-scripts-constants";
 
 export type DietHit = {
@@ -104,51 +102,6 @@ export function detectInlineDispatchFailure(raw: string): DietHit[] {
   ];
 }
 
-export function detectInlineGhAppTokenExport(raw: string): DietHit[] {
-  const lines = raw.split("\n");
-  const re = /export\s+GH_TOKEN\s*=\s*["']?\$\([^)]*github_app\.py[^)]*token[^)]*\)/;
-  const hits: DietHit[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (re.test(lines[i])) {
-      hits.push({
-        patternId: "inline-gh-app-token-export",
-        startLine: i + 1,
-        endLine: i + 1,
-        bytes: lines[i].length + 1,
-        refTarget: "standards/github-app-auth.md",
-      });
-    }
-  }
-  return hits;
-}
-
-export function detectInlineMultiAgentPosting(raw: string): DietHit[] {
-  const lines = raw.split("\n");
-  const re = /github_app\.py\s+--app\s+stark-(claude|codex|gemini)\s+pr\s+review/;
-  const matches: { line: number; agent: string }[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(re);
-    if (m) matches.push({ line: i, agent: m[1] });
-  }
-  // Need at least two distinct agents posting close together to qualify as
-  // the inline multi-agent block. Spread > 30 lines is more likely scattered
-  // examples in different sections.
-  const distinctAgents = new Set(matches.map((m) => m.agent));
-  if (distinctAgents.size < 2) return [];
-  const first = matches[0].line;
-  const last = matches[matches.length - 1].line;
-  if (last - first > 30) return [];
-  return [
-    {
-      patternId: "inline-multi-agent-posting",
-      startLine: first + 1,
-      endLine: last + 1,
-      bytes: blockBytes(lines, first, last),
-      refTarget: "standards/multi-agent-posting.md",
-    },
-  ];
-}
-
 export function detectInlineScriptsConstants(raw: string): DietHit[] {
   const lines = raw.split("\n");
   const hits: DietHit[] = [];
@@ -179,8 +132,6 @@ export function detectInlineScriptsConstants(raw: string): DietHit[] {
 const DETECTORS: Detector[] = [
   detectInlinePreflight,
   detectInlineDispatchFailure,
-  detectInlineGhAppTokenExport,
-  detectInlineMultiAgentPosting,
   detectInlineScriptsConstants,
 ];
 
@@ -212,8 +163,6 @@ export function summarize(repoRoot: string): DietSummary {
   const hitsByPattern: Record<DietPatternId, number> = {
     "inline-preflight": 0,
     "inline-dispatch-failure": 0,
-    "inline-gh-app-token-export": 0,
-    "inline-multi-agent-posting": 0,
     "inline-scripts-constants": 0,
   };
   let bytesInline = 0;

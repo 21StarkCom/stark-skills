@@ -33,19 +33,14 @@
  *                  Push the already-committed branch (never --force),
  *                  adopt an existing open PR for that head or open a
  *                  fresh one (draft by default, authored by `aryeh-stark`
- *                  via `gh` — NOT by the lead's GitHub App), and print
- *                  `{pr, prs}` — `prs` is the union of `--known-prs` with
- *                  the landed/adopted number. `--lead` still selects the
- *                  App used for the READ (PR listing), which needs a token
- *                  but confers no authorship.
+ *                  via `gh`), and print `{pr, prs}`. `prs` includes all known
+ *                  and landed PRs. `--lead` records model attribution only.
  *
  * Arg-parsing house style mirrors `write_spec_land.ts` / `red_team_fold.ts`.
  */
 import { spawnSync } from "node:child_process";
 import { isMainModule } from "./main_module_lib.ts";
-import { prList, type AppName } from "./github_app_lib.ts";
 import {
-  appForLead,
   buildPushArgs,
   deriveImplBranch,
   landImpl,
@@ -432,7 +427,6 @@ async function cmdLand(argv: string[]): Promise<number> {
     return fail(json, (err as Error).message, 1);
   }
 
-  const app = appForLead(lead);
 
   if (dryRun) {
     const plan = {
@@ -442,7 +436,6 @@ async function cmdLand(argv: string[]): Promise<number> {
       branch,
       base,
       lead,
-      app,
       ready,
       title,
       known_prs: knownPrs,
@@ -457,12 +450,12 @@ async function cmdLand(argv: string[]): Promise<number> {
       const r = git(args, cwd);
       return { ok: r.code === 0, stderr: r.stderr };
     },
-    listOpenPrs: async () => (await prList(repo, "open", app)) as OpenPr[],
-    // Opening the PR shells `gh` so it is authored by `aryeh-stark`, not by the
-    // lead agent's GitHub App. Changed 2026-08-04: this used to call
-    // `github_app_lib::prCreate`, which authors as `app/stark-<lead>[bot]` — a
-    // PR Aryeh is considered to have opened must carry his name. `gh pr create`
-    // prints the PR URL and offers no --json, so the number comes from the URL.
+    listOpenPrs: async () => {
+      const result = gh(["api", `repos/${repo}/pulls?state=open&per_page=100`, "--paginate", "--slurp"], cwd);
+      if (result.code !== 0) throw new Error(`gh PR listing failed: ${result.stderr}`);
+      return (JSON.parse(result.stdout) as OpenPr[][]).flat();
+    },
+    // gh owns authentication for PR creation and reads.
     createPr: async (opts) => {
       const argv = [
         "pr", "create",
@@ -512,7 +505,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   } else {
     process.stdout.write(
       `landed impl on ${branch}: pr=#${result.pr.number} ` +
-        `(${result.pr.adopted ? "adopted" : "created"}, ${result.pr.app}) prs=[${result.prs.join(",")}]\n`,
+        `(${result.pr.adopted ? "adopted" : "created"}) prs=[${result.prs.join(",")}]\n`,
     );
   }
   return 0;

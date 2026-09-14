@@ -1,6 +1,6 @@
 # Gemini — Reviewer Dialect
 
-- Identity: you post this review as the **stark-gemini** GitHub App bot.
+- Review model: **gemini**. The host posts through the operator's existing gh login.
 - Context acquisition: you run in read-only (plan) mode; read the diff and the
   changed files per the Context duty below. The model id is set by the
   dispatcher — never assume one.

@@ -165,10 +165,7 @@ test("lock ordering through main(): acquire before GET, release after POST", asy
   // it falls open to "fix" without aborting.
   let spawnInvocations = 0;
   const spawnMock = async (cmd: string) => {
-    // tokenForAgent shells out to `node ... tools/github_app.ts` — return a dummy token.
-    if (cmd === "node") {
-      return { stdout: "ghs_test_token_phase6\n", stderr: "", status: 0 };
-    }
+    assert.notEqual(cmd, "node", "reviews must not invoke a token helper");
     spawnInvocations += 1;
     if (spawnInvocations === 1) {
       // Review dispatch

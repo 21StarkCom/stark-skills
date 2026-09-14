@@ -12,8 +12,6 @@ import { test, type TestContext } from "node:test";
 import {
   detectAll,
   detectInlineDispatchFailure,
-  detectInlineGhAppTokenExport,
-  detectInlineMultiAgentPosting,
   detectInlinePreflight,
   detectInlineScriptsConstants,
 } from "./skill_diet.ts";
@@ -122,48 +120,6 @@ test("detectInlineDispatchFailure skips already-extracted skills", () => {
   assert.deepEqual(detectInlineDispatchFailure(raw), []);
 });
 
-// ── GitHub App token export ─────────────────────────────────────
-
-test("detectInlineGhAppTokenExport flags every inline export line", () => {
-  const raw = [
-    "Setup:",
-    "```bash",
-    'export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)',
-    "```",
-    "",
-    "Later:",
-    'export GH_TOKEN="$($PYTHON $SCRIPTS/github_app.py --app stark-codex token)"',
-  ].join("\n");
-  const hits = detectInlineGhAppTokenExport(raw);
-  assert.equal(hits.length, 2);
-  assert.ok(hits[0].startLine === hits[0].endLine);
-  assert.equal(hits[0].patternId, "inline-gh-app-token-export");
-});
-
-// ── Multi-agent posting ─────────────────────────────────────────
-
-test("detectInlineMultiAgentPosting flags blocks with 2+ agents close together", () => {
-  const raw = [
-    "Post per-agent comments:",
-    "```bash",
-    '$PYTHON $SCRIPTS/github_app.py --app stark-claude pr review 42 --comment --body "..."',
-    '$PYTHON $SCRIPTS/github_app.py --app stark-codex pr review 42 --comment --body "..."',
-    '$PYTHON $SCRIPTS/github_app.py --app stark-gemini pr review 42 --comment --body "..."',
-    "```",
-  ].join("\n");
-  const hits = detectInlineMultiAgentPosting(raw);
-  assert.equal(hits.length, 1);
-  assert.equal(hits[0].patternId, "inline-multi-agent-posting");
-});
-
-test("detectInlineMultiAgentPosting ignores spread-out single-agent uses", () => {
-  // A single agent invocation isn't the multi-post block.
-  const raw = [
-    '$PYTHON $SCRIPTS/github_app.py --app stark-claude pr review 42 --comment --body "..."',
-  ].join("\n");
-  assert.deepEqual(detectInlineMultiAgentPosting(raw), []);
-});
-
 // ── Scripts/python constants ────────────────────────────────────
 
 test("detectInlineScriptsConstants flags the constants block", () => {
@@ -194,7 +150,8 @@ test("detectAll returns hits sorted by startLine", () => {
     "",
     "## Setup", // 6
     "",
-    'export GH_TOKEN=$($PYTHON $SCRIPTS/github_app.py --app stark-claude token)', // 8
+    'SCRIPTS="/example"', // 8
+    'PYTHON="$SCRIPTS/.venv/bin/python3"',
   ].join("\n");
   const hits = detectAll(raw);
   // Both detectors should fire; results sorted ascending.

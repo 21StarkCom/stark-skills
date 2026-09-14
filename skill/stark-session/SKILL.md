@@ -174,7 +174,7 @@ gh auth status   # skip with warning if fails
 gh pr list --head "$(git branch --show-current)" --json number,title,state
 ```
 
-For each open PR: offer to merge via `gh pr merge <number> --<pr_merge_strategy>`. On failure: report and ask "Skip this PR?". Uses your PAT — not GitHub App bots.
+For each open PR: offer to merge via `gh pr merge <number> --<pr_merge_strategy>`. On failure: report and ask "Skip this PR?". Uses the existing `gh` login as `aryeh-stark`.
 
 ### Phase 3 — Commit docs
 

@@ -21,7 +21,6 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { getToken } from "./github_app_lib.ts";
 import { isLockStale } from "./lock_helpers_lib.ts";
 import {
   discoverConfig,
@@ -127,39 +126,12 @@ export function checkCliGemini(): [CheckStatus, string] {
   return ok ? ["pass", out] : ["fail", out];
 }
 
-function keychainCheck(service: string): [CheckStatus, string] {
-  const { ok, out } = runCmd([
-    "security",
-    "find-generic-password",
-    "-s",
-    service,
-    "-w",
-  ]);
-  return ok ? ["pass", "key found"] : ["fail", `keychain: ${out}`];
-}
-
-export function checkKeychainClaude(): [CheckStatus, string] {
-  return keychainCheck("STARK_CLAUDE_PRIVATE_KEY");
-}
-
-export function checkKeychainCodex(): [CheckStatus, string] {
-  return keychainCheck("STARK_CODEX_PRIVATE_KEY");
-}
-
-export function checkKeychainGemini(): [CheckStatus, string] {
-  if (!isAgentEnabled("gemini")) return ["skip", "gemini disabled in config"];
-  return keychainCheck("STARK_GEMINI_PRIVATE_KEY");
-}
-
-export async function checkGithubApp(): Promise<[CheckStatus, string]> {
-  try {
-    const token = await getToken();
-    return token
-      ? ["pass", "token obtained"]
-      : ["fail", "empty token returned"];
-  } catch (err) {
-    return ["fail", (err as Error).message];
-  }
+export function checkGithubUser(): [CheckStatus, string] {
+  const { ok, out } = runCmd(["gh", "api", "user", "--jq", ".login"]);
+  if (!ok) return ["fail", `gh: ${out}`];
+  return out.trim() === "aryeh-stark"
+    ? ["pass", "gh authenticated as aryeh-stark"]
+    : ["fail", `gh identity is ${out.trim() || "unknown"}; expected aryeh-stark`];
 }
 
 export function checkWorkingDir(): [CheckStatus, string] {
@@ -307,8 +279,8 @@ export function checkDeprecatedConfig(): [CheckStatus, string] {
   return ["pass", "no deprecated config keys"];
 }
 
-export function checkStaleLocks(): [CheckStatus, string] {
-  const lockDirs = [
+export function checkStaleLocks(directories?: readonly string[]): [CheckStatus, string] {
+  const lockDirs = directories ?? [
     path.join(os.homedir(), ".claude", "code-review"),
     "/tmp",
   ];
@@ -349,10 +321,7 @@ export const CHECKS: ReadonlyArray<CheckDefinition> = [
   { name: "check_cli_claude", fn: checkCliClaude, critical: false },
   { name: "check_cli_codex", fn: checkCliCodex, critical: false },
   { name: "check_cli_gemini", fn: checkCliGemini, critical: false },
-  { name: "check_keychain_claude", fn: checkKeychainClaude, critical: true },
-  { name: "check_keychain_codex", fn: checkKeychainCodex, critical: true },
-  { name: "check_keychain_gemini", fn: checkKeychainGemini, critical: true },
-  { name: "check_github_app", fn: checkGithubApp, critical: true },
+  { name: "check_github_user", fn: checkGithubUser, critical: true },
   { name: "check_working_dir", fn: checkWorkingDir, critical: false },
   {
     name: "check_model_resolution",
@@ -361,7 +330,7 @@ export const CHECKS: ReadonlyArray<CheckDefinition> = [
     workflowAware: true,
   },
   { name: "check_cost_hard_stop", fn: checkCostHardStop, critical: true },
-  { name: "check_stale_locks", fn: checkStaleLocks, critical: false },
+  { name: "check_stale_locks", fn: () => checkStaleLocks(), critical: false },
   { name: "check_deprecated_config", fn: checkDeprecatedConfig, critical: false },
 ];
 

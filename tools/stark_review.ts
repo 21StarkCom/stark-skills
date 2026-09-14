@@ -29,7 +29,6 @@ import {
 } from "./stark_review_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
 import { isCredentialEnvKey } from "./agent_env_lib.ts";
-import { assetToolsDir } from "./asset_root_lib.ts";
 import {
   buildCodeReviewAnalytics,
   type CodeReviewAnalytics,
@@ -376,9 +375,7 @@ export interface GhJsonOpts {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   paginate?: boolean;
-  /** Optional env keys merged into the gh subprocess env. Used by Task 8-3
-   * to inject a per-agent GitHub App token at POST time without polluting
-   * process.env. */
+  /** Optional subprocess environment overrides; never mutates process.env. */
   envOverride?: Record<string, string>;
 }
 
@@ -412,61 +409,6 @@ function rejectGraphqlPath(p: string): void {
 function buildGhEnv(envOverride?: Record<string, string>): NodeJS.ProcessEnv {
   if (!envOverride) return { ...process.env };
   return { ...process.env, ...envOverride };
-}
-
-// ─── Per-agent GitHub App token resolution (Task 8-3) ───────────────────────
-
-/** Resolve the GitHub App installation token for a specific agent identity
- * (stark-claude / stark-codex / stark-gemini). Cached per process for the
- * agent's ~1h token lifetime. Tokens are NEVER injected into the agent CLI
- * environment — only into the gh transport that POSTs the review and the git
- * transport that pushes fix commits. Callers that may run long after a token
- * was first minted (the POST and push steps) pass forceRefresh to re-mint. */
-const tokenCache: Map<AgentName, string> = new Map();
-
-export function _resetTokenCacheForTests(): void {
-  tokenCache.clear();
-}
-
-export interface TokenForAgentOpts {
-  repo?: string;
-  toolsDir?: string;
-  spawnFn?: typeof spawnCollect;
-  nodeBin?: string;
-  /** Bypass and overwrite the per-process cache. GH App installation tokens
-   * live ~1h, but a single review round can run longer; the POST and push
-   * steps force a fresh mint so they never present an expired credential. */
-  forceRefresh?: boolean;
-}
-
-export async function tokenForAgent(
-  agent: AgentName,
-  opts: TokenForAgentOpts = {},
-): Promise<string> {
-  const cached = opts.forceRefresh ? undefined : tokenCache.get(agent);
-  if (cached) return cached;
-  // Default to the installed TS CLI at ~/.claude/code-review/tools/github_app.ts.
-  // Override via `toolsDir` for tests / out-of-tree invocations.
-  const tools = opts.toolsDir ?? assetToolsDir();
-  const node = opts.nodeBin ?? "node";
-  const args = [
-    path.join(tools, "github_app.ts"),
-    "--app", `stark-${agent}`,
-  ];
-  if (opts.repo) args.push("--repo", opts.repo);
-  args.push("token");
-  const sp = await (opts.spawnFn ?? spawnCollect)(node, args, { env: process.env });
-  if (sp.status !== 0) {
-    throw new Error(
-      `tokenForAgent(${agent}) failed (exit ${sp.status}): ${sp.stderr.slice(0, 400)}`,
-    );
-  }
-  const token = sp.stdout.trim();
-  if (!token) {
-    throw new Error(`tokenForAgent(${agent}) returned empty token`);
-  }
-  tokenCache.set(agent, token);
-  return token;
 }
 
 // ─── Progress logging ───────────────────────────────────────────────────────
@@ -1509,7 +1451,7 @@ export function partitionInlineVsBody(
 
 /** Render the per-domain agent assignment as a markdown list. Used in the
  * review body for mixed-agent runs so a reader can tell which agent produced
- * each finding even when only one bot identity owns the posted review. */
+ * each finding while gh posts through the operator's login. */
 export function renderAgentsResolvedSummary(
   agentsResolved: Record<string, AgentName>,
 ): string {
@@ -1635,13 +1577,8 @@ export interface PostReviewOpts {
   /** Per-domain agent assignment; rendered into the review body for
    * mixed-agent runs (Task 8-4). */
   agentsResolved?: Record<string, AgentName>;
-  /** When set, included as a body note explaining which bot identity owns
-   * the posted review (used for mixed-agent finding rounds, Task 8-3). */
+  /** Optional model-attribution note for mixed-agent reviews. */
   postingAgentNote?: string;
-  /** Per-agent GitHub App installation token. When set, the gh transport
-   * runs with GH_TOKEN set to this value so the posted review appears under
-   * stark-<agent>[bot] (Task 8-3). The token never reaches agent CLIs. */
-  posterToken?: string;
   /** Retrying GH transport, used for the marker GET. Defaults to {@link ghJson}. */
   ghJsonFn?: typeof ghJson;
   /** Non-retrying GH transport, used for the POST itself so the outer
@@ -1702,21 +1639,12 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     payloadSummary: { inlineCount: inline.length, bodyFindingsCount: part.bodyFindings.length, bodyChars: body.length },
   };
   if (opts.dryRun) return result;
-  // Inject the per-agent App token so the posted review is owned by the
-  // matching bot identity (Task 8-3). The override never reaches process.env
-  // and never reaches agent CLIs — only the gh subprocess sees it.
-  const tokenEnv: Record<string, string> | undefined = opts.posterToken
-    ? { GH_TOKEN: opts.posterToken, GITHUB_TOKEN: opts.posterToken }
-    : undefined;
-  const wrap = (fn: typeof ghJson) =>
-    (p: string, o: GhJsonOpts = {}) =>
-      fn(p, tokenEnv ? { ...o, envOverride: { ...(o.envOverride ?? {}), ...tokenEnv } } : o);
-  const gh = wrap(opts.ghJsonFn ?? ghJson);
+  const gh = opts.ghJsonFn ?? ghJson;
   // POST transport must NOT retry internally — the outer retry below re-checks
   // the marker before each retry to guarantee idempotency on 5xx. If both inner
   // (ghJson) and outer retried, a successful-but-unacknowledged POST could be
   // re-sent before the marker check ran, double-posting the review.
-  const ghPost = wrap(opts.ghJsonOnceFn ?? opts.ghJsonFn ?? ghJsonOnce);
+  const ghPost = opts.ghJsonOnceFn ?? opts.ghJsonFn ?? ghJsonOnce;
   const retry = opts.retryFn ?? withRetry;
 
   const checkMarker = async (): Promise<{ stopReason?: string } | void> => {
@@ -2569,12 +2497,12 @@ export async function runTrustedTest(opts: RunTrustedTestOpts): Promise<RunTrust
   return { ok: sp.status === 0, exitCode: sp.status, stderr: sp.stderr };
 }
 
-// ─── Phase 9: push target + GIT_ASKPASS (Task 9-4) ──────────────────────────
+// ─── Phase 9: push target (Task 9-4) ───────────────────────────────────────
 
 export interface PushTarget {
   /** When 'origin', push to the origin remote of the worktree (same-repo PR).
-   * When 'fork', set up a temporary 'stark-fork-push' remote with GIT_ASKPASS
-   * so the push is authenticated without leaking the token via URL/argv. */
+   * When 'fork', set up a temporary 'stark-fork-push' remote
+   * so git can use its existing credentials for the fork. */
   kind: "origin" | "fork";
   /** head ref (branch name) — what we push HEAD to. */
   ref: string;
@@ -2598,7 +2526,7 @@ export class PushTargetUnauthorizedError extends Error {
 
 /** Pure helper: decide whether to push via origin or via a fork remote. Rejects
  * fork PRs without `maintainer_can_modify`: V1.1 only implements push for
- * fork-with-MCM (App-token push via GIT_ASKPASS works because MCM grants the
+ * fork-with-MCM (the operator can push because MCM grants the
  * upstream maintainer push access to the fork branch). No untrusted-fork push
  * credential path is implemented, so even if the fix-loop gate authorizes the
  * round, we refuse to push. */
@@ -2638,10 +2566,6 @@ export async function cleanupStaleForkRemote(
 export interface PushOpts {
   worktree: string;
   target: PushTarget;
-  /** GH App installation token. Authenticates both origin and fork pushes via
-   * GIT_ASKPASS; NEVER embedded in a URL or argv. When omitted, the origin
-   * push falls back to ambient git credentials (test / non-token callers). */
-  token?: string;
   spawnFn?: typeof spawnCollect;
 }
 
@@ -2651,99 +2575,35 @@ export interface PushResult {
   stderr: string;
 }
 
-/** Write a one-shot GIT_ASKPASS helper that echoes $STARK_PUSH_TOKEN, so the
- * token reaches git via env + a 0700 temp file — never argv or a remote URL.
- * Returns the script path and a cleanup fn. */
-function makeAskpass(): { askpath: string; cleanup: () => void } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stark-askpass-"));
-  const askpath = path.join(dir, "askpass.sh");
-  fs.writeFileSync(askpath, '#!/bin/sh\nprintf "%s" "$STARK_PUSH_TOKEN"\n', { mode: 0o700 });
-  fs.chmodSync(askpath, 0o700);
-  return {
-    askpath,
-    cleanup: () => {
-      try { fs.unlinkSync(askpath); } catch { /* */ }
-      try { fs.rmdirSync(dir); } catch { /* */ }
-    },
-  };
-}
-
-/** Execute the push. Never `--force`.
- *  - origin (same-repo) with a token: push over `origin` with the token fed
- *    via GIT_ASKPASS and ambient credential helpers disabled (`-c
- *    credential.helper=`), so neither a stale keychain entry nor an expired
- *    `gh`/`GH_TOKEN` credential can shadow the freshly minted token.
- *  - origin without a token: bare `git push origin` on ambient credentials.
- *  - fork-with-MCM: add a temporary `stark-fork-push` remote, push via the
- *    same GIT_ASKPASS path, then remove the remote. */
+/** Execute a non-force push using the operator's existing git credentials. */
 export async function pushBranch(opts: PushOpts): Promise<PushResult> {
   const spawn = opts.spawnFn ?? spawnCollect;
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
   if (opts.target.kind === "origin") {
-    // No token: legacy / test path — rely on ambient git credentials.
-    if (!opts.token) {
-      const sp = await spawn(
-        "git",
-        ["-C", opts.worktree, "push", "origin", `HEAD:${opts.target.ref}`],
-        { env: process.env },
-      );
-      return analyzePushResult(sp);
-    }
-    const { askpath, cleanup } = makeAskpass();
-    try {
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        GIT_ASKPASS: askpath,
-        GIT_TERMINAL_PROMPT: "0",
-        STARK_PUSH_TOKEN: opts.token,
-      };
-      const sp = await spawn(
-        "git",
-        ["-C", opts.worktree, "-c", "credential.helper=", "push", "origin", `HEAD:${opts.target.ref}`],
-        { env },
-      );
-      return analyzePushResult(sp);
-    } finally {
-      cleanup();
-    }
-  }
-  // Fork push via askpass.
-  if (!opts.token) {
-    return { ok: false, conflict: false, stderr: "fork push requires token" };
+    return analyzePushResult(await spawn(
+      "git", ["-C", opts.worktree, "push", "origin", `HEAD:${opts.target.ref}`],
+      { env },
+    ));
   }
   if (!opts.target.cloneUrl) {
     return { ok: false, conflict: false, stderr: "fork push requires cloneUrl" };
   }
-  const { askpath, cleanup } = makeAskpass();
+  const addSp = await spawn(
+    "git", ["-C", opts.worktree, "remote", "add", FORK_PUSH_REMOTE, opts.target.cloneUrl],
+    { env },
+  );
+  if (addSp.status !== 0) {
+    return { ok: false, conflict: false, stderr: `remote add failed: ${addSp.stderr.slice(0, 300)}` };
+  }
   try {
-    // Add the fork remote (no embedded credentials in URL).
-    const addSp = await spawn(
-      "git",
-      ["-C", opts.worktree, "remote", "add", FORK_PUSH_REMOTE, opts.target.cloneUrl],
-      { env: process.env },
-    );
-    if (addSp.status !== 0) {
-      return { ok: false, conflict: false, stderr: `remote add failed: ${addSp.stderr.slice(0, 300)}` };
-    }
-    try {
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        GIT_ASKPASS: askpath,
-        GIT_TERMINAL_PROMPT: "0",
-        STARK_PUSH_TOKEN: opts.token,
-      };
-      const sp = await spawn(
-        "git",
-        ["-C", opts.worktree, "-c", "credential.helper=", "push", FORK_PUSH_REMOTE, `HEAD:${opts.target.ref}`],
-        { env },
-      );
-      return analyzePushResult(sp);
-    } finally {
-      try {
-        await spawn("git", ["-C", opts.worktree, "remote", "remove", FORK_PUSH_REMOTE], { env: process.env });
-      } catch { /* */ }
-    }
+    return analyzePushResult(await spawn(
+      "git", ["-C", opts.worktree, "push", FORK_PUSH_REMOTE, `HEAD:${opts.target.ref}`],
+      { env },
+    ));
   } finally {
-    cleanup();
+    try {
+      await spawn("git", ["-C", opts.worktree, "remote", "remove", FORK_PUSH_REMOTE], { env });
+    } catch { /* best-effort cleanup */ }
   }
 }
 
@@ -2930,8 +2790,6 @@ export async function main(
     let finalRoundPushedFix = false;
 
     for (let round = 1; round <= cli.maxRounds; round++) {
-      // Re-issue GH App tokens at the start of each round (~1h lifetime).
-      if (round > 1) _resetTokenCacheForTests();
       finalRoundPushedFix = false;
 
       const pass = await runReviewPass(passCtx, passDeps);
@@ -3114,31 +2972,13 @@ export async function main(
       const newSha = shaSp.status === 0 ? shaSp.stdout.trim() : "";
       appendAudit({ action: "commit", round: pass.round, sha: newSha, files: stagedPaths }, { home, repo, pr });
 
-      // Push. Mint a FRESH GH App token immediately before pushing — a single
-      // review round can outlast the ~1h installation-token lifetime, so a
-      // round-start token may already be expired. forceRefresh re-mints, and
-      // pushBranch authenticates origin and fork pushes alike via GIT_ASKPASS.
-      // pushTarget was resolved up-front (before the fixer ran).
-      let pushToken: string;
-      try {
-        pushToken = await tokenForAgent(pass.postingAgent, {
-          repo,
-          forceRefresh: true,
-          ...(spawnD ? { spawnFn: spawnD } : {}),
-        });
-      } catch (err) {
-        const reason = (err as Error).message;
-        appendAudit({ action: "skip", round: pass.round, reason: `push_token_failed: ${reason}` }, { home, repo, pr });
-        terminalCode = { code: "push_token_failed", message: reason };
-        break;
-      }
+      // Push using the operator's existing git credentials.
       const pushRes = await pushBranch({
         worktree: cli.worktree,
         target: pushTarget,
-        token: pushToken,
         ...(spawnD ? { spawnFn: spawnD } : {}),
       });
-      const auditOpts: AppendAuditOpts = { home, repo, pr, redactInLogs: [pushToken] };
+      const auditOpts: AppendAuditOpts = { home, repo, pr };
       if (!pushRes.ok) {
         appendAudit({
           action: "skip", round: pass.round,
@@ -3168,7 +3008,6 @@ export async function main(
     let convergence: SuccessReceipt["convergence"] = null;
     if (!terminalCode && finalRoundPushedFix) {
       progress("convergence — re-reviewing the final round's fix (review-only)");
-      _resetTokenCacheForTests();
       const pass = await runReviewPass(passCtx, passDeps);
       if (pass.kind === "terminal") {
         convergence = { ran: false, round: null, findings: null, error: `${pass.code}: ${pass.message}` };
@@ -3468,7 +3307,7 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
   const postingAgent: AgentName = selectPostingAgent(allFindings) ?? classifierAgent;
   const mixedFindingAgents = findingAgents.size > 1;
   const postingAgentNote = mixedFindingAgents
-    ? `_Posted under stark-${postingAgent}[bot] (majority of findings: ${allFindings.filter((f) => f.agent === postingAgent).length}/${allFindings.length}); per-domain agents in agents_resolved._`
+    ? `_Review models: ${[...new Set(allFindings.map((f) => f.agent))].join(", ")}; per-domain attribution appears in agents_resolved._`
     : undefined;
 
   const marker = buildMarker(allocated.round, postingAgent, runHash);
@@ -3483,54 +3322,37 @@ async function runReviewPass(ctx: PassCtx, deps: PassDeps): Promise<PassResult> 
   if (cls.aborted) {
     appendAudit({ action: "skip", round: allocated.round, reason: "classifier_aborted" }, { home, repo, pr });
   } else if (!alreadyPosted) {
-    let posterToken: string | undefined;
-    if (!cli.dryRun) {
-      try {
-        // Force a fresh mint: a long review round can outlast the token's
-        // ~1h lifetime, so a round-start token may be expired by POST time.
-        posterToken = await tokenForAgent(postingAgent, {
-          repo,
-          forceRefresh: true,
-          ...(deps.spawnFn ? { spawnFn: deps.spawnFn } : {}),
-        });
-      } catch (err) {
-        unpostedReason = `token_resolution_failed: ${(err as Error).message}`;
+    progress(`posting review via gh${cli.dryRun ? "  [dry-run]" : ""}`);
+    try {
+      const pr_ = await postReview({
+        repo, pr, round: allocated.round,
+        agent: postingAgent,
+        runHash,
+        findings: allFindings,
+        changedFiles,
+        fixThreshold: config.fix_threshold,
+        humanSummary: `stark-review TS dispatcher: ${allFindings.length} findings`,
+        prHeadSha,
+        dryRun: cli.dryRun,
+        agentsResolved,
+        ...(postingAgentNote ? { postingAgentNote } : {}),
+        ghJsonFn: deps.ghJsonFn,
+        ghJsonOnceFn: deps.ghJsonOnceFn,
+      });
+      if (pr_.posted && !pr_.unposted) {
+        commentsPosted = pr_.payloadSummary.inlineCount;
+        appendAudit({
+          action: "post", round: allocated.round,
+          ...(pr_.reviewId ? { reason: `review_id=${pr_.reviewId}` } : {}),
+        }, { home, repo, pr });
+        progress(`posted  ${pr_.payloadSummary.inlineCount} inline + ${pr_.payloadSummary.bodyFindingsCount} body${pr_.reviewId ? `  review_id=${pr_.reviewId}` : ""}`);
       }
-    }
-    if ((posterToken || cli.dryRun) && !unpostedReason) {
-      progress(`posting as stark-${postingAgent}${cli.dryRun ? "  [dry-run]" : ""}`);
-      try {
-        const pr_ = await postReview({
-          repo, pr, round: allocated.round,
-          agent: postingAgent,
-          runHash,
-          findings: allFindings,
-          changedFiles,
-          fixThreshold: config.fix_threshold,
-          humanSummary: `stark-review TS dispatcher: ${allFindings.length} findings`,
-          prHeadSha,
-          dryRun: cli.dryRun,
-          agentsResolved,
-          ...(postingAgentNote ? { postingAgentNote } : {}),
-          ...(posterToken ? { posterToken } : {}),
-          ghJsonFn: deps.ghJsonFn,
-          ghJsonOnceFn: deps.ghJsonOnceFn,
-        });
-        if (pr_.posted && !pr_.unposted) {
-          commentsPosted = pr_.payloadSummary.inlineCount;
-          appendAudit({
-            action: "post", round: allocated.round,
-            ...(pr_.reviewId ? { reason: `review_id=${pr_.reviewId}` } : {}),
-          }, { home, repo, pr });
-          progress(`posted  ${pr_.payloadSummary.inlineCount} inline + ${pr_.payloadSummary.bodyFindingsCount} body${pr_.reviewId ? `  review_id=${pr_.reviewId}` : ""}`);
-        }
-        if (pr_.unposted) {
-          unpostedReason = pr_.unpostedReason ?? "post failed";
-          progress(`unposted: ${unpostedReason}`);
-        }
-      } catch (err) {
-        unpostedReason = (err as Error).message;
+      if (pr_.unposted) {
+        unpostedReason = pr_.unpostedReason ?? "post failed";
+        progress(`unposted: ${unpostedReason}`);
       }
+    } catch (err) {
+      unpostedReason = (err as Error).message;
     }
   } else {
     appendAudit({ action: "skip", round: allocated.round, reason: "duplicate_marker" }, { home, repo, pr });

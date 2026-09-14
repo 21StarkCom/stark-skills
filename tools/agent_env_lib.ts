@@ -137,9 +137,7 @@ const CREDENTIAL_ENV_KEEP: ReadonlySet<string> = new Set([
   "GOOGLE_APPLICATION_CREDENTIALS",
 ]);
 
-/** Matches the credential-shaped names the exact list cannot enumerate — in
- *  particular `STARK_{CLAUDE,CODEX,GEMINI}_PRIVATE_KEY_21S`, which
- *  `github_app_lib` reads as its Keychain fallback. */
+/** Matches credential-shaped names beyond the exact denylist. */
 const CREDENTIAL_ENV_PATTERN =
   /PRIVATE_KEY|(^|_)(TOKEN|SECRET|PASSWORD)($|_)|_API_KEY$/;
 

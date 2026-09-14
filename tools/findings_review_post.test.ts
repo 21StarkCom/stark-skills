@@ -284,11 +284,11 @@ describe("toFindings anchor validation", () => {
 
 describe("parseArgs", () => {
   test("parses the full flag set", () => {
-    const a = parseArgs(["--repo", "o/r", "--pr", "7", "--findings", "f.json", "--app", "codex", "--dry-run"]);
+    const a = parseArgs(["--repo", "o/r", "--pr", "7", "--findings", "f.json", "--agent", "codex", "--dry-run"]);
     assert.deepEqual(a, { repo: "o/r", pr: 7, findingsPath: "f.json", agent: "codex", dryRun: true });
   });
 
-  test("defaults the posting identity to claude", () => {
+  test("defaults the model attribution to claude", () => {
     assert.equal(parseArgs(["--repo", "o/r", "--pr", "1", "--findings", "-"]).agent, "claude");
   });
 
@@ -304,10 +304,10 @@ describe("parseArgs", () => {
     assert.throws(() => parseArgs(["--repo", "o/r", "--pr", "0", "--findings", "-"]), /positive integer/);
   });
 
-  test("rejects an unknown --app", () => {
+  test("rejects an unknown --agent", () => {
     assert.throws(
-      () => parseArgs(["--repo", "o/r", "--pr", "1", "--findings", "-", "--app", "gpt"]),
-      /--app must be one of/,
+      () => parseArgs(["--repo", "o/r", "--pr", "1", "--findings", "-", "--agent", "gpt"]),
+      /--agent must be one of/,
     );
   });
 

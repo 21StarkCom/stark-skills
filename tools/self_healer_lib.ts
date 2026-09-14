@@ -241,25 +241,16 @@ interface ExecutionOutcome {
 }
 
 /**
- * Execute a pattern's action. The `refresh_token` action shells out to the
- * TS GitHub-App CLI to mint a fresh installation token. All other actions
- * are stubs that print "not yet implemented" and return success=true.
+ * Execute a configured repair action. Authentication stays operator-owned.
  */
 function executeAction(
   pattern: HealerPattern,
-  scriptsDir: string,
   logFn: (msg: string) => void,
 ): ExecutionOutcome {
   let success = true;
   if (pattern.action === "refresh_token") {
-    // scriptsDir is `<base>/scripts`; the TS CLI sits at `<base>/tools/`.
-    const toolsDir = path.join(path.dirname(scriptsDir), "tools");
-    const result = spawnSync(
-      "node",
-      [path.join(toolsDir, "github_app.ts"), "token"],
-      { encoding: "utf8", timeout: 30_000 },
-    );
-    success = result.status === 0;
+    logFn("authentication requires operator action");
+    return { success: false, verify_passed: false };
   } else if (pattern.action === "release_stale_lock") {
     logFn("no lock path specified, skipping");
     success = true;
@@ -303,9 +294,6 @@ export interface RunHealOpts {
   logPath?: string;
   /** Override for the alert_delivery base dir. */
   alertsBaseDir?: string;
-  /** Override for the scripts dir. Defaults to `~/.claude/code-review/scripts`; the
-   * sibling `tools/` directory hosts the GitHub-App TS CLI used by `refresh_token`. */
-  scriptsDir?: string;
   env?: NodeJS.ProcessEnv;
   now?: Date;
   /** Optional sink for the "no lock path specified" style action stub output. Defaults to stdout. */
@@ -326,7 +314,6 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
   const circuitsPath = opts.circuitsPath ?? defaultCircuitsPath();
   const logPath = opts.logPath ?? defaultLogPath();
   const alertsBaseDir = opts.alertsBaseDir; // undefined => alert_delivery default
-  const scriptsDir = opts.scriptsDir ?? path.join(defaultBaseDir(), "scripts");
   const logFn = opts.log ?? ((s: string) => process.stdout.write(`${s}\n`));
 
   // -------- Load patterns --------
@@ -484,7 +471,7 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
   }
 
   // -------- Auto mode: execute --------
-  const execution = executeAction(pattern, scriptsDir, logFn);
+  const execution = executeAction(pattern, logFn);
   if (typeof pattern.max_per_session === "number" && execution.success) {
     sessionIncrement(pattern.id, sessionPath);
   }

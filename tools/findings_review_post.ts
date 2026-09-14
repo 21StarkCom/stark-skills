@@ -17,7 +17,6 @@ import { spawnSync } from "node:child_process";
 
 import {
   postReview,
-  tokenForAgent,
   type PostReviewResult,
 } from "./stark_review.ts";
 import {
@@ -125,6 +124,7 @@ export function toFindings(
 export function buildHumanSummary(
   findings: Finding[],
   level: string | undefined,
+  agent: AgentName = findings[0]?.agent ?? "claude",
 ): string {
   const bySeverity = new Map<Severity, number>();
   for (const f of findings) {
@@ -136,6 +136,8 @@ export function buildHumanSummary(
     .join(", ");
   const lines = [
     `## Code review — ${findings.length} finding${findings.length === 1 ? "" : "s"}`,
+    "",
+    `Review model: ${agent}. Posted through the operator's gh login.`,
     "",
     counts ? `Severity mix: ${counts}.` : "No findings.",
     "",
@@ -293,12 +295,12 @@ options:
   --repo O/R        target repository (required)
   --pr N            pull request number (required)
   --findings PATH   ReportFindings JSON; "-" reads stdin (required)
-  --app AGENT       posting bot identity: claude|codex|gemini (default: claude)
+  --agent AGENT     review attribution: claude|codex|gemini (default: claude)
   --dry-run         build the payload and print the plan without posting
   -h, --help        show this help message and exit
 
-The review is posted as event=COMMENT under stark-<agent>[bot], never as
-APPROVE or REQUEST_CHANGES — approvals and blocks stay human.`;
+The review is posted as event=COMMENT through the existing gh login.
+The agent selects model attribution only; it never changes authentication.`;
 
 export interface CliArgs {
   repo: string;
@@ -331,9 +333,9 @@ export function parseArgs(argv: string[]): CliArgs {
         break;
       }
       case "--findings": findingsPath = need(); break;
-      case "--app": {
+      case "--agent": {
         const v = need() as AgentName;
-        if (!AGENTS.includes(v)) throw new Error(`--app must be one of ${AGENTS.join("|")}, got ${v}`);
+        if (!AGENTS.includes(v)) throw new Error(`--agent must be one of ${AGENTS.join("|")}, got ${v}`);
         agent = v;
         break;
       }
@@ -370,9 +372,6 @@ async function main(argv: string[]): Promise<number> {
   const payload = readPayload(args.findingsPath);
   const ctx = await fetchPrContext(args.repo, args.pr);
   const findings = toFindings(payload, args.agent, ctx.anchorable);
-  const posterToken = args.dryRun
-    ? undefined
-    : await tokenForAgent(args.agent, { repo: args.repo, forceRefresh: true });
 
   const result: PostReviewResult = await postReview({
     repo: args.repo,
@@ -385,10 +384,9 @@ async function main(argv: string[]): Promise<number> {
     // "low" so severity never filters a finding out of the review — the
     // no-drop rule is the whole point of this path.
     fixThreshold: "low",
-    humanSummary: buildHumanSummary(findings, payload.level),
+    humanSummary: buildHumanSummary(findings, payload.level, args.agent),
     prHeadSha: ctx.headSha,
     dryRun: args.dryRun,
-    posterToken,
   });
   console.log(JSON.stringify({ findings: findings.length, ...result }, null, 2));
   return result.unposted ? 1 : 0;

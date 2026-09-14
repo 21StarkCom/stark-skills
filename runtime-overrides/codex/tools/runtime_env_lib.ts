@@ -1,34 +1,22 @@
 /**
- * Isolated subprocess environments — TypeScript port of
- * `scripts/runtime_env.py`.
- *
- * Controls which env vars reach CLI subprocesses, injects GitHub App
- * tokens for operations that need repo access, manages process-scoped
- * temp dirs, and applies claude model auth via `claude_auth_lib.ts`
- * (subscription OAuth by default; ANTHROPIC_API_KEY injection in api
- * mode) while keeping the key out of codex/gemini envs.
- *
- * The Python imported `config_loader` + shelled out to `github_app.ts`;
- * this port reads config via `stark_config_lib.ts` and mints tokens by
- * importing `github_app_lib.ts` directly.
+ * Credential-scrubbed subprocess environments with process-scoped temp dirs.
+ * GitHub commands use the operator's existing gh login without token injection.
  */
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 
-import { getToken, resolveAppName } from "./github_app_lib.ts";
-import { getRuntimeConfig, loadGlobalConfig } from "./stark_config_lib.ts";
+import { AGENT_ENV_ALLOWLIST, isCredentialEnvKey } from "./agent_env_lib.ts";
+import { getRuntimeConfig } from "./stark_config_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Operations that require a GitHub App token (review bot identity). */
-const GH_TOKEN_OPS: ReadonlySet<string> = new Set(["review"]);
-
-/** Operations using the user's native gh auth — no bot token injected. */
+/** Recognized operations, using the operator's native gh login. */
 const USER_AUTH_OPS: ReadonlySet<string> = new Set([
+  "review",
   "pr_create",
   "issue_ops",
   "local",
@@ -136,27 +124,20 @@ export function makeTempDir(prefix: string): string {
  *
  * Claude model auth follows `claude_auth_lib.ts` (subscription default;
  * ANTHROPIC_API_KEY injected only in api mode) and the key is always
- * absent from codex/gemini envs. GH_TOKEN is present only when
- * `operation === "review"`.
+ * absent from codex/gemini envs. GitHub credentials are never injected.
  */
 export async function buildAgentEnv(
   agent: string,
   operation: string,
 ): Promise<Record<string, string>> {
   const runtimeCfg = getRuntimeConfig();
-  const fullCfg = loadGlobalConfig();
 
-  const allowlist = new Set(runtimeCfg.subagent_env_allowlist);
-  const githubAppsRaw = fullCfg["github_apps"];
-  const githubApps: Record<string, string> =
-    githubAppsRaw && typeof githubAppsRaw === "object" && !Array.isArray(githubAppsRaw)
-      ? (githubAppsRaw as Record<string, string>)
-      : {};
+  const allowlist = new Set([...AGENT_ENV_ALLOWLIST, ...runtimeCfg.subagent_env_allowlist]);
 
   // Start from allowlisted host env keys, excluding blocked keys.
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined && allowlist.has(k) && !BLOCKED_KEYS.has(k)) {
+    if (v !== undefined && allowlist.has(k) && !BLOCKED_KEYS.has(k) && !isCredentialEnvKey(k)) {
       env[k] = v;
     }
   }
@@ -168,18 +149,12 @@ export async function buildAgentEnv(
     if (value && value.trim() !== "") env[key] = value;
   }
 
-  // Model auth for the claude agent: subscription mode (default) leaves
-  // ANTHROPIC_API_KEY absent so the CLI uses the logged-in account's OAuth
-  // credentials; api mode injects it from ANTHROPIC_AGENTS. See claude_auth_lib.ts.
+  // Claude uses the logged-in account's subscription.
   if (agent === "claude") {
-    applyClaudeAuth(env, { require: true });
+    applyClaudeAuth(env);
   }
 
-  // GH_TOKEN: inject the bot token only for review operations.
-  if (GH_TOKEN_OPS.has(operation)) {
-    const appName = githubApps[agent] ?? `stark-${agent}`;
-    env["GH_TOKEN"] = await getToken({ app: resolveAppName(appName) });
-  } else if (!USER_AUTH_OPS.has(operation)) {
+  if (!USER_AUTH_OPS.has(operation)) {
     process.stderr.write(
       `runtime_env: warning: unknown operation '${operation}' for agent ` +
         `'${agent}'; defaulting to no GH_TOKEN\n`,

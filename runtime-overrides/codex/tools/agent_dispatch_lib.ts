@@ -11,8 +11,7 @@
  * Codex variant of `tools/agent_dispatch_lib.ts`. Extracted from the former
  * `copilot_dispatch.ts` when the `/stark-copilot` lead/wing workflow was retired
  * (STARK-2100); only the copilot-specific orchestration was deleted. Consumed by
- * this tree's `iac_review_lib.ts`. Shells out to `tools/github_app.ts` only when
- * a GitHub App token is actually required (operation="review").
+ * this tree's `iac_review_lib.ts`. GitHub uses the operator's gh login.
  */
 import { spawn } from "node:child_process";
 import {
@@ -22,13 +21,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import { assetConfigPath, stateRoot } from "./asset_root_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 import { geminiAuthSettings, resolveGeminiAuthMode } from "./gemini_auth_lib.ts";
@@ -59,13 +58,6 @@ const GEMINI_FALLBACK_LOG = path.join(
   "gemini-api-key-fallback.log",
 );
 
-function resolveSelfDir(): string {
-  const url = new URL(import.meta.url);
-  const filePath = realpathSync(url.pathname);
-  return path.dirname(filePath);
-}
-
-const SELF_DIR = resolveSelfDir();
 // Config (minimal port of config_loader.py) -------------------------------
 
 interface AgentModelConfig {
@@ -88,12 +80,6 @@ const DEFAULT_RUNTIME_ALLOWLIST: readonly string[] = [
   "TERM",
   "ANTHROPIC_AGENTS",
 ];
-
-const DEFAULT_GITHUB_APPS: Record<AgentName, string> = {
-  claude: "stark-claude",
-  codex: "stark-codex",
-  gemini: "stark-gemini",
-};
 
 let _configCache: Record<string, unknown> | null = null;
 
@@ -152,15 +138,6 @@ function getEnvAllowlist(): readonly string[] {
     }
   }
   return DEFAULT_RUNTIME_ALLOWLIST;
-}
-
-function getGitHubAppName(agent: AgentName): string {
-  const apps = loadConfig()["github_apps"];
-  if (isPlainObject(apps)) {
-    const v = (apps as Record<string, unknown>)[agent];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return DEFAULT_GITHUB_APPS[agent];
 }
 
 // Utilities ---------------------------------------------------------------
@@ -386,7 +363,7 @@ export async function buildAgentEnv(
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (typeof v !== "string") continue;
-    if (BLOCKED_ENV_KEYS.has(k)) continue;
+    if (BLOCKED_ENV_KEYS.has(k) || isCredentialEnvKey(k)) continue;
     if (!allowlist.has(k)) continue;
     env[k] = v;
   }
@@ -399,36 +376,11 @@ export async function buildAgentEnv(
     delete env["ANTHROPIC_API_KEY"];
   }
 
-  if (operation === "review") {
-    const token = await fetchGitHubAppToken(getGitHubAppName(agent));
-    if (token) env["GH_TOKEN"] = token;
-  }
-
   delete env["ANTHROPIC_AGENTS"];
 
   const tempDir = makeAgentTempDir();
   env["STARK_AGENT_TMPDIR"] = tempDir;
   return { env, tempDir };
-}
-
-async function fetchGitHubAppToken(appName: string): Promise<string | null> {
-  // Sibling TS CLI: tools/github_app.ts (resolved relative to this script).
-  const ts = path.join(SELF_DIR, "github_app.ts");
-  if (!existsSync(ts)) return null;
-  const res = await run(
-    "node",
-    [ts, "--app", appName, "token"],
-    { timeoutSec: 30, env: process.env },
-  );
-  if (res.code !== 0) {
-    process.stderr.write(
-      `agent_dispatch: github_app token fetch failed (exit ${res.code}): ` +
-        `${res.stderr.slice(0, 300)}\n`,
-    );
-    return null;
-  }
-  const token = res.stdout.trim();
-  return token.length > 0 ? token : null;
 }
 
 // Gemini home setup -------------------------------------------------------

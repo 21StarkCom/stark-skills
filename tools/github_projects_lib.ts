@@ -2,12 +2,8 @@
  * GitHub Projects V2 GraphQL operations — TypeScript port of
  * `scripts/github_projects.py`.
  *
- * Thin function library over GitHub Projects V2 GraphQL. All API calls go
- * through `graphql()` from `github_app_lib.ts`, so per-owner installation
- * routing happens automatically when callers go through the high-level
- * helpers (`findItemForIssue` / `getIssueNodeId` derive owner from `org`
- * via an explicit pass-through — the auto-deriver only kicks in for REST
- * `/repos/...` paths, not GraphQL).
+ * Thin function library over GitHub Projects V2 GraphQL, using the operator's
+ * existing gh login. Model choice never changes GitHub authentication.
  *
  * Field-id discovery is cached per-project for the lifetime of the
  * process. `resetFieldCache()` is exposed for tests; production callers
@@ -17,7 +13,28 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { graphql } from "./github_app_lib.ts";
+import { spawnSync } from "node:child_process";
+
+/** Send one GraphQL request through gh, preserving variables and error details. */
+export async function graphql(
+  query: string,
+  opts: { variables?: Record<string, unknown> } = {},
+): Promise<unknown> {
+  const result = spawnSync("gh", ["api", "graphql", "--input", "-"], {
+    input: JSON.stringify({ query, variables: opts.variables ?? {} }),
+    encoding: "utf8",
+    timeout: 60_000,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`gh api graphql failed: ${result.error?.message ?? result.stderr}`);
+  }
+  const data = JSON.parse(result.stdout) as { errors?: Array<{ message?: string }> };
+  if (data.errors?.length) {
+    throw new Error(`GraphQL errors: ${data.errors.map((e) => e.message ?? JSON.stringify(e)).join("; ")}`);
+  }
+  return data;
+}
 
 // ---------------------------------------------------------------------------
 // Constants

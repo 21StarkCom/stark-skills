@@ -132,10 +132,8 @@ Optional:
 └── gemini × {same 5 domains} when `models.gemini.enabled` is true
 ```
 
-Each agent posts a consolidated review via its own GitHub App bot:
-- **stark-claude** — architecture, accessibility, spec conformance focus
-- **stark-codex** — correctness, behavior, test coverage focus
-- **stark-gemini** — security, regression prevention, UI conformance focus
+Reviews post through the operator's existing `gh` login as `aryeh-stark`.
+Each review identifies its models in the text.
 
 ## Repo Structure
 
@@ -221,7 +219,7 @@ Domains are auto-discovered at startup.
 - macOS (keychain-based auth)
 - `claude`, `codex`, `gemini` CLI tools in PATH
 - Node.js (TS tooling runs via `node`)
-- GitHub App private keys in macOS Keychain
+- GitHub CLI authenticated as `aryeh-stark`
 
 ## Skill Documentation
 

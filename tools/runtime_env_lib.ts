@@ -1,35 +1,23 @@
 /**
- * Isolated subprocess environments — TypeScript port of
- * `scripts/runtime_env.py`.
- *
- * Controls which env vars reach CLI subprocesses, injects GitHub App
- * tokens for operations that need repo access, manages process-scoped
- * temp dirs, and applies claude model auth via `claude_auth_lib.ts`
- * (subscription OAuth by default; ANTHROPIC_API_KEY injection in api
- * mode) while keeping the key out of codex/gemini envs.
- *
- * The Python imported `config_loader` + shelled out to `github_app.ts`;
- * this port reads config via `stark_config_lib.ts` and mints tokens by
- * importing `github_app_lib.ts` directly.
+ * Credential-scrubbed subprocess environments with process-scoped temp dirs.
+ * Model authentication follows claude_auth_lib.ts. GitHub commands use the
+ * operator's existing gh login; subprocesses receive no GitHub tokens.
  */
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 
 import { AGENT_ENV_ALLOWLIST, isCredentialEnvKey } from "./agent_env_lib.ts";
-import { getToken, resolveAppName } from "./github_app_lib.ts";
-import { getRuntimeConfig, loadGlobalConfig } from "./stark_config_lib.ts";
+import { getRuntimeConfig } from "./stark_config_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Operations that require a GitHub App token (review bot identity). */
-const GH_TOKEN_OPS: ReadonlySet<string> = new Set(["review"]);
-
-/** Operations using the user's native gh auth — no bot token injected. */
+/** Recognized operations, all using the operator's native gh login. */
 const USER_AUTH_OPS: ReadonlySet<string> = new Set([
+  "review",
   "pr_create",
   "issue_ops",
   "local",
@@ -137,15 +125,13 @@ export function makeTempDir(prefix: string): string {
  *
  * Claude model auth follows `claude_auth_lib.ts` (subscription default;
  * ANTHROPIC_API_KEY injected only in api mode) and the key is always
- * absent from codex/gemini envs. GH_TOKEN is present only when
- * `operation === "review"`.
+ * absent from codex/gemini envs. GitHub credentials are never injected.
  */
 export async function buildAgentEnv(
   agent: string,
   operation: string,
 ): Promise<Record<string, string>> {
   const runtimeCfg = getRuntimeConfig();
-  const fullCfg = loadGlobalConfig();
 
   // Union with the shared default so the allowlist is a floor, not a
   // replacement: `deepMerge` swaps arrays wholesale, so a config that sets
@@ -155,21 +141,11 @@ export async function buildAgentEnv(
     ...AGENT_ENV_ALLOWLIST,
     ...runtimeCfg.subagent_env_allowlist,
   ]);
-  const githubAppsRaw = fullCfg["github_apps"];
-  const githubApps: Record<string, string> =
-    githubAppsRaw && typeof githubAppsRaw === "object" && !Array.isArray(githubAppsRaw)
-      ? (githubAppsRaw as Record<string, string>)
-      : {};
 
   // Start from allowlisted host env keys, excluding blocked keys.
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
-    // `isCredentialEnvKey` covers what BLOCKED_KEYS never named: the GitHub
-    // and OpenAI credentials. Before this, an allowlist entry for GH_TOKEN
-    // forwarded the operator's PAT verbatim — the existing "no bot token for
-    // non-review ops" assertion only held because the shipped config happens
-    // not to list it. Review ops are unaffected: the App token is injected
-    // below, after this copy.
+    // Credentials stay outside model subprocesses, even if allowlisted.
     if (
       v !== undefined &&
       allowlist.has(k) &&
@@ -195,11 +171,7 @@ export async function buildAgentEnv(
     applyClaudeAuth(env);
   }
 
-  // GH_TOKEN: inject the bot token only for review operations.
-  if (GH_TOKEN_OPS.has(operation)) {
-    const appName = githubApps[agent] ?? `stark-${agent}`;
-    env["GH_TOKEN"] = await getToken({ app: resolveAppName(appName) });
-  } else if (!USER_AUTH_OPS.has(operation)) {
+  if (!USER_AUTH_OPS.has(operation)) {
     process.stderr.write(
       `runtime_env: warning: unknown operation '${operation}' for agent ` +
         `'${agent}'; defaulting to no GH_TOKEN\n`,

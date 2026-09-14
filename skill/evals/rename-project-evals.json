@@ -9,7 +9,7 @@
       "assertions": [
         {"name": "validates_name_format", "check": "Validates both names match ^[A-Za-z0-9._-]+$"},
         {"name": "parses_remote", "check": "Extracts host, org, repo from git remote get-url origin"},
-        {"name": "checks_admin_permission", "check": "Verifies GitHub App has administration:write before renaming"},
+        {"name": "checks_admin_permission", "check": "Verifies the gh user has admin permission before renaming"},
         {"name": "renames_on_github", "check": "Calls gh api -X PATCH /repos/{org}/{old-name} -f name={new-name}"},
         {"name": "updates_remote_url", "check": "Runs git remote set-url origin with new repo name"},
         {"name": "renames_local_dir", "check": "Runs mv and cd to new directory path"},
@@ -74,7 +74,7 @@
     },
     {
       "id": 7,
-      "prompt": "rename stark-review to stark-skills (GitHub App lacks admin permission)",
+      "prompt": "rename stark-review to stark-skills (gh user lacks admin permission)",
       "expected_output": "Fails with clear error about missing admin permission",
       "files": [],
       "assertions": [

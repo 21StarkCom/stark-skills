@@ -44,7 +44,7 @@ import {
 } from "./agent_dispatch_lib.ts";
 import { assetPromptsDir } from "./asset_root_lib.ts";
 import { getIacReviewConfig } from "./stark_config_lib.ts";
-import { prReview, type AppName } from "./github_app_lib.ts";
+import { ghJsonOnce } from "./stark_review.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -118,12 +118,6 @@ export interface RunIacReviewOpts {
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
-
-const APP_FOR_AGENT: Record<AgentName, AppName> = {
-  claude: "stark-claude",
-  codex: "stark-codex",
-  gemini: "stark-gemini",
-};
 
 const CODEX_REASONING_EFFORT = 'model_reasoning_effort="high"';
 
@@ -840,17 +834,18 @@ export async function runIacReview(opts: RunIacReviewOpts): Promise<IacReviewRec
   }
   receipt.findings = findings;
 
-  // Optional PR posting (authored by the first agent's GitHub App).
+  // Optional PR posting through the operator's existing gh login.
   if (opts.pr && opts.repo) {
-    const app = APP_FOR_AGENT[agents[0]];
     const body =
       renderReport(receipt) +
       `\n\n<sub>🤖 stark-${opts.kind}-review · agents: ${agents.join(", ")}</sub>`;
     try {
-      await prReview(opts.repo, opts.pr, "COMMENT", body, app);
+      await ghJsonOnce(`repos/${opts.repo}/pulls/${opts.pr}/reviews`, {
+        method: "POST", body: { event: "COMMENT", body },
+      });
       receipt.posted_pr = opts.pr;
       receipt.posted_ok = true;
-      log(`posted findings to ${opts.repo}#${opts.pr} as ${app}`);
+      log(`posted findings to ${opts.repo}#${opts.pr} via gh`);
     } catch (err) {
       receipt.posted_pr = opts.pr;
       receipt.posted_ok = false;

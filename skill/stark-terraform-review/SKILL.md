@@ -54,7 +54,7 @@ Raw input: `$ARGUMENTS`
 - `--changed` — only HCL changed vs the git merge-base / working tree.
 - `--no-tools` — skip host scanners (review by reading only).
 - `--min-severity S` — drop findings below S (`critical|high|medium|low`).
-- `--pr N --repo O/R` — post the merged findings to PR N (authored by the first agent's GitHub App).
+- `--pr N --repo O/R` — post the merged findings to PR N (through the operator's gh login, with model attribution).
 - `--dry-run` — resolve agents + files, dispatch nothing.
 - `--json` — print the receipt JSON instead of the markdown report.
 

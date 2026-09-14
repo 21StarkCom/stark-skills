@@ -22,8 +22,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 - **Every review's findings get posted on the PR.** Inline where anchored, summary comment otherwise. This repo *is* the review system — `stark_review.ts` already does the posting. Don't drop, downgrade or summarize findings away, and don't merge with open findings unaddressed: fix them, or reply on the thread saying why not.
 - **Draft PRs by default.** Every PR-opening path opens a **draft**, so WIP stays out of draft-guarded CI. Test locally, then un-draft to merge. Opt out per-run with `--ready` (alias `--no-draft`). You cannot merge a draft, so the merge paths run `gh pr ready` first — which fires target CI via `ready_for_review` — then wait for green, then squash-merge. Target repos need the skip-draft guard for "no CI on WIP" to hold: `standards/workflows/skip-draft-guard.md`.
   - **But never guard a workflow whose check is REQUIRED** (STARK-357). A guarded job reports `skipped`, GitHub counts that as satisfying the required check, and it looks identical to a pass — so the guard turns "CI did not run" into "CI is green". PR #877 merged that way; the suite never ran against what landed. Nothing repairs it after the fact: a re-run replays the original payload and skips again, and a `workflow_dispatch` run never joins the PR's status rollup. `.github/workflows/tests.yml` is deliberately unguarded and runs the `tools/` suite. The merge paths (`idun gh pr-merge`) refuse a skipped required check, naming it; `--allow-skipped-checks` opts back in for path-filtered checks that skip by design.
-- **Every PR action is `aryeh-stark`; bots only post reviews.** Opening a PR, commenting, resolving a thread, un-drafting, merging, opening an issue — all go through `gh`, logged in as `aryeh-stark`. The `stark-{claude,codex,gemini}` **21S** Apps exist for exactly one reason: posting multi-LLM review findings, where three distinct bot authors make "which model said this" readable. `tools/github_app{,_lib}.ts` therefore exposes reads plus `pr review` / `pr comment` and **nothing that authors** — `pr create`, `pr ready`, `pr merge` and `issue create` were removed 2026-08-04 and exit `2` naming the `gh` command to run. **Never re-add a bot PR-create path.**
-  - **CI is the one exception** — a workflow has no human token, so `marketplace-sync.yml` mints an app token and uses it to open the bifrost sync PR **and merge it once bifrost's CI is green** (#852). GitHub Actions only; never anything running on this Mac.
+- **Every PR action uses `gh` as `aryeh-stark`.** This includes review posting. Review text identifies the model; authentication never changes with model choice. Review Apps are retired. CI alone uses the separate `stark-meridian-ci` App in `marketplace-sync.yml`.
   - **`idun user` is the other exception, and it is human-invoked only** (moved out of stark-skills in STARK-2215). It moves `gh` to a relief account when `aryeh-stark`'s rate bucket runs dry — `export GH_TOKEN=$(idun user --swap)`. **No tool, skill or hook may invoke it** — it exports `GH_TOKEN`, which overrides `gh`'s keyring for every later call in that shell, so an automated swap silently re-authors whatever runs next.
 - **Language: Go for backend, TypeScript for scripts.** **No new Python.** The repo's tooling is TypeScript-only under `tools/`; the former Python orchestrators and dispatch infra under `scripts/` were migrated out and deleted. If you find a `scripts/*.py` path named in any doc, it is stale — delete the reference, don't recreate the file.
 - **Test live.** Local-only verification is not enough. If a flow touches GCP, exercise the real GCP surface.
@@ -32,7 +31,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Repo Layout
 
-- `tools/` — **all** TypeScript tooling: dispatchers, agent utilities, session/state, GitHub App auth, skill meta-tooling. The only executable surface.
+- `tools/` — **all** TypeScript tooling: dispatchers, agent utilities, session/state, GitHub transport, skill meta-tooling. The only executable surface.
 - `skill/` — all skills (`skill/*/SKILL.md`, **27** skills: 24 `stark-*` plus `simple-gate`, `team-leader-agent`, `team-minion-agent`), packaged as marketplace plugins
 - `global/` — global config + prompts, vendored into each plugin
 - `scripts/` — shell helpers + JSON only (`healer_patterns.json`). **No Python lives here any more.**
@@ -109,23 +108,12 @@ Canonical `skill/` and shared assets are the Claude-authored source. Host-specif
 - Tier by blast radius: trivial → PR only · feature → spec · architectural → ADR + spec.
 - Prompts are per-agent, one version of each domain per LLM. Domain IDs are slugs from filenames (`01-architecture.md` → `architecture`). Config is JSON, prompts are markdown. Agent preambles in `agent.md`, domain prompts in `NN-domain.md`.
 
-## GitHub Apps
+## GitHub authentication
 
-Source of truth is the `APPS` map in `tools/github_app_lib.ts`. All three are the **21S** apps on org `21-Stark-AI`, each also installed on `GetEvinced`. The old `GetEvinced`-era apps (app IDs `30667xx`, pre-`_21S` keychain entries) are **retired** — minting against them 404s.
-
-**They do NOT act as `aryeh-stark`.** An installation token authors as the bot (`app/stark-claude[bot]`). Their only sanctioned use is posting review findings.
-
-| App (display name) | App ID | Install (21-Stark-AI) | Install (GetEvinced) | Keychain |
-|---|---|---|---|---|
-| stark-claude (Stark Claude 21S) | 4094779 | 141330560 | 141330785 | `STARK_CLAUDE_PRIVATE_KEY_21S` |
-| stark-codex (Stark Codex 21S) | 4094776 | 141330526 | 141330738 | `STARK_CODEX_PRIVATE_KEY_21S` |
-| stark-gemini (Stark Gemini 21S) | 4094781 | 141330618 | 141330831 | `STARK_GEMINI_PRIVATE_KEY_21S` |
-
-The Keychain stores **base64-of-PEM** (`github_app_lib` decodes it). For CI secrets, set the **decoded** PEM:
-
-```
-security find-generic-password -s STARK_CLAUDE_PRIVATE_KEY_21S -w | base64 -D | gh secret set STARK_CLAUDE_PRIVATE_KEY --repo 21-Stark-AI/stark-skills
-```
+Local tools use the operator's existing `gh` login as `aryeh-stark`.
+Reviews use `COMMENT` events and identify models in their text.
+No review App keys, token minting, or Keychain checks are required.
+The separate `stark-meridian-ci` App serves GitHub Actions only.
 
 ## Where to go deeper
 
