@@ -47,8 +47,10 @@ export async function checkLeadershipTransfer(previousLeader: string, currentLea
   if (previousLeader === currentLeader) return;
   const peers = await discover(call);
   if (peers.incomplete) throw new Error("Hermod discovery incomplete; cannot transfer leadership");
-  const previous = peers.peers.find(p => (p.threadId || p.sessionId) === previousLeader);
-  if (previous?.liveness === "live") throw new Error("previous leader is still live; interrupt it before transferring leadership");
+  // --all includes stale records; any live record for the session blocks transfer.
+  if (peers.peers.some(p => (p.threadId || p.sessionId) === previousLeader && p.liveness === "live")) {
+    throw new Error("previous leader is still live; interrupt it before transferring leadership");
+  }
 }
 export async function canonicalRepository(repo: string, call: Command = command): Promise<string> {
   const origin = normalizeRepoUrl(await checked(call, ["git", "remote", "get-url", "origin"], repo));
@@ -86,7 +88,8 @@ export async function observeWorkers(run: Run, call: Command = command): Promise
   const groups = new Map<Provider | undefined, Assignment[]>();
   for (const task of run.tasks) {
     const provider = discoveryProvider(task.spec.provider, task.worker?.id);
-    groups.set(provider, [...(groups.get(provider) ?? []), task]);
+    if (!groups.has(provider)) groups.set(provider, []);
+    groups.get(provider)!.push(task);
   }
   const [views, saved] = await Promise.all([
     Promise.all([...groups].map(async ([provider, tasks]) => ({ tasks, peers: await discover(call, provider) }))),

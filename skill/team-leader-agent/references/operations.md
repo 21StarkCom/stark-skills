@@ -131,6 +131,13 @@ Treat the reviewer's applied fixes as part of that completed review.
 Inspect the resulting diff, validate the fixes, and record the final head.
 Repeat review only for substantive changes outside the reviewed fixes.
 A changed commit hash alone does not require another review round.
+`verify` still requires a posted review whose commit is the merged PR head.
+After fix commits or a rebase, repost the review record on the new head.
+Prepare all merge-generated changes before that final review record.
+`idun gh pr-merge` can add a changelog commit while merging.
+For Gru integration, use a merge path that preserves the reviewed head,
+such as `gh pr merge --squash --match-head-commit <reviewed-head>` after
+the repository's checks pass. Do not relax the verifier's exact-head rule.
 
 Reserve integration using the freshly observed base commit.
 Rebase, regenerate, reconcile shared counts, rebuild, and retest.

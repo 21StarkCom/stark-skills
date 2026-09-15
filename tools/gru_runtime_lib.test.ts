@@ -69,6 +69,18 @@ test("opaque recorded identities keep the complete discovery namespace", async (
   assert.ok(calls.some(argv => argv[1] === "msg" && !argv.includes("--agent")));
 });
 
+test("non-native attachment selectors never narrow the discovery namespace", async () => {
+  for (const id of ["acp:session", "claude:session", "CODEX:session"]) {
+    const calls: string[][] = [];
+    const view = await discoverWorker({ provider: "codex", id }, async argv => {
+      calls.push(argv);
+      return response({ peers: [], observedAt: new Date().toISOString(), incomplete: true });
+    });
+    assert.equal(view.incomplete, true);
+    assert.ok(!calls[0].includes("--agent"), id);
+  }
+});
+
 test("interruption requires a complete observation of the actual worker provider", async () => {
   const task = assignment(); task.phase = "stopping";
   const actions: string[][] = [];
@@ -94,6 +106,11 @@ test("same-session resume retains ownership while leadership transfers require f
     assert.ok(!argv.includes("--agent"));
     return response({ peers: [{ ...peer(), threadId: "leader" }], observedAt: new Date().toISOString(), incomplete: false });
   }), /previous leader is still live/);
+  // A stale record listed first must not mask a live record for the same leader.
+  await assert.rejects(checkLeadershipTransfer("leader", "next", async () => response({
+    peers: [{ ...peer(), id: "acp:stale", threadId: "leader", liveness: "stale" }, { ...peer(), threadId: "leader" }],
+    observedAt: new Date().toISOString(), incomplete: false,
+  })), /previous leader is still live/);
 });
 
 test("Hermod discovery omissions and stale hooks never prove death", () => {
