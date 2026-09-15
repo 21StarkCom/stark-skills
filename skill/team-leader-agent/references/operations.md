@@ -94,15 +94,23 @@ Liveness evidence expires after one minute; reconcile before lifecycle changes.
 Read the installed `hermod ticket --help` before launch.
 Use its supported provider and complete-brief launch path.
 Record returned surface, workspace, worktree, provider, and session identities.
-Compare them against `hermod msg peers --all --json`.
+Compare them against Hermod's matching native provider view:
+`hermod msg peers --all --agent codex --json` for Codex,
+or `--agent claude` for Claude.
 Attach the exact peer, not a title or numbered surface reference.
 
-During STARK-4919 development, installed Hermod still rejects Codex ticket launch.
-STARK-4911 owns that dependency.
-Complete custom briefing must also work before autonomous dispatch.
+Native Codex startup and complete file-backed briefing have been exercised
+with Hermod v0.17.0 (STARK-4911). Full Gru acceptance remains incomplete.
+Verify the installed capabilities and actual runtime before dispatch.
 Do not launch an unrestricted prompt and patch it afterward.
 Do not substitute providers or invent unsupported CLI flags.
-Recheck actual capabilities after the dependency lands.
+
+An unavailable provider does not invalidate another native provider's evidence.
+Gru scopes native attachment and lifecycle observations to that worker's provider.
+Mixed-provider runs retain uncertainty for each unavailable provider.
+Opaque recorded identities still require the complete discovery namespace.
+Same-session resume retains its existing ownership; transferring leadership
+still requires complete discovery and a previous leader that is not live.
 
 Messages carry engagement, task, token, kind, and body.
 The worker's `ack` body quotes the exact done-when.
@@ -119,6 +127,17 @@ Confirm every finding has been fixed or answered.
 An unrelated human review does not prove that command ran.
 The verifier checks the posted review's head, not its provenance.
 Gru must verify the review tool's actual invocation separately.
+Treat the reviewer's applied fixes as part of that completed review.
+Inspect the resulting diff, validate the fixes, and record the final head.
+Repeat review only for substantive changes outside the reviewed fixes.
+A changed commit hash alone does not require another review round.
+`verify` still requires a posted review whose commit is the merged PR head.
+After fix commits or a rebase, repost the review record on the new head.
+Prepare all merge-generated changes before that final review record.
+`idun gh pr-merge` can add a changelog commit while merging.
+For Gru integration, use a merge path that preserves the reviewed head,
+such as `gh pr merge --squash --match-head-commit <reviewed-head>` after
+the repository's checks pass. Do not relax the verifier's exact-head rule.
 
 Reserve integration using the freshly observed base commit.
 Rebase, regenerate, reconcile shared counts, rebuild, and retest.

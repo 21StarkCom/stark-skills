@@ -92,7 +92,11 @@ Then follow the autonomous loop below.
 9. Reconcile, verify, update tickets, and repeat while work remains.
 
 Continue until the objective is verified, stopped, or needs operator input.
-When awaiting a worker, poll its specific live identity.
+When awaiting a worker, reconcile its specific live identity.
+When waiting solely for queued reports, report the awaited workers and end your turn.
+Hermod can then deliver queued inputs and resume coordination.
+A silent or dead worker queues nothing; name the run id for `status` or `resume`.
+Do not keep a turn open by repeatedly polling undelivered reports.
 Silence alone never justifies another launch.
 Provide concise progress without waiting for the operator to ask.
 

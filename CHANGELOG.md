@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.11.1] - 2026-09-15
+
+### Fixed
+- Scope Gru's native worker discovery to its provider, preserving uncertainty for unavailable providers and full discovery for leadership transfers and opaque identities. Same-session resume retains existing ownership.
+- Have native Codex leaders and workers yield while awaiting queued messages. Validate reviewer-applied fixes without starting automatic review loops.
+
 ## [v0.11.0] - 2026-09-15
 
 ### Fixed

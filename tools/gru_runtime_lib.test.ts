@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { canonicalRepository, observations, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observations, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
 import type { Assignment, Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
@@ -19,6 +19,99 @@ const run = (): Run => ({ schema: 1, config: { id: "run", objective: "Objective"
   maxAttempts: 2, maxRecoveries: 1, limits: ["No new tickets"], tasks: [assignment().spec] },
   revision: 1, epoch: 1, mode: "running", reconciled: true, received: [], tasks: [assignment()], events: [] });
 const response = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
+
+test("native worker discovery does not depend on an unrelated provider outage", async () => {
+  const calls: string[][] = [];
+  const call: Command = async argv => {
+    calls.push(argv);
+    return response({ peers: [peer()], observedAt: new Date().toISOString(), incomplete: !argv.includes("--agent") });
+  };
+  const view = await discoverWorker(assignment().worker!, call);
+  assert.equal(view.incomplete, false);
+  assert.equal(workerFromPeer(view.peers[0]).session, "session");
+  assert.deepEqual(calls[0], ["hermod", "msg", "peers", "--all", "--agent", "codex", "--json"]);
+  await assert.rejects(discoverWorker(assignment().worker!, async () => response({
+    peers: [{ ...peer(), agent: "claude" }], observedAt: new Date().toISOString(), incomplete: false,
+  })), /provider mismatch/);
+});
+
+test("mixed-provider observations retain uncertainty only for the unavailable provider", async () => {
+  const r = run();
+  const other = assignment();
+  other.spec = { ...other.spec, id: "other", provider: "claude", worktree: "/other" };
+  const otherPeer = { ...peer(), id: "claude:other", agent: "claude", threadId: undefined, sessionId: "other", cwd: "/other" };
+  other.worker = workerFromPeer(otherPeer);
+  r.tasks.push(other);
+  const call: Command = async argv => {
+    if (argv[1] === "sessions") return response({ sessions: [
+      { sessionId: "other", agent: "claude", surfaceId: "surface", pid: 42, alive: false },
+    ], totalMatches: 1 });
+    const provider = argv[argv.indexOf("--agent") + 1];
+    return response({ peers: provider === "codex" ? [peer()] : [],
+      observedAt: new Date().toISOString(), incomplete: provider !== "codex" });
+  };
+  const result = await observeWorkers(r, call);
+  assert.equal(result.task.liveness, "live");
+  assert.equal(result.other.liveness, "unknown");
+  assert.deepEqual(result.other.evidence, []);
+});
+
+test("opaque recorded identities keep the complete discovery namespace", async () => {
+  const r = run();
+  r.tasks[0].worker!.id = "acp:owned-session";
+  const calls: string[][] = [];
+  const result = await observeWorkers(r, async argv => {
+    calls.push(argv);
+    return response(argv[1] === "sessions" ? { sessions: [], totalMatches: 0 }
+      : { peers: [{ ...peer(), id: "acp:owned-session" }], observedAt: new Date().toISOString(), incomplete: false });
+  });
+  assert.equal(result.task.liveness, "live");
+  assert.ok(calls.some(argv => argv[1] === "msg" && !argv.includes("--agent")));
+});
+
+test("non-native attachment selectors never narrow the discovery namespace", async () => {
+  for (const id of ["acp:session", "claude:session", "CODEX:session"]) {
+    const calls: string[][] = [];
+    const view = await discoverWorker({ provider: "codex", id }, async argv => {
+      calls.push(argv);
+      return response({ peers: [], observedAt: new Date().toISOString(), incomplete: true });
+    });
+    assert.equal(view.incomplete, true);
+    assert.ok(!calls[0].includes("--agent"), id);
+  }
+});
+
+test("interruption requires a complete observation of the actual worker provider", async () => {
+  const task = assignment(); task.phase = "stopping";
+  const actions: string[][] = [];
+  let incomplete = false;
+  const call: Command = async argv => {
+    actions.push(argv);
+    return response({ peers: [peer()], observedAt: new Date().toISOString(), incomplete: incomplete || !argv.includes("--agent") });
+  };
+  await interruptWorker(task, call);
+  assert.deepEqual(actions.at(-1), ["hermod", "send-key", "surface", "escape"]);
+  actions.length = 0;
+  incomplete = true;
+  await assert.rejects(interruptWorker(task, call), /incomplete/);
+  assert.equal(actions.length, 1);
+});
+
+test("same-session resume retains ownership while leadership transfers require full discovery", async () => {
+  await checkLeadershipTransfer("leader", "leader", async () => { throw new Error("unrelated discovery unavailable"); });
+  await assert.rejects(checkLeadershipTransfer("leader", "next", async () => response({
+    peers: [], observedAt: new Date().toISOString(), incomplete: true,
+  })), /incomplete/);
+  await assert.rejects(checkLeadershipTransfer("leader", "next", async argv => {
+    assert.ok(!argv.includes("--agent"));
+    return response({ peers: [{ ...peer(), threadId: "leader" }], observedAt: new Date().toISOString(), incomplete: false });
+  }), /previous leader is still live/);
+  // A stale record listed first must not mask a live record for the same leader.
+  await assert.rejects(checkLeadershipTransfer("leader", "next", async () => response({
+    peers: [{ ...peer(), id: "acp:stale", threadId: "leader", liveness: "stale" }, { ...peer(), threadId: "leader" }],
+    observedAt: new Date().toISOString(), incomplete: false,
+  })), /previous leader is still live/);
+});
 
 test("Hermod discovery omissions and stale hooks never prove death", () => {
   const d = { peers: [peer()], observedAt: new Date().toISOString(), incomplete: false };

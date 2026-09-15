@@ -72,6 +72,9 @@ Run the repository's required checks and behavioral verification.
 Run the required `/code-review xhigh --fix` gate.
 Post every finding through the repository-approved review path.
 Fix findings or answer their threads with concrete reasons.
+Inspect and validate the reviewer's applied fixes, then record the final head.
+Repeat review only for substantive changes outside those reviewed fixes.
+Gru requires a posted review on the merged head; repost it after any new head.
 Use the repository's mandated GitHub identity for PR actions.
 
 Send `ready` with the PR, head SHA, review receipt,
