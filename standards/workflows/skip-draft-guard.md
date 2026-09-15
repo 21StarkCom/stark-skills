@@ -52,8 +52,9 @@ runs on the current head. Marking ready is the single CI-triggering moment.
 
 - **`push`-triggered workflows** (e.g. deploy-on-merge, `marketplace-sync`) — a
   merge to the default branch is never "draft", so leave them alone. A workflow
-  that itself *opens* a downstream PR which must run its own CI and auto-merge
-  (again `marketplace-sync`) should open that PR **ready**, not draft.
+  that itself *opens* a downstream PR still follows the review gate.
+  `marketplace-sync` opens a draft, waits for a completed review on that head,
+  then marks it ready and waits for CI before merging that exact head.
 - **Merge gates that read PR status** — a draft never reaches "Ready to Merge",
   so a status-driven gate is already a no-op on drafts; the guard is just
   belt-and-suspenders (and, for `check_run`-triggered gates, must use `!= true`).

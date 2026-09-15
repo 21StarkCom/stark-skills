@@ -97,7 +97,7 @@ codex plugin add stark-plan@bifrost
 /plugin update  stark-analyze@bifrost
 ```
 
-Canonical `skill/` and shared assets are the Claude-authored source. Host-specific Codex behavior belongs **only** under `runtime-overrides/codex/`. `.github/workflows/marketplace-sync.yml` auto-publishes changes to either source surface.
+Canonical `skill/` and shared assets are the Claude-authored source. Host-specific Codex behavior belongs **only** under `runtime-overrides/codex/`. `.github/workflows/marketplace-sync.yml` prepares versioned release notes and opens a draft Bifrost sync PR. It waits up to 20 minutes for `aryeh-stark`'s completed review attestation on the exact head, then runs the ready/CI/merge chain. CI alone never authorizes publication. See the [review attestation contract](skill/team-leader-agent/references/operations.md#verification-and-integration). Every changed runtime advances Bifrost's root release version, including Claude-only changes.
 
 **Local dev is not live.** Editing a file here does nothing until it is published (merge to `main` → `marketplace-sync` PR → merge) and the plugin is updated. To test an in-progress edit against a real install, run `stark sync` in the marketplace repo, then `/plugin update` locally.
 

@@ -127,6 +127,13 @@ Inspect tests, review, findings, and PR state before integration.
 The required review is `/code-review xhigh --fix`.
 Keep its actual command/output receipt and posted review identifier.
 Confirm every finding has been fixed or answered.
+For Bifrost's automated sync PRs, the final `aryeh-stark` review body starts
+with `<!-- stark-code-review:complete -->` on its own first line and names
+the actual `/code-review xhigh --fix` invocation. Add this attestation only
+after the command completes and every finding is fixed or answered.
+The publisher checks the latest submitted operator review on the exact head,
+waits for CI, then rechecks the attestation before merging that head.
+The marker is an operator attestation; it does not replace command receipts.
 An unrelated human review does not prove that command ran.
 The verifier checks the posted review's head, not its provenance.
 Gru must verify the review tool's actual invocation separately.
