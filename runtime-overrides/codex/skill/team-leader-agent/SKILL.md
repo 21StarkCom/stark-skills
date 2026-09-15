@@ -93,6 +93,9 @@ Then follow the autonomous loop below.
 
 Continue until the objective is verified, stopped, or needs operator input.
 When awaiting a worker, poll its specific live identity.
+When waiting solely for queued reports, save status and end your turn.
+Hermod can then deliver queued inputs and resume coordination.
+Do not keep a turn open by repeatedly polling undelivered reports.
 Silence alone never justifies another launch.
 Provide concise progress without waiting for the operator to ask.
 

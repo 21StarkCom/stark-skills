@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { GruStore, readyReason } from "./gru_lib.ts";
-import { canonicalRepository, discover, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -100,7 +100,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       case "reconcile": emit(store.reconcile(id, identity, revision, await observeWorkers(run))); break;
       case "reserve": emit(store.reserve(id, identity, revision, flag("task"))); break;
       case "attach": {
-        const peers = await discover();
+        const peers = await discoverWorker({ provider: task().spec.provider, id: flag("peer") });
         if (peers.incomplete) throw new Error("Hermod discovery incomplete; preserve launch reservation");
         const peer = peers.peers.find(p => p.id === flag("peer"));
         if (!peer) throw new Error("Hermod peer missing; preserve launch reservation");
@@ -111,10 +111,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         emit(store.report(id, identity, revision, report.task, report.token, report.session, report.kind, report.message, flag("message"))); break;
       }
       case "resume": {
-        const peers = await discover();
-        if (peers.incomplete) throw new Error("Hermod discovery incomplete; cannot transfer leadership");
-        const previous = peers.peers.find(p => (p.threadId || p.sessionId) === run.config.leader);
-        if (identity !== run.config.leader && previous?.liveness === "live") throw new Error("previous leader is still live; interrupt it before transferring leadership");
+        await checkLeadershipTransfer(run.config.leader, identity);
         emit(store.resume(id, run.config.leader, revision, identity)); break;
       }
       case "recover": emit(store.recover(id, identity, revision, flag("task"), flag("token"))); break;

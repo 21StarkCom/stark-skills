@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
 import { canonicalWorktree } from "./gru_lib.ts";
-import type { Assignment, CompletionEvidence, Observation, Run, Worker } from "./gru_lib.ts";
+import type { Assignment, CompletionEvidence, Observation, Provider, Run, Worker } from "./gru_lib.ts";
 
 export interface CommandResult { code: number; stdout: string; stderr: string }
 export type Command = (argv: string[], cwd?: string) => Promise<CommandResult>;
@@ -28,10 +28,27 @@ export interface HermodPeer {
 }
 export interface Discovery { peers: HermodPeer[]; observedAt: string; incomplete?: boolean }
 export interface SavedSession { sessionId: string; agent: string; surfaceId?: string; pid?: number; alive?: boolean }
-export async function discover(call: Command = command): Promise<Discovery> {
-  const value = JSON.parse(await checked(call, ["hermod", "msg", "peers", "--all", "--json"]));
+export async function discover(call: Command = command, provider?: Provider): Promise<Discovery> {
+  const value = JSON.parse(await checked(call, ["hermod", "msg", "peers", "--all", ...(provider ? ["--agent", provider] : []), "--json"]));
   if (!Array.isArray(value.peers) || !value.observedAt || typeof value.incomplete !== "boolean") throw new Error("Hermod discovery contract unavailable");
+  if (provider && value.peers.some((peer: HermodPeer) => peer.agent !== provider)) throw new Error("Hermod discovery provider mismatch");
   return value;
+}
+function discoveryProvider(provider: Provider, peerId?: string): Provider | undefined {
+  // Hermod's --agent view contains native peers only. Preserve the full namespace
+  // for any recorded opaque/ACP identity instead of mistaking exclusion for death.
+  return peerId === undefined || peerId.startsWith(`${provider}:`) ? provider : undefined;
+}
+export async function discoverWorker(worker: Pick<Worker, "provider" | "id">, call: Command = command): Promise<Discovery> {
+  return discover(call, discoveryProvider(worker.provider, worker.id));
+}
+export async function checkLeadershipTransfer(previousLeader: string, currentLeader: string, call: Command = command): Promise<void> {
+  // The same session retains its durable ownership; no other leader is displaced.
+  if (previousLeader === currentLeader) return;
+  const peers = await discover(call);
+  if (peers.incomplete) throw new Error("Hermod discovery incomplete; cannot transfer leadership");
+  const previous = peers.peers.find(p => (p.threadId || p.sessionId) === previousLeader);
+  if (previous?.liveness === "live") throw new Error("previous leader is still live; interrupt it before transferring leadership");
 }
 export async function canonicalRepository(repo: string, call: Command = command): Promise<string> {
   const origin = normalizeRepoUrl(await checked(call, ["git", "remote", "get-url", "origin"], repo));
@@ -66,14 +83,22 @@ export function observations(run: Run, discovery: Discovery, sessions: SavedSess
   }));
 }
 export async function observeWorkers(run: Run, call: Command = command): Promise<Record<string, Observation>> {
-  const [peers, saved] = await Promise.all([discover(call), checked(call, ["hermod", "sessions", "--all", "--json"])]);
+  const groups = new Map<Provider | undefined, Assignment[]>();
+  for (const task of run.tasks) {
+    const provider = discoveryProvider(task.spec.provider, task.worker?.id);
+    groups.set(provider, [...(groups.get(provider) ?? []), task]);
+  }
+  const [views, saved] = await Promise.all([
+    Promise.all([...groups].map(async ([provider, tasks]) => ({ tasks, peers: await discover(call, provider) }))),
+    checked(call, ["hermod", "sessions", "--all", "--json"]),
+  ]);
   const sessions = JSON.parse(saved);
   if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
-  return observations(run, peers, sessions.sessions);
+  return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions.sessions)));
 }
 export async function interruptWorker(task: Assignment, call: Command = command): Promise<void> {
   if (task.phase !== "stopping" || !task.worker) throw new Error("stop and identify the worker before interrupting it");
-  const peers = await discover(call);
+  const peers = await discoverWorker(task.worker, call);
   const peer = peers.peers.find(p => p.id === task.worker!.id);
   if (peers.incomplete || !peer) throw new Error("worker observation incomplete; interruption withheld");
   const actual = workerFromPeer(peer);
@@ -83,7 +108,7 @@ export async function interruptWorker(task: Assignment, call: Command = command)
 }
 export async function retireWorker(task: Assignment, call: Command = command): Promise<void> {
   if (task.phase !== "done" || !task.worker) throw new Error("only verified completed workers can be retired");
-  const peers = await discover(call);
+  const peers = await discoverWorker(task.worker, call);
   const peer = peers.peers.find(p => p.id === task.worker!.id);
   if (peers.incomplete || !peer) throw new Error("worker observation incomplete; reconcile before retiring");
   const actual = workerFromPeer(peer);
