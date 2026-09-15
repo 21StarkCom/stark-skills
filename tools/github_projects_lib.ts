@@ -13,23 +13,32 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 
-/** Send one GraphQL request through gh, preserving variables and error details. */
+/** Transport failures worth one retry; a GraphQL error payload is never retried. */
+const TRANSIENT_TRANSPORT = /ECONNRESET|ENOTFOUND|ETIMEDOUT|connection reset|dial tcp|i\/o timeout|TLS handshake timeout/i;
+
+/** Send one GraphQL request through gh, preserving variables and error details.
+ *  Retries once on a transient transport error so a multi-mutation caller
+ *  (setFields, transitionStatus) does not half-apply on a single reset. */
 export async function graphql(
   query: string,
   opts: { variables?: Record<string, unknown> } = {},
 ): Promise<unknown> {
-  const result = spawnSync("gh", ["api", "graphql", "--input", "-"], {
-    input: JSON.stringify({ query, variables: opts.variables ?? {} }),
-    encoding: "utf8",
-    timeout: 60_000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  if (result.error || result.status !== 0) {
-    throw new Error(`gh api graphql failed: ${result.error?.message ?? result.stderr}`);
+  let result: SpawnSyncReturns<string> | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    result = spawnSync("gh", ["api", "graphql", "--input", "-"], {
+      input: JSON.stringify({ query, variables: opts.variables ?? {} }),
+      encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const failure = result.error?.message ?? (result.status !== 0 ? result.stderr : "");
+    if (!failure) break;
+    if (attempt === 0 && TRANSIENT_TRANSPORT.test(failure)) continue;
+    throw new Error(`gh api graphql failed: ${failure}`);
   }
-  const data = JSON.parse(result.stdout) as { errors?: Array<{ message?: string }> };
+  const data = JSON.parse(result!.stdout) as { errors?: Array<{ message?: string }> };
   if (data.errors?.length) {
     throw new Error(`GraphQL errors: ${data.errors.map((e) => e.message ?? JSON.stringify(e)).join("; ")}`);
   }

@@ -22,7 +22,7 @@
  *   --trust-source       REQUIRED before installed scanners/provider tools may
  *                        inspect or evaluate source; otherwise use --no-tools
  *   --min-severity S     drop findings below S (critical|high|medium|low)
- *   --pr N --repo O/R    post findings to PR N (authored by the first agent's App)
+ *   --pr N --repo O/R    post findings to PR N (through the operator's gh login)
  *   --timeout SEC        per-agent timeout (default from config)
  *   --dry-run            preview resolved agents + selected files; run no
  *                        scanners and dispatch nothing (no consent flags needed)

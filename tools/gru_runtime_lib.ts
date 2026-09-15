@@ -7,13 +7,17 @@ import { normalizeRepoUrl } from "./session_state_lib.ts";
 import { canonicalWorktree } from "./gru_lib.ts";
 import type { Assignment, CompletionEvidence, Observation, Provider, Run, Worker } from "./gru_lib.ts";
 
-export interface CommandResult { code: number; stdout: string; stderr: string }
-export type Command = (argv: string[], cwd?: string) => Promise<CommandResult>;
-export const command: Command = async (argv, cwd) => {
+export interface CommandResult { code: number; stdout: string; stderr: string; timedOut?: boolean }
+export type Command = (argv: string[], cwd?: string, timeoutMs?: number) => Promise<CommandResult>;
+/** Host commands (git, gh, hermod, alfred) get five minutes; a declared check gets DEFAULT_CHECK_TIMEOUT_MS. */
+export const DEFAULT_COMMAND_TIMEOUT_MS = 300_000;
+export const DEFAULT_CHECK_TIMEOUT_MS = 1_800_000;
+const hostEnv = (): Record<string, string> =>
+  Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+export const command: Command = async (argv, cwd, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) => {
   const result = await realRunner({ seat: "codex", cmd: argv[0], args: argv.slice(1),
-    cwd: cwd ?? process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
-    stdin: "", timeoutMs: 300_000 });
-  return { code: result.timedOut ? 124 : result.code ?? 1, stdout: result.stdout, stderr: result.stderr };
+    cwd: cwd ?? process.cwd(), env: hostEnv(), stdin: "", timeoutMs });
+  return { code: result.timedOut ? 124 : result.code ?? 1, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut };
 };
 async function checked(call: Command, argv: string[], cwd?: string): Promise<string> {
   const result = await call(argv, cwd);
@@ -28,6 +32,8 @@ export interface HermodPeer {
 }
 export interface Discovery { peers: HermodPeer[]; observedAt: string; incomplete?: boolean }
 export interface SavedSession { sessionId: string; agent: string; surfaceId?: string; pid?: number; alive?: boolean }
+/** `provider` scopes Hermod's `incomplete` flag to that runtime's namespace; unscoped, one
+ *  uninspectable process of any provider anywhere on the host taints the whole fleet. */
 export async function discover(call: Command = command, provider?: Provider): Promise<Discovery> {
   const value = JSON.parse(await checked(call, ["hermod", "msg", "peers", "--all", ...(provider ? ["--agent", provider] : []), "--json"]));
   if (!Array.isArray(value.peers) || !value.observedAt || typeof value.incomplete !== "boolean") throw new Error("Hermod discovery contract unavailable");
@@ -52,10 +58,15 @@ export async function checkLeadershipTransfer(previousLeader: string, currentLea
     throw new Error("previous leader is still live; interrupt it before transferring leadership");
   }
 }
-export async function canonicalRepository(repo: string, call: Command = command): Promise<string> {
-  const origin = normalizeRepoUrl(await checked(call, ["git", "remote", "get-url", "origin"], repo));
+/** `owner/repo` from the checkout's origin, case preserved as GitHub reports it. */
+async function originRepository(repoDir: string, call: Command): Promise<string> {
+  const origin = normalizeRepoUrl(await checked(call, ["git", "remote", "get-url", "origin"], repoDir));
   if (!/^[\w.-]+\/[\w.-]+$/.test(origin)) throw new Error("Gru requires a GitHub repository origin");
-  return origin.toLowerCase();
+  return origin;
+}
+/** Lower-cased ownership key: GitHub owner/repo names are case-insensitive. */
+export async function canonicalRepository(repo: string, call: Command = command): Promise<string> {
+  return (await originRepository(repo, call)).toLowerCase();
 }
 export function workerFromPeer(peer: HermodPeer): Worker {
   if (!peer.id || !peer.surfaceId || !peer.workspaceId || !peer.cwd || !(peer.threadId || peer.sessionId)
@@ -65,23 +76,40 @@ export function workerFromPeer(peer: HermodPeer): Worker {
   return { id: peer.id, session: (peer.threadId || peer.sessionId)!, surface: peer.surfaceId,
     workspace: peer.workspaceId, worktree: peer.cwd, provider: peer.agent as Worker["provider"], ...(peer.pid ? { pid: peer.pid } : {}) };
 }
-export function observations(run: Run, discovery: Discovery, sessions: SavedSession[] = []): Record<string, Observation> {
+/** One fleet-wide discovery, or one per provider namespace (what observeWorkers collects). */
+export type Discoveries = Discovery | Partial<Record<Provider, Discovery>>;
+const discoveryFor = (discoveries: Discoveries, provider: Provider): Discovery | undefined =>
+  "peers" in discoveries ? discoveries as Discovery : discoveries[provider];
+export function observations(run: Run, discoveries: Discoveries, sessions: SavedSession[] = []): Record<string, Observation> {
   return Object.fromEntries(run.tasks.map(task => {
+    const discovery = discoveryFor(discoveries, task.spec.provider);
+    if (!discovery) throw new Error(`no Hermod discovery for provider ${task.spec.provider}`);
     const peer = task.worker && discovery.peers.find(p => p.id === task.worker!.id &&
       (p.threadId || p.sessionId) === task.worker!.session && p.agent === task.spec.provider);
-    // "stale" is not proof of death. Absence from discovery is not proof either.
-    // Normalize the worktree the same way attach() did: a benign
+    // A verified live peer is positive evidence even when Hermod could not inspect every
+    // process in the namespace; only the death inference below needs a complete view.
+    // Normalize the worktree the same way attach() did (path.resolve): a benign
     // path-representation drift from Hermod must not demote a live worker to "unknown".
-    const live = !discovery.incomplete && peer?.liveness === "live" &&
+    const live = peer?.liveness === "live" &&
       peer.surfaceId === task.worker?.surface && typeof peer.cwd === "string" &&
       canonicalWorktree(peer.cwd) === canonicalWorktree(task.worker!.worktree);
     const saved = sessions.filter(s => s.sessionId === task.worker?.session && s.agent === task.spec.provider);
-    const dead = !!task.worker && !discovery.incomplete && !live && !peer && saved.length === 1 && saved[0].alive === false &&
-      saved[0].surfaceId === task.worker?.surface && Number.isSafeInteger(saved[0].pid);
+    // Hermod keeps a "stale" hook-record peer for a session it has watched die; that is the
+    // same record `hermod sessions` reports as alive=false, not a sign of life. Absence from
+    // an incomplete discovery is still not proof of anything.
+    const stale = peer?.liveness === "stale";
+    const gone = !peer || (stale && peer.pid === saved[0]?.pid);
+    // Termination evidence: a probed pid reported alive=false, or a record Hermod has already
+    // stripped of its pid ("absent once the process is gone") alongside that session's stale peer.
+    const terminated = saved.length === 1 && saved[0].surfaceId === task.worker?.surface &&
+      (saved[0].alive === false ? Number.isSafeInteger(saved[0].pid) : stale && saved[0].pid === undefined && saved[0].alive === undefined);
+    const dead = !!task.worker && !discovery.incomplete && !live && gone && terminated;
     return [task.spec.id, { observedAt: discovery.observedAt, liveness: live ? "live" : dead ? "dead" : "unknown",
       activity: live && ["busy", "idle"].includes(peer!.activity) ? peer!.activity : "unknown",
       ...(live && peer!.pid ? { pid: peer!.pid } : {}),
-      evidence: live ? peer!.evidence : dead ? [`Hermod session ${saved[0].sessionId}: pid ${saved[0].pid} alive=false`] : [] } as Observation];
+      evidence: live ? peer!.evidence : dead ? [saved[0].pid === undefined
+        ? `Hermod session ${saved[0].sessionId}: process gone (no pid), peer stale`
+        : `Hermod session ${saved[0].sessionId}: pid ${saved[0].pid} alive=false`] : [] } as Observation];
   }));
 }
 export async function observeWorkers(run: Run, call: Command = command): Promise<Record<string, Observation>> {
@@ -97,28 +125,32 @@ export async function observeWorkers(run: Run, call: Command = command): Promise
   ]);
   const sessions = JSON.parse(saved);
   if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
-  return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions.sessions)));
-}
-export async function interruptWorker(task: Assignment, call: Command = command): Promise<void> {
-  if (task.phase !== "stopping" || !task.worker) throw new Error("stop and identify the worker before interrupting it");
+  return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions.sessions)));}
+/** Find the recorded worker's current Hermod peer and refuse if its identity moved. */
+async function locateWorker(task: Assignment, call: Command, action: string): Promise<{ peer: HermodPeer; actual: Worker }> {
+  if (!task.worker) throw new Error(`identify the worker before ${action}`);
   const peers = await discoverWorker(task.worker, call);
   const peer = peers.peers.find(p => p.id === task.worker!.id);
-  if (peers.incomplete || !peer) throw new Error("worker observation incomplete; interruption withheld");
+  // A peer inside an incomplete namespace view is not a verified identity; withhold lifecycle actions.
+  if (peers.incomplete) throw new Error(`worker observation incomplete; ${action} withheld`);
+  if (!peer) throw new Error(`worker missing from Hermod; reconcile before ${action}`);
   const actual = workerFromPeer(peer);
-  if (actual.session !== task.worker.session || actual.surface !== task.worker.surface || actual.provider !== task.worker.provider) throw new Error("worker identity changed; reconcile before interrupting");
+  if (actual.session !== task.worker.session || actual.surface !== task.worker.surface || actual.provider !== task.worker.provider ||
+      canonicalWorktree(actual.worktree) !== canonicalWorktree(task.worker.worktree) || actual.workspace !== task.worker.workspace) {
+    throw new Error(`worker identity changed; reconcile before ${action}`);
+  }
+  return { peer, actual };
+}
+export async function interruptWorker(task: Assignment, call: Command = command): Promise<void> {
+  if (task.phase !== "stopping") throw new Error("stop the engagement before interrupting a worker");
+  const { peer, actual } = await locateWorker(task, call, "interruption");
   if (peer.activity === "busy") await checked(call, ["hermod", "send-key", actual.surface, "escape"]);
   else if (peer.activity !== "idle") throw new Error("worker activity unknown; interruption withheld");
 }
 export async function retireWorker(task: Assignment, call: Command = command): Promise<void> {
-  if (task.phase !== "done" || !task.worker) throw new Error("only verified completed workers can be retired");
-  const peers = await discoverWorker(task.worker, call);
-  const peer = peers.peers.find(p => p.id === task.worker!.id);
-  if (peers.incomplete || !peer) throw new Error("worker observation incomplete; reconcile before retiring");
-  const actual = workerFromPeer(peer);
-  if (actual.session !== task.worker.session || actual.surface !== task.worker.surface || actual.provider !== task.worker.provider ||
-      canonicalWorktree(actual.worktree) !== canonicalWorktree(task.worker.worktree) || actual.workspace !== task.worker.workspace || peer.activity !== "idle") {
-    throw new Error("completed worker must match its saved identity and be idle");
-  }
+  if (task.phase !== "done") throw new Error("only verified completed workers can be retired");
+  const { peer, actual } = await locateWorker(task, call, "retirement");
+  if (peer.activity !== "idle") throw new Error("completed worker must be idle before retirement");
   // Surface closure preserves the session worktree. close-session removes it.
   await checked(call, ["hermod", "close", actual.surface, "--workspace", actual.workspace]);
 }
@@ -133,7 +165,11 @@ export async function reconnectWorker(task: Assignment, call: Command = command)
   validateReconnect(task);
   if (!task.reconnect?.pending) throw new Error("reserve a bounded reconnect before contacting Hermod");
   const worker = task.worker!;
-  const cmd = worker.provider === "codex" ? `codex resume ${worker.session}` : `claude --resume ${worker.session}`;
+  // Pin the resumed session to its recorded worktree: Hermod's respawn carries no cwd of its
+  // own, so the pane would otherwise inherit whatever directory cmux last tracked for it.
+  const quoted = `'${worker.worktree.replace(/'/g, "'\\''")}'`;
+  const resume = worker.provider === "codex" ? `codex resume ${worker.session}` : `claude --resume ${worker.session}`;
+  const cmd = `cd -- ${quoted} && ${resume}`;
   await checked(call, ["hermod", "respawn", worker.surface, "--workspace", worker.workspace, "--command", cmd], worker.worktree);
   // Submission is deliberately not a successful reconnect verdict.
 }
@@ -167,6 +203,8 @@ export function packet(run: Run, task: Assignment): string {
     "authentication, destructive teardown, and external communication behind existing human gates.",
     "Do not create tickets or spawn workers without explicit operator authorization.",
     "Preserve active and resumable worktrees. Do not run cleanup sweeps.",
+    "STOP-LIST (halt and ask Gru first): force-push or history rewrite; deleting files; edits outside",
+    "the declared files/directories; new external dependencies; spend; production or cloud mutation.",
     "Report blockers immediately. Send meaningful progress; do not exceed 30 minutes silently.",
     "Reports are JSON: {run, task, token, kind: ack|progress|blocked|ready|complete, message}.",
     "The ack message equals the exact done-when. Completion reports remain unverified claims.",
@@ -178,8 +216,11 @@ export function packet(run: Run, task: Assignment): string {
 /** Import a message from Hermod's ledger, rather than accepting a pasted worker claim. */
 export async function receive(run: Run, messageId: string, call: Command = command) {
   if (!/^[0-9a-f-]{36}$/i.test(messageId)) throw new Error("message id must be a UUID");
-  const record = JSON.parse(await checked(call, ["hermod", "msg", "status", messageId, "--json"]));
-  if (record.state === "failed" || record.cancelled || record.expired || record.delivery !== "confirmed") {
+  // Hermod prints the record and exits 4 (failed) or 5 (uncertain): verdicts, not transport errors.
+  const status = await call(["hermod", "msg", "status", messageId, "--json"]);
+  if (![0, 4, 5].includes(status.code)) throw new Error(`hermod failed (${status.code}): ${status.stderr || status.stdout}`);
+  const record = JSON.parse(status.stdout);
+  if (status.code !== 0 || record.state === "failed" || record.cancelled || record.expired || record.delivery !== "confirmed") {
     throw new Error("worker message delivery is not confirmed");
   }
   const body = JSON.parse(record.body);
@@ -201,40 +242,39 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   if (!Number.isSafeInteger(prNumber) || prNumber < 1 || !Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
   const repoDir = task.spec.repo;
   const git = (args: string[]) => checked(call, ["git", ...args], repoDir);
-  const repo = await canonicalRepository(repoDir, call);
+  const repo = await originRepository(repoDir, call);
   const api = async (endpoint: string) => JSON.parse(await checked(call, ["gh", "api", `repos/${repo}/${endpoint}`], repoDir));
   const pr = await api(`pulls/${prNumber}`);
   if (!pr.merged || !pr.merged_at || !/^[0-9a-f]{40,64}$/.test(pr.merge_commit_sha ?? "")) throw new Error("PR is not confirmed merged");
-  if ([pr.head?.repo?.full_name, pr.base?.repo?.full_name].some(name => typeof name !== "string" || name.toLowerCase() !== repo)) throw new Error("PR repository mismatch");
+  // GitHub reports canonical case, and a deleted fork reports head.repo as null.
+  const sameRepo = (r: { full_name?: string } | null | undefined) => r?.full_name?.toLowerCase() === repo.toLowerCase();
+  if (!sameRepo(pr.head.repo) || !sameRepo(pr.base.repo)) throw new Error("PR repository mismatch");
   const review = await api(`pulls/${prNumber}/reviews/${reviewId}`);
   if (review.commit_id !== pr.head.sha || !review.submitted_at || !["COMMENTED", "APPROVED"].includes(review.state)) throw new Error("posted review does not cover the merged PR head");
   await git(["check-ref-format", `refs/heads/${pr.base.ref}`]);
-  const fetchTip = async (remoteRef: string): Promise<string> => {
-    const localRef = `refs/gru/verification/${randomUUID()}`;
-    try {
-      await git(["fetch", "--no-write-fetch-head", "origin", `${remoteRef}:${localRef}`]);
-      return await git(["rev-parse", localRef]);
-    } finally {
-      await git(["update-ref", "-d", localRef]);
-    }
-  };
-  const baseTip = await fetchTip(`refs/heads/${pr.base.ref}`);
-  await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);
-  // Squash merges do not make the reviewed head reachable from the base.
-  if (await fetchTip(`refs/pull/${prNumber}/head`) !== pr.head.sha) throw new Error("fetched PR head differs from the reviewed head");
-  await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);
-  fs.mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
-  const verifyTree = path.join(evidenceDir, `worktree-${task.token}`);
-  // Existing evidence remains untouched. A fresh directory prevents stale build products passing.
-  await git(["worktree", "add", "--detach", verifyTree, baseTip]);
+  // Private refs: FETCH_HEAD is shared with every other fetch in this checkout.
+  const refs = { base: `refs/gru/${task.token}/base`, head: `refs/gru/${task.token}/head` };
+  const cleanup: string[][] = [["update-ref", "-d", refs.base], ["update-ref", "-d", refs.head]];
+  let primary: unknown;
   try {
+    // Squash merges do not make the reviewed head reachable from the base.
+    await git(["fetch", "origin", `+refs/heads/${pr.base.ref}:${refs.base}`, `+refs/pull/${prNumber}/head:${refs.head}`]);
+    const baseTip = await git(["rev-parse", "--verify", `${refs.base}^{commit}`]);
+    if (await git(["rev-parse", "--verify", `${refs.head}^{commit}`]) !== pr.head.sha) throw new Error("fetched PR head differs from the reviewed head");
+    await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);
+    await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);
+    fs.mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
+    const verifyTree = path.join(evidenceDir, `worktree-${task.token}`);
+    // Existing evidence remains untouched. A fresh directory prevents stale build products passing.
+    await git(["worktree", "add", "--detach", verifyTree, baseTip]);
+    cleanup.unshift(["worktree", "remove", "--force", verifyTree]);
     const checks: CompletionEvidence["checks"] = [];
     for (let i = 0; i < task.spec.checks.length; i++) {
       const argv = task.spec.checks[i];
-      const result = await call(argv, verifyTree);
+      const result = await call(argv, verifyTree, task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS);
       const log = path.join(evidenceDir, `check-${task.token}-${i}.log`);
       fs.writeFileSync(log, JSON.stringify({ argv, cwd: verifyTree, head: baseTip, ...result }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-      if (result.code !== 0) throw new Error(`independent check failed; evidence: ${log}`);
+      if (result.code !== 0) throw new Error(`independent check ${result.timedOut ? "timed out" : "failed"}; evidence: ${log}`);
       checks.push({ argv, exitCode: result.code, log });
     }
     const ticket = JSON.parse(await checked(call, ["alfred", "task", "show", task.spec.ticket, "--json"], repoDir));
@@ -243,8 +283,17 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
       pr: pr.html_url, review: review.html_url, checks, verifiedAt: new Date().toISOString(), ticketState: ticket.item.state };
     fs.writeFileSync(path.join(evidenceDir, `completion-${task.token}.json`), JSON.stringify({ ...proof, verifiedMain: baseTip, prRecord: pr, reviewRecord: review }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
     return proof;
+  } catch (error) {
+    primary = error; throw error;
   } finally {
-    // Only this invocation's disposable checkout is removed; evidence remains.
-    await git(["worktree", "remove", "--force", verifyTree]);
+    // Only this invocation's disposable checkout and private refs go; evidence remains.
+    const failures: string[] = [];
+    for (const args of cleanup) {
+      const result = await call(["git", ...args], repoDir);
+      if (result.code !== 0) failures.push(`git ${args.join(" ")}: ${(result.stderr || result.stdout).trim()}`);
+    }
+    // Cleanup trouble must never replace the verification verdict already in flight.
+    if (failures.length > 0 && primary === undefined) throw new Error(`verification cleanup failed: ${failures.join("; ")}`);
+    if (failures.length > 0) process.stderr.write(`gru: verification cleanup failed after error: ${failures.join("; ")}\n`);
   }
 }

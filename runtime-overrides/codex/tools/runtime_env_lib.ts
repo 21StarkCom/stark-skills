@@ -157,7 +157,7 @@ export async function buildAgentEnv(
   if (!USER_AUTH_OPS.has(operation)) {
     process.stderr.write(
       `runtime_env: warning: unknown operation '${operation}' for agent ` +
-        `'${agent}'; defaulting to no GH_TOKEN\n`,
+        `'${agent}'; no GitHub credentials are ever injected\n`,
     );
   }
 

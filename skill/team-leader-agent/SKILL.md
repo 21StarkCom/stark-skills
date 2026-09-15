@@ -31,7 +31,7 @@ Read [research](references/research.md) when changing this protocol.
 - `--tickets STARK-n,...`: existing tickets to consider.
 - `--max-workers N`: explicitly authorized simultaneous worker limit.
 - `--max-attempts N`: total launches per task, including the first.
-- `--max-recoveries N`: allowed recovery actions per task.
+- `--max-recoveries N`: allowed reconnects of a dead worker per task; a replacement launch spends `--max-attempts` instead.
 - `status <run-id>`: report verified progress and current blockers.
 - `resume <run-id>`: restore leadership and reconnect existing workers.
 - `stop <run-id>`: stop dispatch and interrupt owned workers.

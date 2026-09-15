@@ -283,6 +283,19 @@ test("checkDeprecatedConfig: returns pass when no automation block exists", asyn
   });
 });
 
+test("checkDeprecatedConfig: warns when the retired github_apps block is present", async () => {
+  await withScratchHome((home) => {
+    fs.mkdirSync(path.join(home, ".claude", "code-review"), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, ".claude", "code-review", "config.json"),
+      JSON.stringify({ github_apps: { claude: "stark-claude" } }),
+    );
+    const [status, msg] = checkDeprecatedConfig();
+    assert.equal(status, "warn");
+    assert.match(msg, /github_apps/);
+  });
+});
+
 test("checkDeprecatedConfig: warns when automation.model_pins is present", async () => {
   await withScratchHome((home) => {
     fs.mkdirSync(path.join(home, ".claude", "code-review"), { recursive: true });

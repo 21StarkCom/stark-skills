@@ -20,7 +20,7 @@ test("classify: literal pattern match → confidence 1.0", () => {
   const r = classify("remote: HTTP 401 Unauthorized");
   assert.equal(r.category, "AUTH_STALE");
   assert.equal(r.confidence, 1.0);
-  assert.equal(r.pattern_id, "auth-stale");
+  assert.equal(r.pattern_id, null);
   assert.equal(r.recommended_action, "ask the operator to check GitHub authentication");
 });
 

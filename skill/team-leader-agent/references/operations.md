@@ -19,7 +19,7 @@ Use command argument arrays rather than interpolated shell strings.
 {
   "id": "stark-4919-engagement",
   "objective": "The complete authorized objective",
-  "leader": "the-current-real-session-id",
+  "leader": "the-current-real-session-id (CODEX_THREAD_ID or CLAUDE_CODE_SESSION_ID; pass --leader only when neither is exported)",
   "maxWorkers": 2,
   "maxAttempts": 2,
   "maxRecoveries": 1,
@@ -36,10 +36,13 @@ Use command argument arrays rather than interpolated shell strings.
     "exclusiveResources": ["host:port:4310"],
     "mergeResources": ["repository-release-index"],
     "doneWhen": "The exact behavior and completion evidence required",
-    "checks": [["npm", "test"]]
+    "checks": [["npm", "ci"], ["npm", "test"]],
+    "checkTimeoutMs": 1800000
   }]
 }
 ```
+
+`checkTimeoutMs` bounds each declared check (default 30 minutes); a timed-out check is a failed check.
 
 Example limits are illustrative, not authorization for a new invocation.
 Require explicit worker, launch-attempt, and recovery limits.
@@ -180,7 +183,9 @@ Gru validates session identifiers before reserving a reconnect.
 Retain its existing session and worktree when reconnection succeeds.
 Preserve uncertain launch and merge outcomes before further dispatch.
 Replace workers only after authoritatively observing old execution termination.
-Count recovery actions against the engagement's explicit limit.
+Reconnects count against `maxRecoveries`; replacement launches count against `maxAttempts`.
+Once the reconnect budget is spent, a dead worker is replaced directly.
+A fully verified engagement releases its ticket, worktree, and identity ownership.
 Exhausted budgets require operator input; resume never resets them.
 
 `resume` changes leadership, not worker identity or task ownership.

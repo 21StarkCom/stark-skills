@@ -8,7 +8,6 @@ import {
   appendAudit,
   auditLogPath,
   buildTrustedTestEnv,
-  cleanupStaleForkRemote,
   evaluateFixLoopGate,
   parseFixerOutput,
   pushBranch,
@@ -383,7 +382,7 @@ test("pushBranch: origin uses existing git credentials", async () => {
   assert.ok(!calls[0].env?.GIT_ASKPASS, "bare push must not set GIT_ASKPASS");
 });
 
-test("pushBranch: fork uses existing credentials and removes its temporary remote", async () => {
+test("pushBranch: fork pushes straight to the fork URL with existing credentials", async () => {
   const wt = tmpDir("wt");
   const calls: { cmd: string; args: string[]; env?: NodeJS.ProcessEnv }[] = [];
   const fakeSpawn = async (cmd: string, args: string[], opts?: { env?: NodeJS.ProcessEnv }) => {
@@ -397,9 +396,7 @@ test("pushBranch: fork uses existing credentials and removes its temporary remot
   });
   assert.equal(r.ok, true);
   assert.deepEqual(calls.map((c) => c.args.slice(2)), [
-    ["remote", "add", "stark-fork-push", "https://github.com/u/r.git"],
-    ["push", "stark-fork-push", "HEAD:feat"],
-    ["remote", "remove", "stark-fork-push"],
+    ["push", "https://github.com/u/r.git", "HEAD:feat"],
   ]);
   for (const call of calls) {
     assert.equal(call.env?.GIT_TERMINAL_PROMPT, "0");
@@ -423,20 +420,6 @@ test("pushBranch: non-fast-forward stderr → conflict=true", async () => {
   assert.equal(r.conflict, true);
 });
 
-test("cleanupStaleForkRemote removes the remote when present", async () => {
-  const wt = tmpDir("wt");
-  const calls: { args: string[] }[] = [];
-  const fakeSpawn = async (_cmd: string, args: string[]) => {
-    calls.push({ args });
-    if (args[args.length - 1] === "remote") {
-      return { stdout: "origin\nstark-fork-push\n", stderr: "", status: 0 };
-    }
-    return { stdout: "", stderr: "", status: 0 };
-  };
-  await cleanupStaleForkRemote(wt, fakeSpawn as any);
-  assert.ok(calls.some((c) => c.args.includes("remove") && c.args.includes("stark-fork-push")));
-});
-
 // ─── Task 9-6: audit log ────────────────────────────────────────────────────
 
 test("auditLogPath under ~/.claude/code-review/audit/{org}/{repo}/{pr}.jsonl", () => {
@@ -456,18 +439,6 @@ test("appendAudit appends JSONL line with ts and round, creates parent dirs", ()
   assert.equal(ev0.round, 1);
   assert.deepEqual(ev0.files, ["a.ts"]);
   assert.ok(typeof ev0.ts === "string" && ev0.ts.length > 0);
-});
-
-test("appendAudit redactInLogs scrubs token values from any field", () => {
-  const home = tmpDir("home");
-  const TOKEN = "ghs_topsecret_abc123";
-  appendAudit(
-    { action: "push", round: 2, sha: "deadbeef", reason: `token=${TOKEN} pushed`, head_repo: "o/r" } as any,
-    { home, repo: "o/r", pr: 9, redactInLogs: [TOKEN] },
-  );
-  const raw = fs.readFileSync(auditLogPath(home, "o/r", 9), "utf8");
-  assert.ok(!raw.includes(TOKEN), "token must not appear in audit log");
-  assert.ok(raw.includes("***REDACTED***"));
 });
 
 test("appendAudit emits all six required action types over the lifecycle", () => {
