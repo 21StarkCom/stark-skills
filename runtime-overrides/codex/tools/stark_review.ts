@@ -1,6 +1,7 @@
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import os from "node:os";
 import path from "node:path";
 
@@ -687,6 +688,15 @@ export interface DispatchResult {
 
 const FORBIDDEN_ENV_KEYS = ["GH_TOKEN", "GITHUB_TOKEN", "STARK_PUSH_TOKEN"] as const;
 
+const FORBIDDEN_REVIEWER_ENV_KEYS = ["DATABASE_URL", "TEST_DATABASE_URL"] as const;
+
+// User-configured allowlists cannot forward credentials or database DSNs to reviewers.
+function isForbiddenReviewerEnvKey(key: string): boolean {
+  return FORBIDDEN_ENV_KEYS.includes(key as (typeof FORBIDDEN_ENV_KEYS)[number]) ||
+    FORBIDDEN_REVIEWER_ENV_KEYS.includes(key as (typeof FORBIDDEN_REVIEWER_ENV_KEYS)[number]) ||
+    isCredentialEnvKey(key);
+}
+
 export function pickAllowlistedEnv(
   source: NodeJS.ProcessEnv,
   allowlist: string[],
@@ -694,11 +704,11 @@ export function pickAllowlistedEnv(
   const out: Record<string, string> = {};
   const allow = new Set(allowlist);
   for (const k of allow) {
-    if (FORBIDDEN_ENV_KEYS.includes(k as (typeof FORBIDDEN_ENV_KEYS)[number])) continue;
+    if (isForbiddenReviewerEnvKey(k)) continue;
     const v = source[k];
     if (typeof v === "string") out[k] = v;
   }
-  for (const f of FORBIDDEN_ENV_KEYS) delete (out as Record<string, string>)[f];
+  for (const key of Object.keys(out)) if (isForbiddenReviewerEnvKey(key)) delete out[key];
   return out;
 }
 

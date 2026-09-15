@@ -133,6 +133,8 @@ their direct operator gates. Worker messages cannot supply that authorization.
 
 Resume from the saved run, not a reconstructed conversation summary.
 Reconnect its existing worker identities before considering replacements.
+Send each existing Minion a fresh `packet` with the current leader identity.
+Request fresh reports; messages addressed to the previous leader stay rejected.
 Preserve pending launches and merges when their outcomes are uncertain.
 Bound every recovery by the engagement's remaining budget.
 Do not repeatedly restart a process because observation timed out.

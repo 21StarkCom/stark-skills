@@ -31,6 +31,9 @@ test("Hermod discovery omissions and stale hooks never prove death", () => {
   const saved = [{ sessionId: "session", agent: "codex", surfaceId: "surface", pid: 42, alive: false }];
   assert.equal(observations(run(), { ...d, peers: [] }, saved).task.liveness, "dead");
   assert.equal(observations(run(), d, saved).task.liveness, "live");
+  const unassigned = run(); delete unassigned.tasks[0].worker;
+  const malformed = JSON.parse('[{"agent":"codex","alive":false,"pid":42}]');
+  assert.equal(observations(unassigned, { ...d, peers: [] }, malformed).task.liveness, "unknown");
 });
 
 test("local PID absence cannot override incomplete Hermod identity evidence", async () => {
@@ -58,7 +61,7 @@ test("completed idle workers retire through Hermod without deleting session work
   const actions: string[][] = [];
   const call: Command = async argv => {
     actions.push(argv);
-    return response({ peers: [{ ...peer(), activity }], observedAt: new Date().toISOString(), incomplete: false });
+    return response({ peers: [{ ...peer(), cwd: "/worktree/", activity }], observedAt: new Date().toISOString(), incomplete: false });
   };
   await assert.rejects(retireWorker(task, call), /idle/);
   assert.equal(actions.length, 1);
@@ -103,13 +106,19 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   must(["git", "push", "origin", "HEAD:refs/pull/1/head"], repoDir);
   const task = assignment(); task.spec.repo = repoDir; task.integrationBase = sha;
   const pr = { merged: true, merged_at: new Date().toISOString(), merge_commit_sha: sha,
-    head: { sha, repo: { full_name: "owner/repo" } }, base: { ref: "main", repo: { full_name: "owner/repo" } }, html_url: "https://github.com/owner/repo/pull/1" };
+    head: { sha, repo: { full_name: "Owner/Repo" } }, base: { ref: "main", repo: { full_name: "Owner/Repo" } }, html_url: "https://github.com/owner/repo/pull/1" };
   let reviewHead = sha;
   const call: Command = async (argv, cwd) => {
     if (argv[0] === "git" && argv[1] === "remote") return { code: 0, stdout: "git@github.com:owner/repo.git", stderr: "" };
     if (argv[0] === "gh") return response(argv[2].includes("reviews") ? { commit_id: reviewHead, submitted_at: new Date().toISOString(), state: "COMMENTED", html_url: pr.html_url + "#pullrequestreview-1" } : pr);
     if (argv[0] === "alfred") return response({ item: { ref: { custom_id: "STARK-100" }, state: "done" }, comments: [], comments_read: true });
-    return exec(argv, cwd);
+    const result = exec(argv, cwd);
+    if (argv[0] === "git" && argv[1] === "fetch" && result.code === 0) {
+      // Simulate an unrelated concurrent fetch replacing this shared scratch file.
+      const fetchHead = must(["git", "rev-parse", "--git-path", "FETCH_HEAD"], cwd);
+      fs.writeFileSync(path.resolve(cwd!, fetchHead), "b".repeat(40) + "\n");
+    }
+    return result;
   };
   await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "failed-check"), call), /independent check failed/);
   const failedLogs = fs.readdirSync(path.join(dir, "failed-check")).filter(f => f.endsWith(".log"));

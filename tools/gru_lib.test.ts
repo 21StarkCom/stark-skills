@@ -35,6 +35,18 @@ function report(store: GruStore, run: Run, id: string, kind: "ack" | "ready" | "
   return store.report(run.config.id, run.config.leader, run.revision, id, task.token!, worker(id).session, kind, message ?? task.spec.doneWhen);
 }
 
+test("attachment recognizes a symlink alias of the reserved worktree", t => {
+  const { store, file } = fixture(t);
+  const target = path.join(path.dirname(file), "worktree");
+  const alias = path.join(path.dirname(file), "alias");
+  fs.mkdirSync(target); fs.symlinkSync(target, alias);
+  const c = config(); c.tasks[0].worktree = fs.realpathSync(target);
+  let run = observe(store, store.create(c));
+  run = store.reserve(c.id, c.leader, run.revision, "one");
+  run = store.attach(c.id, c.leader, run.revision, "one", run.tasks[0].token!, { ...worker("one"), worktree: alias });
+  assert.equal(run.tasks[0].worker!.worktree, c.tasks[0].worktree);
+});
+
 test("DAG and authority validation reject missing limits, cycles, duplicated ownership, and provider fallback", () => {
   for (const change of [
     (c: any) => { delete c.maxWorkers; },

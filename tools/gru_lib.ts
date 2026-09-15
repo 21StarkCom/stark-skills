@@ -4,6 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+export function canonicalWorktree(value: string): string {
+  return fs.existsSync(value) ? fs.realpathSync(value) : path.resolve(value);
+}
+
 export type Provider = "claude" | "codex";
 export type Phase = "pending" | "reserved" | "intake" | "working" | "blocked" |
   "review" | "integrating" | "verifying" | "done" | "stopping" | "stopped" | "failed";
@@ -257,9 +261,9 @@ export class GruStore {
       requireValue((run.mode === "running" && task.phase === "reserved") || stoppingLaunch, "no pending launch to attach");
       for (const key of ["id", "session", "surface", "workspace", "worktree"] as const) requireValue(nonempty(worker[key]), `worker ${key} is required`);
       requireValue(worker.provider === task.spec.provider, "provider substitution refused");
-      requireValue(path.resolve(worker.worktree) === path.resolve(task.spec.worktree), "worker worktree mismatch");
+      requireValue(canonicalWorktree(worker.worktree) === canonicalWorktree(task.spec.worktree), "worker worktree mismatch");
       this.own(run, task, [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`]);
-      task.worker = structuredClone(worker);
+      task.worker = { ...structuredClone(worker), worktree: canonicalWorktree(worker.worktree) };
       if (stoppingLaunch) task.stoppedFrom = "intake";
       else task.phase = "intake";
       this.event(run, "attached", worker.id, taskId);

@@ -1,8 +1,10 @@
 /** Gru's consumers of Hermod and existing verification commands. No transport implementation. */
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
+import { canonicalWorktree } from "./gru_lib.ts";
 import type { Assignment, CompletionEvidence, Observation, Run, Worker } from "./gru_lib.ts";
 
 export interface CommandResult { code: number; stdout: string; stderr: string }
@@ -49,13 +51,13 @@ export function observations(run: Run, discovery: Discovery, sessions: SavedSess
     const peer = task.worker && discovery.peers.find(p => p.id === task.worker!.id &&
       (p.threadId || p.sessionId) === task.worker!.session && p.agent === task.spec.provider);
     // "stale" is not proof of death. Absence from discovery is not proof either.
-    // Normalize the worktree the same way attach() did (path.resolve): a benign
+    // Normalize the worktree the same way attach() did: a benign
     // path-representation drift from Hermod must not demote a live worker to "unknown".
     const live = !discovery.incomplete && peer?.liveness === "live" &&
       peer.surfaceId === task.worker?.surface && typeof peer.cwd === "string" &&
-      path.resolve(peer.cwd) === path.resolve(task.worker!.worktree);
+      canonicalWorktree(peer.cwd) === canonicalWorktree(task.worker!.worktree);
     const saved = sessions.filter(s => s.sessionId === task.worker?.session && s.agent === task.spec.provider);
-    const dead = !discovery.incomplete && !live && !peer && saved.length === 1 && saved[0].alive === false &&
+    const dead = !!task.worker && !discovery.incomplete && !live && !peer && saved.length === 1 && saved[0].alive === false &&
       saved[0].surfaceId === task.worker?.surface && Number.isSafeInteger(saved[0].pid);
     return [task.spec.id, { observedAt: discovery.observedAt, liveness: live ? "live" : dead ? "dead" : "unknown",
       activity: live && ["busy", "idle"].includes(peer!.activity) ? peer!.activity : "unknown",
@@ -86,7 +88,7 @@ export async function retireWorker(task: Assignment, call: Command = command): P
   if (peers.incomplete || !peer) throw new Error("worker observation incomplete; reconcile before retiring");
   const actual = workerFromPeer(peer);
   if (actual.session !== task.worker.session || actual.surface !== task.worker.surface || actual.provider !== task.worker.provider ||
-      actual.worktree !== task.worker.worktree || actual.workspace !== task.worker.workspace || peer.activity !== "idle") {
+      canonicalWorktree(actual.worktree) !== canonicalWorktree(task.worker.worktree) || actual.workspace !== task.worker.workspace || peer.activity !== "idle") {
     throw new Error("completed worker must match its saved identity and be idle");
   }
   // Surface closure preserves the session worktree. close-session removes it.
@@ -171,21 +173,27 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   if (!Number.isSafeInteger(prNumber) || prNumber < 1 || !Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
   const repoDir = task.spec.repo;
   const git = (args: string[]) => checked(call, ["git", ...args], repoDir);
-  const repo = normalizeRepoUrl(await git(["remote", "get-url", "origin"]));
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("verification needs a GitHub origin");
+  const repo = await canonicalRepository(repoDir, call);
   const api = async (endpoint: string) => JSON.parse(await checked(call, ["gh", "api", `repos/${repo}/${endpoint}`], repoDir));
   const pr = await api(`pulls/${prNumber}`);
   if (!pr.merged || !pr.merged_at || !/^[0-9a-f]{40,64}$/.test(pr.merge_commit_sha ?? "")) throw new Error("PR is not confirmed merged");
-  if (pr.head.repo.full_name !== repo || pr.base.repo.full_name !== repo) throw new Error("PR repository mismatch");
+  if ([pr.head?.repo?.full_name, pr.base?.repo?.full_name].some(name => typeof name !== "string" || name.toLowerCase() !== repo)) throw new Error("PR repository mismatch");
   const review = await api(`pulls/${prNumber}/reviews/${reviewId}`);
   if (review.commit_id !== pr.head.sha || !review.submitted_at || !["COMMENTED", "APPROVED"].includes(review.state)) throw new Error("posted review does not cover the merged PR head");
   await git(["check-ref-format", `refs/heads/${pr.base.ref}`]);
-  await git(["fetch", "origin", `refs/heads/${pr.base.ref}`]);
-  const baseTip = await git(["rev-parse", "FETCH_HEAD"]);
+  const fetchTip = async (remoteRef: string): Promise<string> => {
+    const localRef = `refs/gru/verification/${randomUUID()}`;
+    try {
+      await git(["fetch", "--no-write-fetch-head", "origin", `${remoteRef}:${localRef}`]);
+      return await git(["rev-parse", localRef]);
+    } finally {
+      await git(["update-ref", "-d", localRef]);
+    }
+  };
+  const baseTip = await fetchTip(`refs/heads/${pr.base.ref}`);
   await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);
   // Squash merges do not make the reviewed head reachable from the base.
-  await git(["fetch", "origin", `refs/pull/${prNumber}/head`]);
-  if (await git(["rev-parse", "FETCH_HEAD"]) !== pr.head.sha) throw new Error("fetched PR head differs from the reviewed head");
+  if (await fetchTip(`refs/pull/${prNumber}/head`) !== pr.head.sha) throw new Error("fetched PR head differs from the reviewed head");
   await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);
   fs.mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
   const verifyTree = path.join(evidenceDir, `worktree-${task.token}`);

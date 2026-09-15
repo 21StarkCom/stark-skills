@@ -218,7 +218,7 @@ Domains are auto-discovered at startup.
 
 - macOS (keychain-based auth)
 - `claude`, `codex`, `gemini` CLI tools in PATH
-- Node.js (TS tooling runs via `node`)
+- Node.js ≥ 24 (TypeScript and SQLite tooling runs via plain `node`)
 - GitHub CLI authenticated as `aryeh-stark`
 
 ## Skill Documentation

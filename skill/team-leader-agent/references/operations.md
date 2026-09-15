@@ -135,7 +135,10 @@ Do not rely on ignored dependencies from the worker's checkout.
 It retains command, directory, revision, and output logs.
 Its disposable verification checkout is removed after success or failure.
 Worker and session worktrees remain preserved.
-Checks close stdin and use the existing process-group timeout runner.
+Checks close stdin and use the existing process-group timeout runner, with a
+five-minute limit per command. Keep declared setup and verification commands
+within that bound. A timeout preserves integration ownership for diagnosis and
+retry; it does not prove completion or worker death.
 It checks Alfred's actual ticket identity and completion state.
 
 Release milestones can require additional direct operator actions.

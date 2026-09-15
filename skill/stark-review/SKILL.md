@@ -98,13 +98,7 @@ Review model attribution appears in the text.
 ### 3. Verify gh and provision the worktree
 
 ```bash
-if [ -n "${GH_TOKEN:-}" ]; then
-    gh auth status
-elif [ -n "${DRY_RUN:-}" ]; then
-    warn "skipping 'gh auth status' (no GH_TOKEN provisioned; --dry-run continues)"
-else
-    gh auth status
-fi
+gh auth status
 
 SETUP_JSON=$(node "$TOOLS/review_setup_worktree.ts" \
     --pr "$PR_NUM" --repo "$REPO" --mode single --json)

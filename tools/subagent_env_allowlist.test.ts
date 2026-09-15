@@ -16,6 +16,8 @@
 import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -24,6 +26,48 @@ import { DEFAULT_RUNTIME_ALLOWLIST } from "./agent_dispatch_lib.ts";
 import { DEFAULT_RUNTIME } from "./stark_config_lib.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+for (const runtime of ["claude", "codex"]) {
+  test(`${runtime} dispatch scrubs Gemini credentials and preserves the process floor`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-env-parity-"));
+    try {
+      const toolDir = path.join(root, "tools");
+      fs.mkdirSync(toolDir);
+      for (const source of [path.join(REPO_ROOT, "tools"), ...(runtime === "codex" ? [path.join(REPO_ROOT, "runtime-overrides/codex/tools")] : [])]) {
+        for (const name of fs.readdirSync(source)) {
+          if (name.endsWith(".ts") && !name.endsWith(".test.ts")) fs.copyFileSync(path.join(source, name), path.join(toolDir, name));
+        }
+      }
+      fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ type: "module" }));
+      fs.writeFileSync(path.join(root, "config.json"), JSON.stringify({ runtime: { subagent_env_allowlist: ["GH_TOKEN"] } }));
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+        import assert from "node:assert/strict";
+        import { makeGeminiEnv, buildAgentEnv, releaseAgentTempDir } from "./tools/agent_dispatch_lib.ts";
+        import { pickAllowlistedEnv } from "./tools/stark_review.ts";
+        const source = { USER: "fixture-user", GH_TOKEN: "fixture-github", OPENAI_API_KEY: "fixture-openai", EXAMPLE_SECRET: "fixture-secret",
+          DATABASE_URL: "fixture-database", TEST_DATABASE_URL: "fixture-test-database" };
+        assert.deepEqual(pickAllowlistedEnv(source, Object.keys(source)), { USER: "fixture-user" });
+        const gemini = makeGeminiEnv("/tmp/fixture-gemini");
+        for (const key of ["GH_TOKEN", "OPENAI_API_KEY", "EXAMPLE_SECRET"]) assert.equal(gemini[key], undefined, key);
+        assert.equal(gemini.USER, "fixture-user");
+        const child = await buildAgentEnv("codex", "review");
+        try {
+          assert.equal(child.env.USER, "fixture-user");
+          assert.ok(child.env.PATH);
+          assert.equal(child.env.GH_TOKEN, undefined);
+        } finally { releaseAgentTempDir(child.tempDir); }
+        console.log("credential filtering and process floor passed");
+      `], {
+        cwd: root, encoding: "utf8", timeout: 15_000,
+        env: { PATH: process.env.PATH, HOME: process.env.HOME, USER: "fixture-user", LANG: "en_US.UTF-8",
+          STARK_ASSET_ROOT: root, CLAUDE_PLUGIN_ROOT: root, STARK_GEMINI_AUTH: "oauth", STARK_GEMINI_VERTEX_PROJECT: "fixture-project",
+          GH_TOKEN: "fixture-github", OPENAI_API_KEY: "fixture-openai", EXAMPLE_SECRET: "fixture-secret" },
+      });
+      assert.equal(result.status, 0, result.stderr || result.error?.message);
+      assert.match(result.stdout, /credential filtering and process floor passed/);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
 
 function shippedAllowlist(): string[] {
   const raw = fs.readFileSync(path.join(REPO_ROOT, "global", "config.json"), "utf8");

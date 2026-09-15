@@ -71,14 +71,13 @@ const DEFAULT_MODELS: Record<AgentName, AgentModelConfig> = {
   gemini: { enabled: true, model_id: GEMINI_DEFAULT_MODEL },
 };
 
-const DEFAULT_RUNTIME_ALLOWLIST: readonly string[] = [
+export const DEFAULT_RUNTIME_ALLOWLIST: readonly string[] = [
   "PATH",
   "HOME",
   "USER",
   "SHELL",
   "LANG",
   "TERM",
-  "ANTHROPIC_AGENTS",
 ];
 
 let _configCache: Record<string, unknown> | null = null;
@@ -134,7 +133,8 @@ function getEnvAllowlist(): readonly string[] {
   if (isPlainObject(runtime)) {
     const list = (runtime as Record<string, unknown>)["subagent_env_allowlist"];
     if (Array.isArray(list) && list.every((x) => typeof x === "string")) {
-      return list as string[];
+      // Config extends the process-variable floor, including USER for CLI identity.
+      return [...new Set([...DEFAULT_RUNTIME_ALLOWLIST, ...(list as string[])])];
     }
   }
   return DEFAULT_RUNTIME_ALLOWLIST;
@@ -449,6 +449,7 @@ export function makeGeminiEnv(
     if (typeof v !== "string") continue;
     if (BLOCKED_ENV_KEYS.has(k)) continue;
     if (k.startsWith(ANTHROPIC_PREFIX) && !ALLOWED_ANTHROPIC_KEYS.has(k)) continue;
+    if (isCredentialEnvKey(k)) continue;
     env[k] = v;
   }
   env["GEMINI_CLI_HOME"] = geminiHome;

@@ -693,7 +693,7 @@ const FORBIDDEN_ENV_KEYS = ["GH_TOKEN", "GITHUB_TOKEN", "STARK_PUSH_TOKEN"] as c
  * They sit in `runtime.subagent_env_allowlist` because the copilot lead is
  * their declared consumer — it implements against a real database. A reviewer
  * subprocess is not: its entire input is untrusted PR diff text, and its
- * output is posted to the PR by this file's own GitHub-App poster, so a
+ * output is posted to the PR through the operator's existing gh login, so a
  * prompt-injected diff that dumps the env publishes a live DSN on a public
  * thread. Per-consumer split, not deletion; the trusted test-command runner
  * has its own `test_env_allowlist` for genuine DB access.

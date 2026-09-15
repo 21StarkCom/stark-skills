@@ -41,13 +41,14 @@ reserve records intent, not successful startup. Launch through Hermod only.
 attach requires a live Hermod peer; receive requires a confirmed worker message.
 reconcile never equates missing discovery with death. Keep uncertain reservations.
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
-verify reruns declared checks in a retained detached worktree, on fetched main.
+verify reruns declared checks in a disposable detached worktree, on fetched main.
 It requires a merged PR, posted head-matching review, and Alfred completion.
-No command publishes, changes authentication, or deletes worktrees.
+Verification removes its disposable checkout and retains its logs.
+No command publishes, changes authentication, or deletes worker/session worktrees.
 `;
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
-  if (argv.length === 0 || argv.some(a => ["help", "--help", "-h"].includes(a))) { process.stdout.write(HELP); return 0; }
+  if (argv.length === 0 || argv[0] === "help" || argv.some(a => ["--help", "-h"].includes(a))) { process.stdout.write(HELP); return 0; }
   let store: GruStore | undefined;
   try {
     const verb = argv[0];
