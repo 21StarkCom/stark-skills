@@ -9,31 +9,11 @@
  * (branch adopt-or-create, never force-push, find-by-branch adopt-or-create
  * PR, draft-by-default) and `red_team_fold_lib.ts::openOrEditFoldPr`
  * (injectable PR side effects so the decision logic is testable without
- * network). Unlike write-spec, copilot's lead roster includes `gemini`, so
- * the lead→App mapping here is its own (write-spec's `appForLead` is total
- * only over `{claude, codex}` — see its own doc comment for why it isn't a
- * shared export).
+ * network).
  *
  * The CLI (`copilot_land.ts`) owns every real git/gh side effect; this module
  * owns the decisions that make the flow idempotent and provable.
  */
-import type { AppName } from "./github_app_lib.ts";
-
-// ── Lead → App identity ─────────────────────────────────────────────────────
-
-/**
- * The GitHub App that authors the impl PR/comment for a given copilot lead.
- * Mirrors the table already documented in SKILL.md §4b (`claude`→stark-claude,
- * `codex`→stark-codex, `gemini`→stark-gemini). An unrecognized lead fails
- * closed to `stark-claude` rather than throwing — the landing flow must not
- * crash the run over an already-validated `--lead` value.
- */
-export function appForLead(lead: string): AppName {
-  if (lead === "codex") return "stark-codex";
-  if (lead === "gemini") return "stark-gemini";
-  return "stark-claude";
-}
-
 // ── Branch naming ────────────────────────────────────────────────────────────
 
 /**
@@ -109,7 +89,6 @@ export function mergePrNumbers(known: readonly number[], landed: readonly number
 export interface LandedPr {
   number: number;
   url: string;
-  app: AppName;
   adopted: boolean;
 }
 
@@ -138,7 +117,7 @@ export interface LandResult {
 export interface LandDeps {
   /** Push the impl branch. NEVER passes a force flag (see `buildPushArgs`). */
   push: () => { ok: boolean; stderr?: string };
-  /** List open PRs for the target repo. Auth only — NOT scoped to any one App's authored PRs. */
+  /** List open PRs for the target repo using the operator's gh login. */
   listOpenPrs: () => Promise<readonly OpenPr[]>;
   /** Open a fresh PR (only called when no open PR targets `branch`). */
   createPr: (opts: {
@@ -147,13 +126,11 @@ export interface LandDeps {
     title: string;
     body: string;
     draft: boolean;
-    app: AppName;
   }) => Promise<{ number: number; html_url?: string }>;
   /**
    * Mark an adopted PR ready-for-review. Only called on the adopt path when
    * `input.ready` is set AND the adopted PR is currently a draft — mirrors
-   * `write_spec_land.ts`'s `gh pr ready` fallback (App tokens cannot call the
-   * GraphQL un-draft mutation). Optional so existing stubs/tests that never
+   * `write_spec_land.ts`'s `gh pr ready` path. Optional so existing stubs/tests that never
    * exercise this branch don't need to supply it.
    */
   markReady?: (prNumber: number) => Promise<{ ok: boolean; stderr?: string }>;
@@ -169,12 +146,11 @@ export interface LandDeps {
  *     — `createPr` is NOT called in this path, so a bare re-invocation never
  *     opens a duplicate. When `input.ready` is set and the adopted PR is
  *     still a draft, mark it ready via `deps.markReady` (mirrors
- *     `write_spec_land.ts`'s `gh pr ready` fallback — App tokens cannot
- *     un-draft via the GraphQL mutation). Adopting an already-ready PR with
+ *     `write_spec_land.ts`'s `gh pr ready` path). Adopting an already-ready PR with
  *     `--ready` is a harmless no-op (`markReady` is not called); adopting a
  *     draft WITHOUT `--ready` leaves it a draft.
  *  3. Otherwise open a fresh PR, draft by default (`draft: !input.ready`),
- *     authored by the lead's App.
+ *     authored by the operator through gh.
  *  4. Union `input.knownPrs` with the landed/adopted number — re-reporting a
  *     known number is a no-op, never a conflict.
  */
@@ -184,7 +160,6 @@ export async function landImpl(input: LandInput, deps: LandDeps): Promise<LandRe
     throw new Error(`copilot_land: push failed: ${pushed.stderr ?? "unknown error"}`);
   }
 
-  const app = appForLead(input.lead);
   const openPrs = await deps.listOpenPrs();
   const existing = pickPrForHead(openPrs, input.branch);
 
@@ -202,7 +177,6 @@ export async function landImpl(input: LandInput, deps: LandDeps): Promise<LandRe
     pr = {
       number: existing.number,
       url: existing.html_url ?? "",
-      app,
       adopted: true,
     };
   } else {
@@ -212,12 +186,10 @@ export async function landImpl(input: LandInput, deps: LandDeps): Promise<LandRe
       title: input.title,
       body: input.body,
       draft: !input.ready,
-      app,
     });
     pr = {
       number: created.number,
       url: created.html_url ?? "",
-      app,
       adopted: false,
     };
   }

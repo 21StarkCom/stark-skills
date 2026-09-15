@@ -11,11 +11,6 @@
 #     but only `contents: read` by default — GRANT `contents: write` in the App's
 #     permissions, or the `git push` below 403s.
 #
-# History: this workflow used the `stark-claude-21s` App until its installation
-# was suspended 2026-08-12 alongside the other stark-*-21s review apps; every
-# sync after that failed at token mint ("This installation has been suspended"),
-# silently stranding merged source changes off the marketplace.
-#
 # The engine is pure Go (no Node needed): `stark sync` copies the .ts tools
 # verbatim into the vendor snapshot; nothing executes them in CI.
 name: marketplace-sync

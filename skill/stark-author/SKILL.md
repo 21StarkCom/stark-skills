@@ -284,8 +284,7 @@ On go (all git via Bash; never touch the default branch):
 2. Branch `spec/<slug>` from the default branch; commit **both files** (the spec
    and its `.human.md` sidecar); push.
 3. Open a **draft** PR. It must be authored by **`aryeh-stark`**, so this goes
-   through `gh` — never `github_app.ts`, whose installation token authors as
-   `app/stark-claude[bot]`. (`--ready` on the skill opts out of draft.)
+   through `gh` as `aryeh-stark`. (`--ready` opts out of draft.)
 
 ```bash
 gh pr create --head "spec/<slug>" --base main --draft \

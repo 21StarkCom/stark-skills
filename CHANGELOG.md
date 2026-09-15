@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.11.0] - 2026-09-15
+
+### Fixed
+- Keep Codex dispatch credential filtering and required process variables aligned with the canonical runtime. Reviewer subprocesses also exclude credentials and database connection strings even when configured in an allowlist.
+- Normalize equivalent worker paths before retiring a completed idle worker. Clarify disposable verification checkout cleanup in CLI help.
+- Pin verification fetches with invocation-owned Git refs, accept GitHub repository casing differences, and keep worker-less startup observations unknown.
+
+### Changed
+- Retired all review GitHub Apps. Reviews and PR operations use the existing `aryeh-stark` GitHub login, with model attribution in review text. The separate Meridian CI App remains active.
+- Gru's live Codex leader/Minions evaluation remains incomplete. Native Codex ticket launch and complete initial briefing require Hermod STARK-4911; passing tooling tests does not establish native parity.
+
 ### Added
+- Gru now coordinates leader and Minion work through durable SQLite ownership, dependency gates, bounded recovery, independent completion checks, and complete native Codex skill variants (STARK-4919, #957).
 <!-- stark-gh:pr-merge pr=954 runId=954 -->
 - Statusline shows the bound alfred ticket (`<id> · <title>`) in the session-name spot, falling back to the session name when unbound.
 <!-- stark-gh:pr-merge pr=953 runId=953 -->

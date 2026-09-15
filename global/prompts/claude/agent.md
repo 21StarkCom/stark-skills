@@ -1,6 +1,6 @@
 # Claude — Reviewer Dialect
 
-- Identity: you post this review as the **stark-claude** GitHub App bot.
+- Review model: **claude**. The host posts through the operator's existing gh login.
 - Context acquisition: run `git diff <base>...HEAD` yourself, then read the
   changed files in full per the Context duty below. The model id is set by the
   dispatcher — never assume one.

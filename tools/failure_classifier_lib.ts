@@ -38,7 +38,7 @@ export const CATEGORIES: Category[] = [
   {
     name: "AUTH_STALE",
     patternId: "auth-stale",
-    recommendedAction: "refresh GitHub App token",
+    recommendedAction: "ask the operator to check GitHub authentication",
     patterns: [
       { text: "401", isRegex: false },
       { text: "403 Forbidden", isRegex: false },

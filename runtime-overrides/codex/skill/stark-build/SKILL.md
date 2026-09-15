@@ -462,10 +462,10 @@ consequence if left unfixed: critical = data loss / crash on the normal path
 / security hole; high = wrong output or a broken spec contract; medium = a
 real defect on a reachable edge path; low = everything else."*
 
-Post the findings as ONE PR comment authored by the selected reviewer's app
-identity (`stark-claude`, `stark-codex`, or `stark-gemini`) — ALL of them,
-every severity, before any fixing. Then re-run the pass NEVER, whatever Phase
-4b does. [RQ6][A1]
+Post ALL findings as one review through `gh` as `aryeh-stark`.
+Identify the selected review model. Anchor findings where possible;
+put unanchorable findings in the review body. Include every severity
+before fixing. Never re-run this pass, whatever Phase 4b does. [RQ6][A1]
 
 ## Phase 4b — ONE fix round, medium+ only (skip with `--no-fix`) [§3.7]
 

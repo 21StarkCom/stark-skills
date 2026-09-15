@@ -21,7 +21,7 @@ test("classify: literal pattern match → confidence 1.0", () => {
   assert.equal(r.category, "AUTH_STALE");
   assert.equal(r.confidence, 1.0);
   assert.equal(r.pattern_id, "auth-stale");
-  assert.equal(r.recommended_action, "refresh GitHub App token");
+  assert.equal(r.recommended_action, "ask the operator to check GitHub authentication");
 });
 
 test("classify: regex pattern match → confidence 0.7", () => {

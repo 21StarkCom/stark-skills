@@ -21,8 +21,7 @@ export const CLAUDE_MODEL = "claude-opus-5[1m]";
  * Return an allowlisted env for headless dispatch. Delegates to
  * `runtime_env_lib.buildAgentEnv("claude", "local")` so the subprocess sees
  * only allowlisted vars; auth rides HOME's OAuth credentials (no Anthropic
- * API key is injected). The "local" operation fetches no GitHub App token —
- * used by callers that don't touch GitHub.
+ * API key is injected). GitHub credentials are never injected.
  */
 export function makeCleanEnv(): Promise<Record<string, string>> {
   return buildAgentEnv("claude", "local");

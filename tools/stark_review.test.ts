@@ -6,14 +6,12 @@ import { test } from "node:test";
 
 import {
   _resetAgentPortCacheForTests,
-  _resetTokenCacheForTests,
   buildReviewBody,
   extractClassificationJson,
   loadAgentPort,
   renderAgentsResolvedSummary,
   resolveAgentPorts,
   selectPostingAgent,
-  tokenForAgent,
 } from "./stark_review.ts";
 import * as agentClaude from "./agent_claude.ts";
 import * as agentGemini from "./agent_gemini.ts";
@@ -201,46 +199,7 @@ test("agent_gemini: normalizeOutput unwraps Gemini envelope", () => {
   assert.match(text, /"classification":"fix"/);
 });
 
-// ─── Task 8-3 / 8-4: per-agent token + receipt visibility ───────────────────
-
-test("tokenForAgent: caches per process and surfaces failures", async () => {
-  _resetTokenCacheForTests();
-  let calls = 0;
-  const fakeSpawn = async () => {
-    calls++;
-    return { stdout: "ghs_fake_token_123\n", stderr: "", status: 0 };
-  };
-  const t1 = await tokenForAgent("codex", { repo: "o/r", spawnFn: fakeSpawn });
-  const t2 = await tokenForAgent("codex", { repo: "o/r", spawnFn: fakeSpawn });
-  assert.equal(t1, "ghs_fake_token_123");
-  assert.equal(t1, t2);
-  assert.equal(calls, 1, "token must be cached after first resolution");
-});
-
-test("tokenForAgent: forceRefresh bypasses the cache", async () => {
-  _resetTokenCacheForTests();
-  let calls = 0;
-  const fakeSpawn = async () => {
-    calls++;
-    return { stdout: `ghs_fake_token_${calls}\n`, stderr: "", status: 0 };
-  };
-  const t1 = await tokenForAgent("codex", { repo: "o/r", spawnFn: fakeSpawn });
-  const t2 = await tokenForAgent("codex", { repo: "o/r", spawnFn: fakeSpawn, forceRefresh: true });
-  assert.equal(calls, 2, "forceRefresh must re-mint even when a token is cached");
-  assert.notEqual(t1, t2, "forceRefresh returns the freshly minted token");
-  const t3 = await tokenForAgent("codex", { repo: "o/r", spawnFn: fakeSpawn });
-  assert.equal(calls, 2, "a non-refresh call after a refresh stays cached");
-  assert.equal(t3, t2, "the cache now holds the refreshed token");
-});
-
-test("tokenForAgent: throws on subprocess failure", async () => {
-  _resetTokenCacheForTests();
-  const fakeSpawn = async () => ({ stdout: "", stderr: "boom", status: 1 });
-  await assert.rejects(
-    tokenForAgent("claude", { repo: "o/r", spawnFn: fakeSpawn }),
-    /tokenForAgent\(claude\) failed/,
-  );
-});
+// ─── Model attribution ────────────────────────────────────────────────────
 
 test("renderAgentsResolvedSummary: emits per-domain agent list", () => {
   const out = renderAgentsResolvedSummary({

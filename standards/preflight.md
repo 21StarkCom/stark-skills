@@ -34,9 +34,6 @@ Interactive skill invocations skip steps 1–2 and just print + stop.
 
 ## Constants
 
-`TOOLS` set above is reused throughout the skill body for other TS dispatchers
-(`stark_review.ts`, `github_app.ts`, etc.) — define it once in this preflight
-block and rely on it later. Skills that still call into Python orchestrators
-also need `SCRIPTS=${STARK_REVIEW_SCRIPTS:-$HOME/.claude/code-review/scripts}` and a
-`PYTHON="$SCRIPTS/.venv/bin/python3"` fallback alongside; preflight itself
-no longer requires the Python interpreter.
+`TOOLS` also locates dispatchers such as `stark_review.ts`.
+Preflight checks the existing `gh` login as `aryeh-stark`.
+Authentication changes require operator action.

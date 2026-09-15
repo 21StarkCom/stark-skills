@@ -2,27 +2,12 @@ import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 
 import {
-  appForLead,
   buildPushArgs,
   deriveImplBranch,
   landImpl,
   mergePrNumbers,
   type LandDeps,
 } from "./copilot_land_lib.ts";
-
-// --- appForLead --------------------------------------------------------------
-
-describe("appForLead", () => {
-  test("maps each copilot lead to its GitHub App identity (mirrors §4b's table)", () => {
-    assert.equal(appForLead("claude"), "stark-claude");
-    assert.equal(appForLead("codex"), "stark-codex");
-    assert.equal(appForLead("gemini"), "stark-gemini");
-  });
-
-  test("unknown lead fails closed to stark-claude", () => {
-    assert.equal(appForLead("unknown-agent"), "stark-claude");
-  });
-});
 
 // --- buildPushArgs -----------------------------------------------------------
 
@@ -132,7 +117,7 @@ describe("landImpl — idempotent create-or-adopt", () => {
     assert.deepEqual(result.prs, [812]);
   });
 
-  test("no existing PR for the branch: opens exactly one, draft by default, authored by the lead's App", async () => {
+  test("no existing PR for the branch: opens exactly one, draft by default, authored through gh", async () => {
     const { deps, calls } = makeDeps();
 
     const result = await landImpl(
@@ -151,7 +136,6 @@ describe("landImpl — idempotent create-or-adopt", () => {
 
     assert.equal(calls.create, 1);
     assert.equal(result.pr.adopted, false);
-    assert.equal(result.pr.app, "stark-codex");
     assert.equal(result.pr.number, 900);
     assert.deepEqual(result.prs, [900]);
   });

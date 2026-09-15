@@ -1,6 +1,4 @@
-// Tests for `tools/runtime_env_lib.ts` — the subagent environment
-// builder ported from `scripts/runtime_env.py`. Only the non-review
-// (no GitHub App token) paths are exercised so tests stay offline.
+// Tests for credential-scrubbed subprocess environments.
 
 import { strict as assert } from "node:assert";
 import fs from "node:fs";
@@ -111,6 +109,31 @@ test("cleanupStaleTempDirs: removes a dir owned by a dead PID, keeps a live one"
 // ---------------------------------------------------------------------------
 // buildAgentEnv
 // ---------------------------------------------------------------------------
+
+test("review environments require no App key and scrub allowlisted GitHub tokens", async () => {
+  await withConfigHome(
+    { runtime: { subagent_env_allowlist: ["PATH", "HOME", "GH_TOKEN", "GITHUB_TOKEN"] } },
+    async () => {
+      const saved = { GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+      process.env.GH_TOKEN = "operator-token-must-not-reach-model";
+      process.env.GITHUB_TOKEN = "operator-token-must-not-reach-model";
+      try {
+        for (const agent of ["claude", "codex", "gemini"]) {
+          const env = await buildAgentEnv(agent, "review");
+          assert.equal(env.GH_TOKEN, undefined);
+          assert.equal(env.GITHUB_TOKEN, undefined);
+          assert.ok(env.HOME);
+          fs.rmSync(env.STARK_AGENT_TMPDIR, { recursive: true, force: true });
+        }
+      } finally {
+        for (const key of ["GH_TOKEN", "GITHUB_TOKEN"] as const) {
+          if (saved[key] === undefined) delete process.env[key];
+          else process.env[key] = saved[key];
+        }
+      }
+    },
+  );
+});
 
 test("buildAgentEnv: codex/local → no Anthropic key, sanitized, has tmpdir", async () => {
   const resolved = await withEnv({ ANTHROPIC_AGENTS: "secret-key" }, () =>

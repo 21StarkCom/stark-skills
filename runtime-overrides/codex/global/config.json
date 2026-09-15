@@ -35,11 +35,6 @@
     "max_files": 80,
     "max_bytes_per_file": 100000
   },
-  "github_apps": {
-    "claude": "stark-claude",
-    "codex": "stark-codex",
-    "gemini": "stark-gemini"
-  },
   "session": {
     "health_checks": [],
     "doc_paths": [

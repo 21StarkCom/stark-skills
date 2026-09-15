@@ -9,7 +9,7 @@ multi_review.ts
 ├── claude × architecture      ┐
 ├── claude × accessibility     │
 ├── claude × correctness       │
-├── claude × type-safety       ├── stark-claude bot posts consolidated review
+├── claude × type-safety       ├── gh posts the Claude review
 ├── claude × security          │
 ├── claude × test-coverage     │
 ├── claude × spec-conformance  │
@@ -18,7 +18,7 @@ multi_review.ts
 ├── codex  × architecture      ┐
 ├── codex  × accessibility     │
 ├── codex  × correctness       │
-├── codex  × type-safety       ├── stark-codex bot posts consolidated review
+├── codex  × type-safety       ├── gh posts the Codex review
 ├── codex  × security          │
 ├── codex  × test-coverage     │
 ├── codex  × spec-conformance  │
@@ -27,7 +27,7 @@ multi_review.ts
 ├── gemini × architecture      ┐
 ├── gemini × accessibility     │
 ├── gemini × correctness       │
-├── gemini × type-safety       ├── stark-gemini bot posts consolidated review
+├── gemini × type-safety       ├── gh posts the Gemini review
 ├── gemini × security          │
 ├── gemini × test-coverage     │
 ├── gemini × spec-conformance  │

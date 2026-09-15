@@ -1,15 +1,5 @@
 [
   {
-    "id": "auth-stale",
-    "category": "AUTH_STALE",
-    "regex": "(401|Bad credentials|token expired)",
-    "guard": "security find-generic-password -s STARK_CLAUDE_PRIVATE_KEY -w",
-    "action": "refresh_token",
-    "verify_command": "node tools/github_app.ts token",
-    "requires_confirmation": false,
-    "max_per_session": 1
-  },
-  {
     "id": "missing-import",
     "category": "MISSING_IMPORT",
     "regex": "No module named '([^']+)'",
