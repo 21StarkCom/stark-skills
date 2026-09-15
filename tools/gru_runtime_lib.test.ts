@@ -305,7 +305,12 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /behavior verified/);
   // A replacement can verify the prior worker's merge using the retained grant.
   task.phase = "intake";
-  assert.equal((await verifyCompletion(task, 1, 1, path.join(dir, "replacement-check"), call)).merge, fixed);
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "replacement-intake"), call), /integration reservation required/);
+  task.phase = "working";
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "replacement-working"), call), /integration reservation required/);
+  task.phase = "pending";
+  assert.equal((await verifyCompletion(task, 1, 1, path.join(dir, "before-replacement-check"), call)).merge, fixed);
+  task.phase = "integrating";
   task.phase = "integrating";
   assert.equal(fs.existsSync(path.join(dir, "passing-check", "worktree-token")), false);
 

@@ -34,7 +34,7 @@
  *                  adopt an existing open PR for that head or open a
  *                  fresh one (draft by default, authored by `aryeh-stark`
  *                  via `gh`), and print `{pr, prs}`. `prs` includes all known
- *                  and landed PRs. `--lead` records model attribution only.
+ *                  and landed PRs. `--lead` is a compatibility argument, echoed only by dry-run.
  *
  * Arg-parsing house style mirrors `write_spec_land.ts` / `red_team_fold.ts`.
  */
@@ -413,7 +413,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   const branch = str(flags, "branch");
   const title = str(flags, "title");
   const body = str(flags, "body");
-  // Accepted for caller compatibility and echoed in --dry-run; model attribution only.
+  // Accepted for caller compatibility; echoed only in --dry-run.
   const lead = str(flags, "lead") || "claude";
   const base = str(flags, "base") || "main";
   const cwd = str(flags, "repo-dir") || process.cwd();

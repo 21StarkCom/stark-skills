@@ -83,7 +83,9 @@ Gru preserves session worktrees and ownership after completion. Native worker ob
 
 ## Distribution
 
-PR landing retains `--lead` compatibility. The legacy authentication-refresh refusal remains defensive. Read-only GraphQL operations may retry once; uncertain mutations never retry.
+PR landing retains `--lead` as a compatibility argument, echoed only in dry-run output. Legacy authentication patterns return `skipped` with `operator_action_required` before guard commands, verification, budgets, or circuit accounting. Read-only GraphQL operations may retry once; uncertain mutations never retry.
+
+Replacement workers cannot verify a retained merge during reservation, intake, or implementation. Settle an existing merge before replacement starts, or require the replacement's ready report and integration grant first. Uncertain reconnects cannot verify completion.
 
 Skills + tools ship as separate self-contained **Claude Code** and native **Codex** plugin packages via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.
 

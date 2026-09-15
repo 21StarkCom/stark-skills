@@ -4,7 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { canonicalWorktree } from "./gru_lib.ts";
+import { canonicalWorktree, verificationReady } from "./gru_lib.ts";
 import type { Assignment, CompletionEvidence, Observation, Provider, Run, Worker } from "./gru_lib.ts";
 
 export interface CommandResult { code: number; stdout: string; stderr: string; timedOut?: boolean }
@@ -246,7 +246,7 @@ export async function receive(run: Run, messageId: string, call: Command = comma
 /** Read authoritative PR/commit state and rerun declared checks in a fresh verification worktree. */
 export async function verifyCompletion(task: Assignment, prNumber: number, reviewId: number, evidenceDir: string,
   call: Command = command): Promise<CompletionEvidence> {
-  if (["done", "stopping"].includes(task.phase) || !task.integrationBase || !task.token) throw new Error("integration reservation required");
+  if (!verificationReady(task) || !task.token) throw new Error("integration reservation required");
   if (!Number.isSafeInteger(prNumber) || prNumber < 1 || !Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
   const repoDir = task.spec.repo;
   const git = (args: string[]) => checked(call, ["git", ...args], repoDir);

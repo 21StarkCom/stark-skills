@@ -195,6 +195,11 @@ test("replacement retains the pending merge grant and can verify its original ba
     pr: "https://github.com/o/r/pull/1", review: "https://github.com/o/r/pull/1#pullrequestreview-1",
     verifiedAt: new Date().toISOString(), ticketState: "done",
     checks: run.tasks[0].spec.checks.map(argv => ({ argv, exitCode: 0, log: "/evidence/check.log" })) };
+  assert.throws(() => store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof), /integration and independent verification required/);
+  run = report(store, run, "one", "ack");
+  assert.throws(() => store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof), /integration and independent verification required/);
+  run = report(store, run, "one", "ready");
+  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "a".repeat(40));
   run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof);
   run = store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "c".repeat(40));
   assert.equal(run.tasks[1].phase, "integrating");
