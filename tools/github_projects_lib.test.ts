@@ -13,6 +13,7 @@ import test from "node:test";
 
 import {
   buildFieldValuePayload,
+  graphql,
   checkSpecCompleteness,
   isLegalTransition,
   itemMatchesFilters,
@@ -22,6 +23,42 @@ import {
   type FieldInfo,
   type ProjectItem,
 } from "./github_projects_lib.ts";
+
+test("GraphQL retries opted-in reads once, preserves errors, and never replays default mutations", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "graphql-transport-"));
+  const count = path.join(dir, "count");
+  const mode = path.join(dir, "mode");
+  const originalPath = process.env.PATH;
+  t.after(() => {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  fs.writeFileSync(path.join(dir, "gh"), `#!/usr/bin/env node
+const fs = require("node:fs");
+const count = ${JSON.stringify(count)}, mode = ${JSON.stringify(mode)};
+const n = Number(fs.readFileSync(count, "utf8")) + 1;
+fs.writeFileSync(count, String(n));
+const behavior = fs.readFileSync(mode, "utf8");
+if (behavior === "stdout") { console.log(JSON.stringify({errors:[{message:"Resource not accessible"}]})); process.exit(1); }
+if (n === 1 || behavior === "always") { console.error("ECONNRESET"); process.exit(1); }
+console.log(JSON.stringify({data:{ok:true}}));
+`, { mode: 0o700 });
+  process.env.PATH = `${dir}${path.delimiter}${originalPath ?? ""}`;
+  const reset = (behavior: string) => { fs.writeFileSync(count, "0"); fs.writeFileSync(mode, behavior); };
+  reset("once");
+  assert.deepEqual(await graphql("query { viewer { login } }", { retryRead: true }), { data: { ok: true } });
+  assert.equal(fs.readFileSync(count, "utf8"), "2");
+  reset("once");
+  await assert.rejects(graphql("mutation { change }"), /ECONNRESET/);
+  assert.equal(fs.readFileSync(count, "utf8"), "1");
+  reset("always");
+  await assert.rejects(graphql("query { viewer { login } }", { retryRead: true }), /ECONNRESET/);
+  assert.equal(fs.readFileSync(count, "utf8"), "2");
+  reset("stdout");
+  await assert.rejects(graphql("query { viewer { login } }", { retryRead: true }), /Resource not accessible/);
+  assert.equal(fs.readFileSync(count, "utf8"), "1");
+});
 
 // ---------------------------------------------------------------------------
 // isLegalTransition / state machine

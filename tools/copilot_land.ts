@@ -62,6 +62,7 @@ function git(args: string[], cwd: string = process.cwd()): Shell {
 }
 
 function gh(args: string[], cwd: string = process.cwd()): Shell {
+  // A paginated PR listing is ~18 KB per PR; Node's 1 MiB default would ENOBUFS at ~58 open PRs.
   const r = spawnSync("gh", args, { cwd, encoding: "utf8", timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
   const stderr = [(r.stderr ?? "").trim(), r.error?.message ?? ""].filter(Boolean).join("; ");
   return { code: r.status ?? 1, stdout: (r.stdout ?? "").trim(), stderr };
@@ -412,6 +413,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   const branch = str(flags, "branch");
   const title = str(flags, "title");
   const body = str(flags, "body");
+  // Accepted for caller compatibility and echoed in --dry-run; model attribution only.
   const lead = str(flags, "lead") || "claude";
   const base = str(flags, "base") || "main";
   const cwd = str(flags, "repo-dir") || process.cwd();
@@ -493,7 +495,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   let result;
   try {
     result = await landImpl(
-      { branch, base, title, body, lead, ready, hasUpstream: hasUpstream(cwd), knownPrs },
+      { branch, base, title, body, ready, hasUpstream: hasUpstream(cwd), knownPrs },
       deps,
     );
   } catch (err) {

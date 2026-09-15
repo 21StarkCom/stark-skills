@@ -51,6 +51,7 @@ export interface Worker {
 }
 export interface Observation {
   pid?: number;
+  retired?: boolean;
   observedAt: string;
   liveness: "live" | "dead" | "unknown";
   activity: "busy" | "idle" | "unknown";
@@ -74,6 +75,7 @@ export interface Assignment {
   token?: string;
   worker?: Worker;
   observation?: Observation;
+  retired?: { surface: string; at: string };
   acknowledged?: string;
   report?: { kind: string; message: string; at: string };
   integrationBase?: string;
@@ -110,11 +112,12 @@ function isProvider(value: unknown): value is Provider {
 }
 const active = (t: Assignment) => !["pending", "done", "stopped"].includes(t.phase);
 const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped";
-// Completed workers release slots only with fresh idle/dead evidence. Unknown or
-// still-busy workers continue to count toward the operator's concurrency limit.
+// Completed workers release slots with fresh idle/dead or confirmed-retirement
+// evidence. Unconfirmed or still-busy workers count toward the concurrency limit.
 const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
   !(fresh(t.observation) && (t.observation?.liveness === "dead" ||
-    (t.phase === "done" && t.observation?.liveness === "live" && t.observation.activity === "idle"))));
+    (t.phase === "done" && (t.observation?.retired ||
+      (t.observation?.liveness === "live" && t.observation.activity === "idle"))))));
 const overlap = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
 const repositoryKey = (t: TaskSpec) => t.repositoryKey ?? t.repo;
 const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
@@ -216,7 +219,15 @@ export class GruStore {
     return (this.db.prepare("SELECT body FROM runs WHERE id<>?").all(id) as { body: string }[]).map(row => JSON.parse(row.body) as Run);
   }
   readyReason(run: Run, task: Assignment): string | null {
-    const reason = readyReason(run, task, this.others(run.config.id));
+    return this.reasonFor(run, task, this.others(run.config.id));
+  }
+  /** Every task's reason at once; the cross-run snapshot is read and parsed once, not per task. */
+  readyReasons(run: Run): Map<string, string | null> {
+    const others = this.others(run.config.id);
+    return new Map(run.tasks.map(task => [task.spec.id, this.reasonFor(run, task, others)]));
+  }
+  private reasonFor(run: Run, task: Assignment, others: readonly Run[]): string | null {
+    const reason = readyReason(run, task, others);
     if (reason) return reason;
     for (const resource of reservationResources(task)) {
       const owner = this.db.prepare("SELECT run,task FROM owners WHERE resource=?").get(resource) as { run: string; task: string } | undefined;
@@ -271,7 +282,10 @@ export class GruStore {
       this.own(run, task, reservationResources(task));
       task.token = randomUUID(); task.attempts++; task.phase = "reserved";
       task.worker = undefined; task.observation = undefined; task.acknowledged = undefined;
-      task.report = undefined; task.evidence = undefined; task.integrationBase = undefined;
+      // A replacement inherits any unsettled merge grant and its last report.
+      // Keep the original base so an already-merged PR can still be verified.
+      if (!task.integrationBase) task.report = undefined;
+      task.evidence = undefined; task.retired = undefined;
       task.reconnect = undefined; task.stoppedFrom = undefined;
       this.event(run, "reserved", task.token, taskId);
     });
@@ -330,6 +344,8 @@ export class GruStore {
         requireValue(["busy", "idle", "unknown"].includes(observation.activity), "invalid worker activity");
         requireValue(stringList(observation.evidence), "observation evidence is required");
         requireValue(observation.liveness === "unknown" || observation.evidence.length > 0, "liveness requires evidence");
+        requireValue(!observation.retired || (task.phase === "done" && task.retired &&
+          observation.liveness !== "live" && observation.evidence.length > 0), "retirement requires confirmed surface closure");
         task.observation = structuredClone(observation);
         if (task.worker && observation.liveness === "live" && Number.isSafeInteger(observation.pid) && observation.pid! > 1) task.worker.pid = observation.pid;
       }
@@ -358,7 +374,8 @@ export class GruStore {
       requireValue(!task.reconnect?.pending, "reconnect outcome is uncertain; observe it before replacement");
       requireValue(task.reconnect || task.recoveries >= run.config.maxRecoveries, "reconnect the existing session before replacement");
       requireValue(fresh(task.observation), "termination evidence is stale; reconcile again");
-      requireValue(task.phase !== "integrating" && task.stoppedFrom !== "integrating", "reconcile pending merge before recovery");
+      // Replacement does not release the merge owner or erase integrationBase.
+      // The leader can verify a merge that landed, or resume this task's PR.
       task.phase = "pending";
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND resource LIKE 'exclusive:%'").run(id, taskId);
       this.event(run, "recovery", "old worker observed terminal; existing worktree must be preserved", taskId);
@@ -413,7 +430,8 @@ export class GruStore {
   complete(id: string, leader: string, revision: number, taskId: string, token: string, evidence: CompletionEvidence): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
-      requireValue(run.mode === "running" && run.reconciled && task.phase === "integrating", "integration and independent verification required");
+      requireValue(run.mode === "running" && run.reconciled && task.integrationBase &&
+        task.phase !== "done" && task.phase !== "stopping", "integration and independent verification required");
       requireValue(evidence.base === task.integrationBase, "integration base changed; rebase and reverify");
       for (const sha of [evidence.head, evidence.base, evidence.merge]) requireValue(/^[0-9a-f]{40,64}$/.test(sha), "invalid evidence revision");
       requireValue(nonempty(evidence.pr) && nonempty(evidence.review) && nonempty(evidence.verifiedAt), "PR, review, and verification evidence required");
@@ -425,6 +443,15 @@ export class GruStore {
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND (resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%' OR resource LIKE 'exclusive:%')").run(id, taskId);
       if (run.tasks.every(t => t.phase === "done")) run.mode = "complete";
       this.event(run, "verified", evidence.merge, taskId);
+    });
+  }
+  retire(id: string, leader: string, revision: number, taskId: string, token: string, surface: string): Run {
+    return this.transaction(id, leader, revision, run => {
+      const task = this.task(run, taskId, token);
+      requireValue(task.phase === "done" && task.worker?.surface === surface, "retirement must match the verified worker");
+      task.retired = { surface, at: new Date().toISOString() };
+      task.observation = undefined;
+      this.event(run, "retired", `Hermod closed surface ${surface}; saved-session ownership retained`, taskId);
     });
   }
   stop(id: string, leader: string, revision: number): Run {

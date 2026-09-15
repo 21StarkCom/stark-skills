@@ -297,6 +297,18 @@ test("runHeal: missing stderr-file returns error result with code 1", () => {
   assert.ok(r.result.error);
 });
 
+test("runHeal: custom legacy authentication action never runs its verification command", t => {
+  const c = ctx();
+  t.after(() => fs.rmSync(c.dir, { recursive: true, force: true }));
+  const marker = path.join(c.dir, "auth-verification-ran");
+  writePatterns(c, [pattern({ action: "refresh_token", verify_command: `touch '${marker.replace(/'/g, "'\\''")}'` })]);
+  fs.writeFileSync(path.join(c.dir, "stderr.log"), "err");
+  const result = runHeal({ ...baseOpts(c), patternId: "test-pattern", stderrFile: path.join(c.dir, "stderr.log"),
+    mode: "auto", autoPatterns: ["test-pattern"] });
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(result.result.verify_passed, false);
+});
+
 test("runHeal: guard command failure → aborted with reason=guard_failed", () => {
   const c = ctx();
   writePatterns(c, [pattern({ guard: "false" })]); // always exit 1

@@ -107,3 +107,5 @@ the operator's direct authorization under the repository rules.
 Gru cannot relay or manufacture that approval.
 Preserve active and resumable session folders.
 No cleanup sweeps, history rewrites, or unrelated outward-facing actions.
+Keep edits within the assignment's declared files and directories.
+Report any needed scope expansion to Gru before making those edits.

@@ -195,11 +195,19 @@ Preserve uncertain launch and merge outcomes before further dispatch.
 Replace workers only after authoritatively observing old execution termination.
 Reconnects count against `maxRecoveries`; replacement launches count against `maxAttempts`.
 After a settled reconnect, or with no reconnect budget, replacement remains bounded.
-Pending merges and uncertain startups still block replacement.
+Uncertain reconnect startups still block replacement.
+Replacement retains the original integration base, report, and merge ownership.
+Before further work, inspect the existing PR's outcome.
+Use `verify` to settle an existing merge with that retained base.
+Otherwise resume the existing PR; request integration with the updated base when ready.
 Termination requires matching session, surface, and positive PID evidence with `alive=false`.
 Missing PIDs and stale hooks alone remain unknown.
-Verified workers release slots only when freshly observed idle or dead.
+Verified workers release slots when freshly observed idle, dead, or confirmed retired.
+`retire` records successful idle-surface closure before refreshing observations.
+Complete discovery with no live session confirms retired capacity without claiming PID death.
+Incomplete discovery or a resumed live session revokes that capacity evidence.
 Completed engagements retain ticket, worktree, and saved-session identity ownership.
+Follow-up assignments use distinct tickets and worktrees; completion does not authorize their reuse.
 Exhausted budgets require operator input; resume never resets them.
 
 `resume` changes leadership, not worker identity or task ownership.

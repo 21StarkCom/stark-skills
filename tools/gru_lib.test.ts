@@ -177,7 +177,7 @@ test("replacement stays reachable when the reconnect budget is small or spent", 
   assert.equal(other.tasks[1].phase, "pending");
 });
 
-test("a dead integrating worker retains its merge state and blocks replacement", t => {
+test("replacement retains the pending merge grant and can verify its original base", t => {
   const { store } = fixture(t);
   const c = config(); c.maxRecoveries = 0;
   let run = start(store, observe(store, store.create(c)), "one");
@@ -186,10 +186,35 @@ test("a dead integrating worker retains its merge state and blocks replacement",
   run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "a".repeat(40));
   run = store.reconcile("demo", "leader-one", run.revision, Object.fromEntries(run.tasks.map(t => [t.spec.id,
     { observedAt: new Date().toISOString(), liveness: t.spec.id === "one" ? "dead" : "live", activity: "idle", evidence: ["Hermod observation"] }])));
-  assert.throws(() => store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!), /pending merge/);
-  assert.equal(store.read("demo").tasks[0].phase, "integrating");
-  assert.equal(store.read("demo").tasks[0].integrationBase, "a".repeat(40));
+  run = store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!);
+  run = start(store, run, "one");
+  assert.equal(run.tasks[0].integrationBase, "a".repeat(40));
+  assert.equal(run.tasks[0].report?.kind, "ready");
   assert.throws(() => store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "a".repeat(40)), /already owned/);
+  const proof: CompletionEvidence = { base: "a".repeat(40), head: "b".repeat(40), merge: "c".repeat(40),
+    pr: "https://github.com/o/r/pull/1", review: "https://github.com/o/r/pull/1#pullrequestreview-1",
+    verifiedAt: new Date().toISOString(), ticketState: "done",
+    checks: run.tasks[0].spec.checks.map(argv => ({ argv, exitCode: 0, log: "/evidence/check.log" })) };
+  run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof);
+  run = store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "c".repeat(40));
+  assert.equal(run.tasks[1].phase, "integrating");
+});
+
+test("confirmed retirement frees capacity while uncertain or resumed workers count", t => {
+  const { store } = fixture(t);
+  let run = start(store, observe(store, store.create(config())), "one");
+  run = start(store, run, "two");
+  run = finish(store, run, "one"); run = finish(store, run, "two");
+  run = store.retire("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "surface-one");
+  run = store.retire("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "surface-two");
+  run = store.reconcile("demo", "leader-one", run.revision, Object.fromEntries(run.tasks.map(task => [task.spec.id,
+    { observedAt: new Date().toISOString(), liveness: "unknown", activity: "unknown", retired: true, evidence: ["confirmed surface closure"] }])));
+  assert.equal(store.readyReason(run, run.tasks[2]), null);
+  run = observe(store, run, "unknown");
+  assert.equal(store.readyReason(run, run.tasks[2]), "worker limit reached");
+  run = observe(store, run);
+  for (const task of run.tasks.slice(0, 2)) task.observation!.activity = "busy";
+  assert.equal(readyReason(run, run.tasks[2]), "worker limit reached");
 });
 
 test("verified idle workers free dispatch slots while saved-session ownership remains", t => {

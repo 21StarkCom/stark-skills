@@ -44,6 +44,7 @@ reconcile never equates missing discovery with death. Keep uncertain reservation
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
 It requires a merged PR, posted head-matching review, and Alfred completion.
+Replacement retains pending merge grants; verify can settle an earlier merge.
 Each check is bounded by the task's checkTimeoutMs (default 30 minutes).
 Verification removes its disposable checkout and retains its logs.
 When every task is verified the engagement completes; session ownership remains.
@@ -51,7 +52,9 @@ No command publishes, changes authentication, or deletes worker/session worktree
 `;
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
-  if (argv.length === 0 || argv.some(a => ["help", "--help", "-h"].includes(a))) { process.stdout.write(HELP); return 0; }
+  // Only a leading `help` verb or a real `--help`/`-h` flag: a bare "help" scanned
+  // anywhere in argv turns a flag VALUE (--run help, --task help) into a silent exit-0 no-op.
+  if (argv.length === 0 || argv[0] === "help" || argv.some(a => a === "--help" || a === "-h")) { process.stdout.write(HELP); return 0; }
   let store: GruStore | undefined;
   try {
     const verb = argv[0];
@@ -92,8 +95,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const id = flag("run");
     const run = store.read(id);
     if (verb === "status") {
-      const reasons = new Map<string, string | null>();
-      for (const task of run.tasks) reasons.set(task.spec.id, store.readyReason(run, task));
+      const reasons = store.readyReasons(run);
       emit({ ...run, ready: run.tasks.filter(t => reasons.get(t.spec.id) === null).map(t => t.spec.id),
         waiting: run.tasks.filter(t => t.phase !== "done").map(t => ({ task: t.spec.id, reason: reasons.get(t.spec.id) })) }); return 0;
     }
@@ -140,7 +142,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         const assigned = task(flag("token"));
         // complete() will refuse these anyway; refuse before spending a full verification run.
         if (run.mode !== "running" || !run.reconciled) throw new Error("resume and reconcile before verification");
-        if (assigned.phase !== "integrating") throw new Error(`task is ${assigned.phase}; integrate before verification`);
+        if (!assigned.integrationBase || ["done", "stopping"].includes(assigned.phase)) throw new Error(`task is ${assigned.phase}; integrate before verification`);
         const evidenceRoot = path.join(path.dirname(statePath), "evidence", id);
         fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
         const evidenceDir = fs.mkdtempSync(path.join(evidenceRoot, "verification-"));
@@ -154,8 +156,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }
       case "stopped": emit(store.stopped(id, identity, revision, flag("task"), flag("token"))); break;
       case "retire": {
-        await retireWorker(task(flag("token")));
-        emit(store.reconcile(id, identity, revision, await observeWorkers(run))); break;
+        const surface = await retireWorker(task(flag("token")));
+        const retired = store.retire(id, identity, revision, flag("task"), flag("token"), surface);
+        emit(store.reconcile(id, identity, retired.revision, await observeWorkers(retired))); break;
       }
       default: throw new Error(`unknown command ${verb}`);
     }

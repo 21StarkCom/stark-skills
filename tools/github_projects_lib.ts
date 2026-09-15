@@ -15,25 +15,33 @@ import path from "node:path";
 
 import { spawnSync } from "node:child_process";
 
-/** Send one GraphQL request through gh, preserving variables and error details. */
+const TRANSIENT_TRANSPORT = /ECONNRESET|ENOTFOUND|ETIMEDOUT|connection reset|dial tcp|i\/o timeout|TLS handshake timeout/i;
+
+/** Reads may opt into one transport retry; uncertain mutations are never replayed. */
 export async function graphql(
   query: string,
-  opts: { variables?: Record<string, unknown> } = {},
+  opts: { variables?: Record<string, unknown>; retryRead?: boolean } = {},
 ): Promise<unknown> {
-  const result = spawnSync("gh", ["api", "graphql", "--input", "-"], {
-    input: JSON.stringify({ query, variables: opts.variables ?? {} }),
-    encoding: "utf8",
-    timeout: 60_000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  if (result.error || result.status !== 0) {
-    throw new Error(`gh api graphql failed: ${result.error?.message ?? result.stderr}`);
+  for (let attempt = 0; ; attempt++) {
+    const result = spawnSync("gh", ["api", "graphql", "--input", "-"], {
+      input: JSON.stringify({ query, variables: opts.variables ?? {} }),
+      encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    if (result.error || result.status !== 0) {
+      const transport = result.error?.message || (result.stderr ?? "").trim();
+      if (attempt === 0 && opts.retryRead && TRANSIENT_TRANSPORT.test(transport)) continue;
+      // gh may emit a GraphQL error payload only on stdout.
+      const detail = transport || (result.stdout ?? "").trim() || `exit ${result.status}`;
+      throw new Error(`gh api graphql failed: ${detail}`);
+    }
+    const data = JSON.parse(result.stdout) as { errors?: Array<{ message?: string }> };
+    if (data.errors?.length) {
+      throw new Error(`GraphQL errors: ${data.errors.map((e) => e.message ?? JSON.stringify(e)).join("; ")}`);
+    }
+    return data;
   }
-  const data = JSON.parse(result.stdout) as { errors?: Array<{ message?: string }> };
-  if (data.errors?.length) {
-    throw new Error(`GraphQL errors: ${data.errors.map((e) => e.message ?? JSON.stringify(e)).join("; ")}`);
-  }
-  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +308,7 @@ export async function findProject(
   for (;;) {
     const variables: Record<string, unknown> = { org };
     if (cursor) variables["cursor"] = cursor;
-    const result = (await graphql(FIND_PROJECT_Q, { variables })) as GqlEnvelope<{
+    const result = (await graphql(FIND_PROJECT_Q, { variables, retryRead: true })) as GqlEnvelope<{
       organization: {
         projectsV2: { pageInfo: PageInfo; nodes: ProjectNode[] };
       };
@@ -349,6 +357,7 @@ export async function getFieldIds(
   }
 
   const result = (await graphql(GET_FIELD_IDS_Q, {
+    retryRead: true,
     variables: { projectId },
   })) as GqlEnvelope<{ node: { fields: { nodes: FieldNode[] } } }>;
 
@@ -491,6 +500,7 @@ export async function getItemFields(
   itemId: string,
 ): Promise<Record<string, FieldValue>> {
   const result = (await graphql(GET_SINGLE_ITEM_Q, {
+    retryRead: true,
     variables: { itemId },
   })) as GqlEnvelope<{ node: ItemNode }>;
   return parseFieldValues(result.data.node.fieldValues.nodes);
@@ -542,7 +552,7 @@ export async function getItems(
   for (;;) {
     const variables: Record<string, unknown> = { projectId };
     if (cursor) variables["cursor"] = cursor;
-    const result = (await graphql(GET_ITEMS_Q, { variables })) as GqlEnvelope<{
+    const result = (await graphql(GET_ITEMS_Q, { variables, retryRead: true })) as GqlEnvelope<{
       node: { items: { pageInfo: PageInfo; nodes: ItemNode[] } };
     }>;
     const itemsData = result.data.node.items;
@@ -587,6 +597,7 @@ export async function findItemForIssue(
   projectId: string,
 ): Promise<string | null> {
   const result = (await graphql(ISSUE_PROJECT_ITEMS_Q, {
+    retryRead: true,
     variables: { org, repo, number: issueNumber },
   })) as GqlEnvelope<IssueProjectItemsResp>;
   const issue = result.data.repository.issue;
@@ -603,6 +614,7 @@ export async function getIssueNodeId(
   issueNumber: number,
 ): Promise<string> {
   const result = (await graphql(ISSUE_PROJECT_ITEMS_Q, {
+    retryRead: true,
     variables: { org, repo, number: issueNumber },
   })) as GqlEnvelope<IssueProjectItemsResp>;
   const issue = result.data.repository.issue;

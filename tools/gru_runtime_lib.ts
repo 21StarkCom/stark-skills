@@ -101,12 +101,18 @@ export function observations(run: Run, discoveries: Discoveries, sessions: Saved
     const terminated = saved.length === 1 && saved[0].surfaceId === task.worker?.surface &&
       saved[0].alive === false && Number.isSafeInteger(saved[0].pid) && saved[0].pid! > 1;
     const dead = !!task.worker && !discovery.incomplete && !live && gone && terminated;
+    // A confirmed idle-surface closure frees capacity without claiming PID death.
+    // A resumed session, or an incomplete view, revokes that capacity evidence.
+    const retired = Boolean(task.retired && task.retired.surface === task.worker?.surface && !discovery.incomplete &&
+      !discovery.peers.some(p => p.agent === task.spec.provider &&
+        (p.threadId || p.sessionId) === task.worker?.session && p.liveness === "live") &&
+      !saved.some(s => s.alive === true));
     return [task.spec.id, { observedAt: discovery.observedAt, liveness: live ? "live" : dead ? "dead" : "unknown",
       activity: live && ["busy", "idle"].includes(peer!.activity) ? peer!.activity : "unknown",
+      ...(retired ? { retired: true } : {}),
       ...(live && peer!.pid ? { pid: peer!.pid } : {}),
-      evidence: live ? peer!.evidence : dead ? [saved[0].pid === undefined
-        ? `Hermod session ${saved[0].sessionId}: process gone (no pid), peer stale`
-        : `Hermod session ${saved[0].sessionId}: pid ${saved[0].pid} alive=false`] : [] } as Observation];
+      evidence: live ? peer!.evidence : dead ? [`Hermod session ${saved[0].sessionId}: pid ${saved[0].pid} alive=false`]
+        : retired ? [`Hermod closed surface ${task.retired!.surface}; complete discovery finds no live session`] : [] } as Observation];
   }));
 }
 export async function observeWorkers(run: Run, call: Command = command): Promise<Record<string, Observation>> {
@@ -145,12 +151,13 @@ export async function interruptWorker(task: Assignment, call: Command = command)
   if (peer.activity === "busy") await checked(call, ["hermod", "send-key", actual.surface, "escape"]);
   else if (peer.activity !== "idle") throw new Error("worker activity unknown; interruption withheld");
 }
-export async function retireWorker(task: Assignment, call: Command = command): Promise<void> {
+export async function retireWorker(task: Assignment, call: Command = command): Promise<string> {
   if (task.phase !== "done") throw new Error("only verified completed workers can be retired");
   const { peer, actual } = await locateWorker(task, call, "retirement");
   if (peer.activity !== "idle") throw new Error("completed worker must be idle before retirement");
   // Surface closure preserves the session worktree. close-session removes it.
   await checked(call, ["hermod", "close", actual.surface, "--workspace", actual.workspace]);
+  return actual.surface;
 }
 export function validateReconnect(task: Assignment): void {
   if (!task.worker) throw new Error("reconnect requires a recorded worker");
@@ -184,6 +191,11 @@ export function packet(run: Run, task: Assignment): string {
     `Objective: ${task.spec.objective}`,
     `Done-when: ${task.spec.doneWhen}`,
     `Files/directories: ${JSON.stringify(task.spec.files)}`,
+    "Keep edits within those declared files/directories; report any needed scope expansion to Gru.",
+    ...(task.integrationBase ? [
+      `Pending integration base: ${task.integrationBase}. Existing report: ${JSON.stringify(task.report ?? null)}`,
+      "Before new work, ask Gru to inspect the existing PR's merge outcome. Verify an existing merge or resume that PR; do not duplicate it.",
+    ] : []),
     `Dependencies: ${JSON.stringify(task.spec.dependsOn)}`,
     `Exclusive resources: ${JSON.stringify(task.spec.exclusiveResources)}`,
     `Integration resources: ${JSON.stringify(task.spec.mergeResources)}`,
@@ -234,7 +246,7 @@ export async function receive(run: Run, messageId: string, call: Command = comma
 /** Read authoritative PR/commit state and rerun declared checks in a fresh verification worktree. */
 export async function verifyCompletion(task: Assignment, prNumber: number, reviewId: number, evidenceDir: string,
   call: Command = command): Promise<CompletionEvidence> {
-  if (task.phase !== "integrating" || !task.integrationBase || !task.token) throw new Error("integration reservation required");
+  if (["done", "stopping"].includes(task.phase) || !task.integrationBase || !task.token) throw new Error("integration reservation required");
   if (!Number.isSafeInteger(prNumber) || prNumber < 1 || !Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
   const repoDir = task.spec.repo;
   const git = (args: string[]) => checked(call, ["git", ...args], repoDir);

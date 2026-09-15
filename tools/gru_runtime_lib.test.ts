@@ -118,7 +118,7 @@ test("Gru CLI initializes with each supported session environment and rejects re
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const env = { ...process.env };
   for (const key of ["CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) delete env[key];
-  const input: Engagement = { ...run().config, tasks: [{ ...assignment().spec,
+  const input: Engagement = { ...run().config, id: "help", tasks: [{ ...assignment().spec,
     repo: path.resolve(import.meta.dirname, ".."), worktree: path.join(dir, "worker") }] };
   const file = path.join(dir, "engagement.json");
   fs.writeFileSync(file, JSON.stringify(input));
@@ -128,6 +128,10 @@ test("Gru CLI initializes with each supported session environment and rejects re
       { env: { ...env, [key]: input.leader }, encoding: "utf8", timeout: 10_000 });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).config.leader, input.leader);
+    const status = spawnSync(process.execPath, [cli, "status", "--run", "help", "--state", path.join(dir, `${key}.sqlite`)],
+      { env: { ...env, [key]: input.leader }, encoding: "utf8", timeout: 10_000 });
+    assert.equal(status.status, 0, status.stderr);
+    assert.equal(JSON.parse(status.stdout).config.id, "help");
   }
   input.tasks[0].repo = ".";
   fs.writeFileSync(file, JSON.stringify(input));
@@ -165,6 +169,20 @@ test("Hermod discovery omissions and stale hooks never prove death", () => {
   // Discovery is collected per provider namespace.
   assert.equal(observations(run(), { codex: d }).task.liveness, "live");
   assert.throws(() => observations(run(), { claude: d }), /no Hermod discovery for provider codex/);
+});
+
+test("retired surface absence releases capacity without turning unknown PIDs into death", () => {
+  const r = run(); r.tasks[0].phase = "done";
+  r.tasks[0].retired = { surface: "surface", at: new Date().toISOString() };
+  const d = { peers: [], observedAt: new Date().toISOString(), incomplete: false };
+  const saved = [{ sessionId: "session", agent: "codex", surfaceId: "surface" }];
+  assert.equal(observations(r, d, saved).task.retired, true);
+  assert.equal(observations(r, d, saved).task.liveness, "unknown");
+  assert.equal(observations(r, { ...d, incomplete: true }, saved).task.retired, undefined);
+  assert.equal(observations(r, { ...d, peers: [{ ...peer(), surfaceId: "resumed", activity: "busy" }] }, saved).task.retired, undefined);
+  assert.equal(observations(r, d, [{ ...saved[0], alive: true }]).task.retired, undefined);
+  r.tasks[0].retired = undefined;
+  assert.equal(observations(r, d, saved).task.retired, undefined);
 });
 
 test("local PID absence cannot override incomplete Hermod identity evidence", async () => {
@@ -285,6 +303,10 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   assert.equal(proof.head, fixed);
   assert.equal(proof.checks[0].exitCode, 0);
   assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /behavior verified/);
+  // A replacement can verify the prior worker's merge using the retained grant.
+  task.phase = "intake";
+  assert.equal((await verifyCompletion(task, 1, 1, path.join(dir, "replacement-check"), call)).merge, fixed);
+  task.phase = "integrating";
   assert.equal(fs.existsSync(path.join(dir, "passing-check", "worktree-token")), false);
 
   // The same assignment can be verified twice after a leadership race. Finishing
@@ -299,7 +321,7 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
     return result;
   };
   const first = verifyCompletion(task, 1, 1, path.join(dir, "concurrent-first"), delayed);
-  await firstWaiting;
+  await Promise.race([firstWaiting, first]);
   try { await verifyCompletion(task, 1, 1, path.join(dir, "concurrent-second"), call); }
   finally { releaseFirst(); }
   assert.equal((await first).merge, fixed);
