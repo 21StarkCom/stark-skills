@@ -137,23 +137,27 @@ jobs:
           short="${SRC_SHA::7}"
           branch="auto/marketplace-sync"
           title="chore(sync): regenerate from stark-skills@${short}"
-          body="Automated regeneration from stark-skills@${SRC_SHA}. Publication waits for aryeh-stark's completed /code-review xhigh --fix record on the final head, then green CI. The review body must start with <!-- stark-code-review:complete -->. All findings must be fixed or answered before that attestation."
+          body="Automated regeneration from stark-skills@${SRC_SHA}. Publication waits for aryeh-stark's completed /code-review xhigh --fix record on the final head, then green CI. The review body must open with <!-- stark-code-review:complete --> on its own first line, and name the /code-review xhigh --fix invocation. All findings must be fixed or answered before that attestation."
           # Prepare notes before review and before VERSION triggers signing.
           release_version=$(tr -d '\r\n' < VERSION)
           if grep -Fq "## [$release_version]" CHANGELOG.md; then
-            echo "release $release_version already has notes; refusing to rewrite a release" >&2
-            exit 1
+            # Step 3 only advances VERSION when a rendered runtime changed, so this
+            # state means the diff is catalog-only and its notes already shipped with
+            # the release that carries this version. Sync it WITHOUT rewriting a
+            # released section — aborting here would strand a legitimate publish.
+            echo "release $release_version already has notes; syncing without new notes"
+          else
+            awk -v version="$release_version" -v source="$SRC_SHA" -v short="$short" -v date="$(date -u +%F)" '
+              function notes() {
+                print "## [" version "] - " date "\n\n### Changed"
+                print "- Refresh marketplace packages from [stark-skills@" short "](https://github.com/21StarkCom/stark-skills/commit/" source ").\n"
+              }
+              !inserted && /^## \[[0-9]/ { notes(); inserted=1 }
+              { print }
+              END { if (!inserted) notes() }
+            ' CHANGELOG.md > CHANGELOG.md.next
+            mv CHANGELOG.md.next CHANGELOG.md
           fi
-          awk -v version="$release_version" -v source="$SRC_SHA" -v short="$short" -v date="$(date -u +%F)" '
-            function notes() {
-              print "## [" version "] - " date "\n\n### Changed"
-              print "- Refresh marketplace packages from [stark-skills@" short "](https://github.com/21StarkCom/stark-skills/commit/" source ").\n"
-            }
-            !inserted && /^## \[[0-9]/ { notes(); inserted=1 }
-            { print }
-            END { if (!inserted) notes() }
-          ' CHANGELOG.md > CHANGELOG.md.next
-          mv CHANGELOG.md.next CHANGELOG.md
           git config user.name "stark-meridian-ci[bot]"
           git config user.email "stark-meridian-ci[bot]@users.noreply.github.com"
           git switch -C "$branch"
@@ -175,7 +179,11 @@ jobs:
             # read "@950f79f" for a head that was already "@e71f532"; anyone trusting
             # the title was reading a stale claim about live content.
             gh pr edit "$num" --repo 21StarkCom/bifrost --title "$title" --body "$body"
-            if [ "$(gh pr view "$num" --repo 21StarkCom/bifrost --json isDraft --jq '.isDraft')" != true ]; then
+            # Read into a variable first: inside `[ "$(...)" != true ]` a failed
+            # `gh pr view` is invisible to `set -e` and its empty output reads as
+            # "not a draft", so a transport error would force-draft a live PR.
+            is_draft="$(gh pr view "$num" --repo 21StarkCom/bifrost --json isDraft --jq '.isDraft')"
+            if [ "$is_draft" != true ]; then
               gh pr ready "$num" --repo 21StarkCom/bifrost --undo
             fi
             echo "updated existing PR #${num}"
@@ -207,30 +215,50 @@ jobs:
           # the actual command completed and every finding was fixed or answered.
           # Pages are kept together so an older matching page cannot hide a
           # later CHANGES_REQUESTED or DISMISSED review on the same head.
+          # The body is CRLF-normalized first: GitHub returns web-UI-authored
+          # review bodies with \r\n, so matching the raw text would reject the
+          # attestation an operator actually types and burn the whole window
+          # reporting "no completed head review".
           # shellcheck disable=SC2016
           review_filter='[.[][] | select(.user.login == "aryeh-stark" and .commit_id == $head and .submitted_at != null)]
             | sort_by(.submitted_at, .id) | last
             | . != null and (.state == "COMMENTED" or .state == "APPROVED")
-              and ((.body // "") | startswith("<!-- stark-code-review:complete -->\n") and contains("/code-review xhigh --fix"))'
+              and (((.body // "") | gsub("\r\n"; "\n")) | startswith("<!-- stark-code-review:complete -->\n") and contains("/code-review xhigh --fix"))'
+          # Exit 2 = could not read the reviews at all. A transport blip must not
+          # read as "the operator withdrew the attestation" on the pre-merge recheck.
           completed_review() {
-            gh api --paginate --slurp "repos/21StarkCom/bifrost/pulls/$PR/reviews" \
-              | jq -e --arg head "$1" "$review_filter" >/dev/null
+            local reviews
+            reviews="$(gh api --paginate --slurp "repos/21StarkCom/bifrost/pulls/$PR/reviews")" || return 2
+            printf '%s' "$reviews" | jq -e --arg head "$1" "$review_filter" >/dev/null
           }
+          # Deadline, not an iteration count: each pass also spends two API
+          # round-trips, so `seq 1 120` ran 23-27 minutes against a 30-minute
+          # step budget and could leave no room for the ready/CI/merge chain.
           reviewed_head=""
-          for _ in $(seq 1 120); do
+          review_deadline=$(( SECONDS + 1200 ))
+          waits=0
+          while :; do
             head=$(gh pr view "$PR" --repo 21StarkCom/bifrost --json headRefOid --jq '.headRefOid')
             if completed_review "$head"; then
               reviewed_head="$head"
               break
             fi
-            echo "waiting for completed operator review on $head"
+            [ "$SECONDS" -lt "$review_deadline" ] || break
+            # One line a minute — 120 identical lines bury the real failure.
+            if [ $(( waits % 6 )) -eq 0 ]; then
+              echo "waiting for completed operator review on $head"
+            fi
+            waits=$(( waits + 1 ))
             sleep 10
           done
           if [ -z "$reviewed_head" ]; then
             echo "no completed head review within 20 minutes; PR remains unmerged" >&2
             exit 1
           fi
-          if [ "$(gh pr view "$PR" --repo 21StarkCom/bifrost --json isDraft --jq '.isDraft')" = true ]; then
+          # Read into a variable so a failed `gh pr view` fails the step instead of
+          # silently skipping the un-draft and failing later on an unmergeable draft.
+          is_draft="$(gh pr view "$PR" --repo 21StarkCom/bifrost --json isDraft --jq '.isDraft')"
+          if [ "$is_draft" = true ]; then
             gh pr ready "$PR" --repo 21StarkCom/bifrost
           fi
           # A just-pushed head carries no check runs for a few seconds. Wait for one to
@@ -250,12 +278,19 @@ jobs:
           fi
           echo "watching $count check run(s) on PR #${PR}"
           gh pr checks "$PR" --repo 21StarkCom/bifrost --watch --fail-fast
+          # `identical` is not mergeable — main already contains this head, so
+          # `gh pr merge` would fail anyway. Name it here instead of later.
           base_status=$(gh api "repos/21StarkCom/bifrost/compare/main...$reviewed_head" --jq '.status')
-          if [ "$base_status" != ahead ] && [ "$base_status" != identical ]; then
-            echo "reviewed head needs a rebase onto current main; merge withheld" >&2
+          if [ "$base_status" != ahead ]; then
+            echo "reviewed head is '$base_status' vs main, not ahead; merge withheld" >&2
             exit 1
           fi
-          if ! completed_review "$reviewed_head"; then
+          recheck=0
+          completed_review "$reviewed_head" || recheck=$?
+          if [ "$recheck" -eq 2 ]; then
+            echo "could not re-read the PR's reviews before merging; merge withheld" >&2
+            exit 1
+          elif [ "$recheck" -ne 0 ]; then
             echo "completed head review changed while waiting for CI; merge withheld" >&2
             exit 1
           fi

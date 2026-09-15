@@ -37,6 +37,21 @@ test("publisher requires the operator's explicit completed review on the current
   ]) accepted([[{ ...completed(), ...change }]], false);
 });
 
+test("publisher accepts the CRLF body GitHub's web UI actually submits", () => {
+  // GitHub returns web-UI-authored review bodies with \r\n line endings (over
+  // half of any sampled comment page carries them). Matching the raw text would
+  // reject the attestation an operator types by hand and report it as "no
+  // completed head review", pointing the blame at the human, not the parser.
+  const crlf = completed().body.replace(/\n/g, "\r\n");
+  accepted([[{ ...completed(), body: crlf }]], true);
+  accepted([[{ ...completed(), body: crlf.replace("/code-review xhigh --fix", "/code-review high") }]], false);
+  // The marker must still own the whole first line, CRLF or not.
+  accepted([[{ ...completed(), body: "Example marker:\r\n" + crlf }]], false);
+  accepted([[{ ...completed(), body: "<!-- stark-code-review:complete --> /code-review xhigh --fix" }]], false);
+  // A review with no author record must not read as the operator's.
+  accepted([[{ ...completed(), user: null }]], false);
+});
+
 test("publisher keeps all review pages and honors the latest operator verdict", () => {
   const later = { ...completed(), id: 2, submitted_at: "2026-09-15T12:01:00Z" };
   accepted([[completed()], [{ ...later, state: "CHANGES_REQUESTED" }]], false);
