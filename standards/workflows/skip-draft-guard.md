@@ -52,8 +52,16 @@ runs on the current head. Marking ready is the single CI-triggering moment.
 
 - **`push`-triggered workflows** (e.g. deploy-on-merge, `marketplace-sync`) — a
   merge to the default branch is never "draft", so leave them alone. A workflow
-  that itself *opens* a downstream PR which must run its own CI and auto-merge
-  (again `marketplace-sync`) should open that PR **ready**, not draft.
+  that itself *opens* a downstream PR still follows the review gate.
+  `marketplace-sync` opens a draft, waits for a completed review on that head,
+  then marks it ready and waits for CI before merging that exact head.
+  - **The CI that publisher gate reads must NOT be draft-guarded.** bifrost's
+    `ci.yml` is `pull_request: branches: [main]` with the default `types`, so it
+    runs on the draft itself and `gh pr ready` fires nothing extra. Add the guard
+    there (or omit `ready_for_review` from `types` after adding it) and every
+    check on the draft reports `skipped` — the publisher still counts them,
+    `gh pr checks --watch --fail-fast` still exits 0, and it merges a suite that
+    never ran. That is the unrepairable false green described below.
 - **Merge gates that read PR status** — a draft never reaches "Ready to Merge",
   so a status-driven gate is already a no-op on drafts; the guard is just
   belt-and-suspenders (and, for `check_run`-triggered gates, must use `!= true`).

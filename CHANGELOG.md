@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.11.2] - 2026-09-15
+
 ### Fixed
+- Keep Bifrost sync PRs in draft until the latest submitted operator review attests that the required code review completed on the current head. Recheck that review after CI and merge only the reviewed head.
+- Prepare marketplace release notes before publishing, and advance Bifrost's root version for changes to either runtime. A review timeout leaves the PR unmerged.
 <!-- idun:pr-merge pr=960 runId=960 -->
 - fix(STARK-4919): Gru dead-worker detection, slot/owner release on completion, private verify refs, gh maxBuffer + graphql retry
 
