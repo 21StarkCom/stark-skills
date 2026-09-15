@@ -124,6 +124,13 @@ const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
 const fresh = (o?: Observation) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
+/** A replacement must finish intake and receive integration before verification.
+ * A retained merge can still be settled before replacement starts. */
+export function verificationReady(task: Assignment): task is Assignment & { integrationBase: string } {
+  return Boolean(task.integrationBase && !task.reconnect?.pending &&
+    ["integrating", "pending", "stopped"].includes(task.phase));
+}
+
 /** Reject a malformed DAG or unspecified authority before creating any state. */
 export function parseEngagement(value: unknown): Engagement {
   requireValue(isRecord(value), "engagement must be an object");
@@ -430,8 +437,7 @@ export class GruStore {
   complete(id: string, leader: string, revision: number, taskId: string, token: string, evidence: CompletionEvidence): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
-      requireValue(run.mode === "running" && run.reconciled && task.integrationBase &&
-        task.phase !== "done" && task.phase !== "stopping", "integration and independent verification required");
+      requireValue(run.mode === "running" && run.reconciled && verificationReady(task), "integration and independent verification required");
       requireValue(evidence.base === task.integrationBase, "integration base changed; rebase and reverify");
       for (const sha of [evidence.head, evidence.base, evidence.merge]) requireValue(/^[0-9a-f]{40,64}$/.test(sha), "invalid evidence revision");
       requireValue(nonempty(evidence.pr) && nonempty(evidence.review) && nonempty(evidence.verifiedAt), "PR, review, and verification evidence required");

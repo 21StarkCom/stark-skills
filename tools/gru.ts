@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { GruStore, parseEngagement } from "./gru_lib.ts";
+import { GruStore, parseEngagement, verificationReady } from "./gru_lib.ts";
 import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
@@ -142,7 +142,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         const assigned = task(flag("token"));
         // complete() will refuse these anyway; refuse before spending a full verification run.
         if (run.mode !== "running" || !run.reconciled) throw new Error("resume and reconcile before verification");
-        if (!assigned.integrationBase || ["done", "stopping"].includes(assigned.phase)) throw new Error(`task is ${assigned.phase}; integrate before verification`);
+        if (!verificationReady(assigned)) throw new Error(`task is ${assigned.phase}; integrate before verification`);
         const evidenceRoot = path.join(path.dirname(statePath), "evidence", id);
         fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
         const evidenceDir = fs.mkdtempSync(path.join(evidenceRoot, "verification-"));

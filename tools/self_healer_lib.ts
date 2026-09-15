@@ -248,10 +248,7 @@ function executeAction(
   logFn: (msg: string) => void,
 ): ExecutionOutcome {
   let success = true;
-  if (pattern.action === "refresh_token") {
-    logFn("authentication requires operator action");
-    return { success: false, verify_passed: false };
-  } else if (pattern.action === "release_stale_lock") {
+  if (pattern.action === "release_stale_lock") {
     logFn("no lock path specified, skipping");
     success = true;
   } else {
@@ -343,6 +340,14 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
   }
 
   const ts = isoZ(now);
+
+  // Authentication cannot become an automatic repair, even through custom patterns.
+  if (pattern.action === "refresh_token") {
+    const result = { status: "skipped", reason: "operator_action_required", pattern_id: pattern.id,
+      action: pattern.action, verify_passed: false };
+    appendLog({ timestamp: ts, mode: opts.mode, ...result }, logPath);
+    return { exit: 0, result };
+  }
 
   // -------- Gate: guard cmd --------
   if (pattern.guard) {

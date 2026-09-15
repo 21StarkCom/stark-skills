@@ -297,16 +297,25 @@ test("runHeal: missing stderr-file returns error result with code 1", () => {
   assert.ok(r.result.error);
 });
 
-test("runHeal: custom legacy authentication action never runs its verification command", t => {
+test("runHeal: custom authentication action skips commands, budgets, and circuit accounting", t => {
   const c = ctx();
   t.after(() => fs.rmSync(c.dir, { recursive: true, force: true }));
   const marker = path.join(c.dir, "auth-verification-ran");
-  writePatterns(c, [pattern({ action: "refresh_token", verify_command: `touch '${marker.replace(/'/g, "'\\''")}'` })]);
+  const command = `touch '${marker.replace(/'/g, "'\\''")}'`;
+  writePatterns(c, [pattern({ action: "refresh_token", guard: command, verify_command: command, max_per_session: 1 })]);
   fs.writeFileSync(path.join(c.dir, "stderr.log"), "err");
-  const result = runHeal({ ...baseOpts(c), patternId: "test-pattern", stderrFile: path.join(c.dir, "stderr.log"),
-    mode: "auto", autoPatterns: ["test-pattern"] });
+  for (let i = 0; i < 3; i++) {
+    const result = runHeal({ ...baseOpts(c), patternId: "test-pattern", stderrFile: path.join(c.dir, "stderr.log"),
+      mode: "auto", autoPatterns: ["test-pattern"] });
+    assert.equal(result.result.status, "skipped");
+    assert.equal(result.result.reason, "operator_action_required");
+    assert.equal(result.result.verify_passed, false);
+  }
   assert.equal(fs.existsSync(marker), false);
-  assert.equal(result.result.verify_passed, false);
+  assert.equal(sessionCount("test-pattern", c.sessionPath), 0);
+  assert.equal(fs.existsSync(c.circuitsPath), false);
+  assert.equal(alertMarkers(c).length, 0);
+  assert.deepEqual(logLines(c).map(row => row.status), ["skipped", "skipped", "skipped"]);
 });
 
 test("runHeal: guard command failure → aborted with reason=guard_failed", () => {
