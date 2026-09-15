@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { GruStore, parseEngagement, readyReason } from "./gru_lib.ts";
+import { GruStore, parseEngagement } from "./gru_lib.ts";
 import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
@@ -34,7 +34,7 @@ Usage: node tools/gru.ts <command> [options]
 Every command returns JSON. packet returns the complete worker brief as text.
 Writes require the current leader identity and an exact state revision.
 The leader identity is CODEX_THREAD_ID or CLAUDE_CODE_SESSION_ID from the
-environment; use --leader SESSION only when neither is set.
+environment (legacy CLAUDE_SESSION_ID is accepted); --leader is the fallback.
 State defaults to ~/.stark/gru/state.sqlite, shared across runtimes.
 --state PATH overrides the database. --help, -h, help exit without side effects.
 
@@ -46,12 +46,12 @@ verify reruns declared checks in a disposable detached worktree, on fetched main
 It requires a merged PR, posted head-matching review, and Alfred completion.
 Each check is bounded by the task's checkTimeoutMs (default 30 minutes).
 Verification removes its disposable checkout and retains its logs.
-When every task is verified the engagement completes and releases its ownership.
+When every task is verified the engagement completes; session ownership remains.
 No command publishes, changes authentication, or deletes worker/session worktrees.
 `;
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
-  if (argv.length === 0 || argv[0] === "help" || argv.some(a => ["--help", "-h"].includes(a))) { process.stdout.write(HELP); return 0; }
+  if (argv.length === 0 || argv.some(a => ["help", "--help", "-h"].includes(a))) { process.stdout.write(HELP); return 0; }
   let store: GruStore | undefined;
   try {
     const verb = argv[0];
@@ -92,9 +92,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const id = flag("run");
     const run = store.read(id);
     if (verb === "status") {
-      const others = store.others(id);
-      emit({ ...run, ready: run.tasks.filter(t => readyReason(run, t, others) === null).map(t => t.spec.id),
-        waiting: run.tasks.filter(t => t.phase !== "done").map(t => ({ task: t.spec.id, reason: readyReason(run, t, others) })) }); return 0;
+      const reasons = new Map<string, string | null>();
+      for (const task of run.tasks) reasons.set(task.spec.id, store.readyReason(run, task));
+      emit({ ...run, ready: run.tasks.filter(t => reasons.get(t.spec.id) === null).map(t => t.spec.id),
+        waiting: run.tasks.filter(t => t.phase !== "done").map(t => ({ task: t.spec.id, reason: reasons.get(t.spec.id) })) }); return 0;
     }
     const task = (token?: string) => {
       const found = run.tasks.find(t => t.spec.id === flag("task"));

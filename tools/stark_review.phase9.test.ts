@@ -382,7 +382,7 @@ test("pushBranch: origin uses existing git credentials", async () => {
   assert.ok(!calls[0].env?.GIT_ASKPASS, "bare push must not set GIT_ASKPASS");
 });
 
-test("pushBranch: fork pushes straight to the fork URL with existing credentials", async () => {
+test("pushBranch: fork uses existing credentials without changing shared remotes", async () => {
   const wt = tmpDir("wt");
   const calls: { cmd: string; args: string[]; env?: NodeJS.ProcessEnv }[] = [];
   const fakeSpawn = async (cmd: string, args: string[], opts?: { env?: NodeJS.ProcessEnv }) => {
@@ -439,6 +439,18 @@ test("appendAudit appends JSONL line with ts and round, creates parent dirs", ()
   assert.equal(ev0.round, 1);
   assert.deepEqual(ev0.files, ["a.ts"]);
   assert.ok(typeof ev0.ts === "string" && ev0.ts.length > 0);
+});
+
+test("appendAudit redactInLogs scrubs token values from any field", () => {
+  const home = tmpDir("home");
+  const TOKEN = "ghs_topsecret_abc123";
+  appendAudit(
+    { action: "push", round: 2, sha: "deadbeef", reason: `token=${TOKEN} pushed`, head_repo: "o/r" } as any,
+    { home, repo: "o/r", pr: 9, redactInLogs: [TOKEN] },
+  );
+  const raw = fs.readFileSync(auditLogPath(home, "o/r", 9), "utf8");
+  assert.ok(!raw.includes(TOKEN), "token must not appear in audit log");
+  assert.ok(raw.includes("***REDACTED***"));
 });
 
 test("appendAudit emits all six required action types over the lifecycle", () => {

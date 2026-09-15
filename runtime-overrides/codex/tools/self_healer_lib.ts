@@ -248,7 +248,10 @@ function executeAction(
   logFn: (msg: string) => void,
 ): ExecutionOutcome {
   let success = true;
-  if (pattern.action === "release_stale_lock") {
+  if (pattern.action === "refresh_token") {
+    logFn("authentication requires operator action");
+    return { success: false, verify_passed: false };
+  } else if (pattern.action === "release_stale_lock") {
     logFn("no lock path specified, skipping");
     success = true;
   } else {

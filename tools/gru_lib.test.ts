@@ -69,6 +69,7 @@ test("DAG and authority validation reject missing limits, cycles, duplicated own
     (c: any) => { c.tasks[0].checkTimeoutMs = 0; },
     (c: any) => { c.tasks[0].worktree = c.tasks[0].repo + "/"; },
     (c: any) => { c.tasks[0].checkTimeoutMs = "600000"; },
+    (c: any) => { c.tasks[0].checkTimeoutMs = 2_147_483_648; },
   ]) { const c = config(); change(c); assert.throws(() => parseEngagement(c)); }
   const bounded = config(); bounded.tasks[0].checkTimeoutMs = 600_000;
   assert.equal(parseEngagement(bounded).tasks[0].checkTimeoutMs, 600_000);
@@ -176,7 +177,7 @@ test("replacement stays reachable when the reconnect budget is small or spent", 
   assert.equal(other.tasks[1].phase, "pending");
 });
 
-test("a dead integrating worker is replaced while its merge lock stays with the task", t => {
+test("a dead integrating worker retains its merge state and blocks replacement", t => {
   const { store } = fixture(t);
   const c = config(); c.maxRecoveries = 0;
   let run = start(store, observe(store, store.create(c)), "one");
@@ -185,33 +186,50 @@ test("a dead integrating worker is replaced while its merge lock stays with the 
   run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "a".repeat(40));
   run = store.reconcile("demo", "leader-one", run.revision, Object.fromEntries(run.tasks.map(t => [t.spec.id,
     { observedAt: new Date().toISOString(), liveness: t.spec.id === "one" ? "dead" : "live", activity: "idle", evidence: ["Hermod observation"] }])));
-  run = store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!);
-  assert.equal(run.tasks[0].phase, "pending");
+  assert.throws(() => store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!), /pending merge/);
+  assert.equal(store.read("demo").tasks[0].phase, "integrating");
+  assert.equal(store.read("demo").tasks[0].integrationBase, "a".repeat(40));
   assert.throws(() => store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "a".repeat(40)), /already owned/);
-  run = start(store, run, "one");
-  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
-  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "b".repeat(40));
-  assert.equal(run.tasks[0].phase, "integrating");
 });
 
-test("verified completion frees dispatch slots and releases the engagement's ownership", t => {
+test("verified idle workers free dispatch slots while saved-session ownership remains", t => {
   const { store } = fixture(t);
   let run = start(store, observe(store, store.create(config())), "one");
   run = start(store, run, "two");
   run = finish(store, run, "one");
   run = finish(store, run, "two");
-  // Retired or idle workers of verified-done tasks no longer hold a maxWorkers slot.
+  assert.equal(readyReason(run, run.tasks[2]), "worker limit reached");
+  run = observe(store, run);
   assert.equal(readyReason(run, run.tasks[2]), null);
   run = observe(store, run, "unknown");
+  assert.equal(readyReason(run, run.tasks[2]), "worker limit reached");
+  run = observe(store, run);
+  run.tasks[0].observation!.activity = "busy";
+  run.tasks[1].observation!.activity = "busy";
+  assert.equal(readyReason(run, run.tasks[2]), "worker limit reached");
+  run = observe(store, run);
+  for (const task of run.tasks) if (task.observation) task.observation.observedAt = "2020-01-01T00:00:00Z";
+  assert.equal(readyReason(run, run.tasks[2]), "worker limit reached");
+  run = observe(store, run, "dead");
   assert.equal(readyReason(run, run.tasks[2]), null);
   run = start(store, run, "dependent");
   run = finish(store, run, "dependent");
   assert.equal(run.mode, "complete");
-  // A complete engagement cannot resume, so a follow-up may reuse its worktrees and tickets.
+  // The engagement is complete, but its worker sessions can still resume independently.
   const next = config(); next.id = "follow-up";
   let other = observe(store, store.create(next));
-  other = store.reserve("follow-up", "leader-one", other.revision, "one");
-  assert.equal(other.tasks[0].phase, "reserved");
+  assert.match(store.readyReason(other, other.tasks[0])!, /already owned/);
+  assert.throws(() => store.reserve("follow-up", "leader-one", other.revision, "one"), /already owned/);
+});
+
+test("status sees exclusive resources held by another engagement", t => {
+  const { store } = fixture(t);
+  const first = config(); first.tasks[0].exclusiveResources = ["port:4310"];
+  start(store, observe(store, store.create(first)), "one");
+  const second = config(); second.id = "second"; second.tasks[1].exclusiveResources = ["port:4310"];
+  const run = observe(store, store.create(second));
+  assert.match(store.readyReason(run, run.tasks[1])!, /exclusive:port:4310/);
+  assert.throws(() => store.reserve("second", "leader-one", run.revision, "two"), /exclusive:port:4310/);
 });
 
 test("shared integration resources serialize independently implemented tasks", t => {

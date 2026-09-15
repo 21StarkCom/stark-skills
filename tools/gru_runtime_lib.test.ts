@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observations, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
-import type { Assignment, Run } from "./gru_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, interruptWorker, observations, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import type { Assignment, Engagement, Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
   surfaceId: "surface", workspaceId: "workspace", cwd: "/worktree", liveness: "live",
@@ -113,6 +113,30 @@ test("same-session resume retains ownership while leadership transfers require f
   })), /previous leader is still live/);
 });
 
+test("Gru CLI initializes with each supported session environment and rejects relative paths", t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-cli-test-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const env = { ...process.env };
+  for (const key of ["CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) delete env[key];
+  const input: Engagement = { ...run().config, tasks: [{ ...assignment().spec,
+    repo: path.resolve(import.meta.dirname, ".."), worktree: path.join(dir, "worker") }] };
+  const file = path.join(dir, "engagement.json");
+  fs.writeFileSync(file, JSON.stringify(input));
+  const cli = path.join(import.meta.dirname, "gru.ts");
+  for (const key of ["CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) {
+    const result = spawnSync(process.execPath, [cli, "init", "--file", file, "--state", path.join(dir, `${key}.sqlite`)],
+      { env: { ...env, [key]: input.leader }, encoding: "utf8", timeout: 10_000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).config.leader, input.leader);
+  }
+  input.tasks[0].repo = ".";
+  fs.writeFileSync(file, JSON.stringify(input));
+  const invalid = spawnSync(process.execPath, [cli, "init", "--file", file, "--state", path.join(dir, "invalid.sqlite"), "--leader", input.leader],
+    { env, encoding: "utf8", timeout: 10_000 });
+  assert.equal(invalid.status, 2);
+  assert.match(invalid.stderr, /absolute paths/);
+});
+
 test("Hermod discovery omissions and stale hooks never prove death", () => {
   const d = { peers: [peer()], observedAt: new Date().toISOString(), incomplete: false };
   assert.equal(observations(run(), d).task.liveness, "live");
@@ -131,9 +155,9 @@ test("Hermod discovery omissions and stale hooks never prove death", () => {
   // Hermod keeps a stale hook-record peer for the dead session; it is the same evidence, not life.
   assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: 42 }] }, saved).task.liveness, "dead");
   assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: 7 }] }, saved).task.liveness, "unknown");
-  // A record Hermod already stripped of its pid, beside that session's stale peer, is termination too.
+  // Missing PIDs cannot establish termination, including beside a stale peer.
   const gone = [{ sessionId: "session", agent: "codex", surfaceId: "surface" }];
-  assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: undefined }] }, gone).task.liveness, "dead");
+  assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: undefined }] }, gone).task.liveness, "unknown");
   assert.equal(observations(run(), { ...d, peers: [] }, gone).task.liveness, "unknown");
   assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: 42 }] }, gone).task.liveness, "unknown");
   // Absence inside an incomplete namespace proves nothing.
@@ -154,13 +178,18 @@ test("local PID absence cannot override incomplete Hermod identity evidence", as
   assert.ok(calls.some(argv => argv[1] === "msg" && argv.includes("--agent") && argv.includes("codex")));
 });
 
+test("command terminates a real check at its declared timeout", async () => {
+  const result = await command([process.execPath, "-e", "setInterval(() => {}, 1000)"], undefined, 100);
+  assert.equal(result.timedOut, true);
+  assert.equal(result.code, 124);
+});
+
 test("dispatch packet uses the selected runtime and retains the full objective and limits", () => {
   const r = run();
   const brief = packet(r, r.tasks[0]);
   assert.ok(brief.startsWith("Run $team-minion-agent"));
   assert.ok(brief.includes(r.tasks[0].spec.objective));
   assert.ok(brief.includes("No new tickets"));
-  assert.match(brief, /STOP-LIST[^\n]*force-push/);
   r.tasks[0].spec.provider = "claude";
   assert.ok(packet(r, r.tasks[0]).startsWith("Run /team-minion-agent"));
   assert.throws(() => workerFromPeer({ ...peer(), threadId: undefined }), /identity/);
@@ -257,6 +286,53 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   assert.equal(proof.checks[0].exitCode, 0);
   assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /behavior verified/);
   assert.equal(fs.existsSync(path.join(dir, "passing-check", "worktree-token")), false);
+
+  // The same assignment can be verified twice after a leadership race. Finishing
+  // one invocation must not delete refs the other still needs to inspect.
+  let releaseFirst!: () => void;
+  let firstFetched!: () => void;
+  const firstWaiting = new Promise<void>(resolve => { firstFetched = resolve; });
+  const release = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const delayed: Command = async (argv, cwd, timeoutMs) => {
+    const result = await call(argv, cwd, timeoutMs);
+    if (argv[0] === "git" && argv[1] === "fetch") { firstFetched(); await release; }
+    return result;
+  };
+  const first = verifyCompletion(task, 1, 1, path.join(dir, "concurrent-first"), delayed);
+  await firstWaiting;
+  try { await verifyCompletion(task, 1, 1, path.join(dir, "concurrent-second"), call); }
+  finally { releaseFirst(); }
+  assert.equal((await first).merge, fixed);
+  assert.equal(must(["git", "for-each-ref", "--format=%(refname)", "refs/gru"], repoDir), "");
+
+  // The verifier forwards the task's bound, and rejects a timed-out result even
+  // if the process reported zero just as the timeout fired.
+  const bounds: number[] = [];
+  const timed: Command = async (argv, cwd, timeoutMs) => {
+    if (argv[0] === "node") {
+      bounds.push(timeoutMs!);
+      return { code: 0, stdout: "partial output", stderr: "", timedOut: true };
+    }
+    return call(argv, cwd, timeoutMs);
+  };
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "default-timeout"), timed), /check timed out/);
+  task.spec.checkTimeoutMs = 600_000;
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "custom-timeout"), timed), /check timed out/);
+  assert.deepEqual(bounds, [DEFAULT_CHECK_TIMEOUT_MS, 600_000]);
+
+  // Cleanup continues after a transport exception and preserves the check error.
+  const cleanupAttempts: string[][] = [];
+  const cleanupFailure: Command = async (argv, cwd, timeoutMs) => {
+    const result = await timed(argv, cwd, timeoutMs);
+    if (argv[0] === "git" && argv[1] === "update-ref") {
+      cleanupAttempts.push(argv);
+      throw new Error("simulated cleanup transport failure");
+    }
+    return result;
+  };
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "cleanup-failure"), cleanupFailure), /check timed out/);
+  assert.equal(cleanupAttempts.length, 2);
+  assert.equal(must(["git", "for-each-ref", "--format=%(refname)", "refs/gru"], repoDir), "");
 
   // The verification clone cannot see the reviewed head through the squash.
   must(["git", "checkout", "-b", "candidate"], repoDir);

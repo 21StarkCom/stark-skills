@@ -110,10 +110,15 @@ function isProvider(value: unknown): value is Provider {
 }
 const active = (t: Assignment) => !["pending", "done", "stopped"].includes(t.phase);
 const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped";
-// A verified-done task's retired or idle worker must not hold a dispatch slot.
-const occupiesSlot = (t: Assignment) => active(t) || (t.phase !== "done" && Boolean(t.worker && t.observation?.liveness !== "dead"));
+// Completed workers release slots only with fresh idle/dead evidence. Unknown or
+// still-busy workers continue to count toward the operator's concurrency limit.
+const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
+  !(fresh(t.observation) && (t.observation?.liveness === "dead" ||
+    (t.phase === "done" && t.observation?.liveness === "live" && t.observation.activity === "idle"))));
 const overlap = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
 const repositoryKey = (t: TaskSpec) => t.repositoryKey ?? t.repo;
+const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
+  ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
 const fresh = (o?: Observation) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
 /** Reject a malformed DAG or unspecified authority before creating any state. */
@@ -143,7 +148,7 @@ export function parseEngagement(value: unknown): Engagement {
     requireValue((t.files as string[]).length > 0, "declare task files");
     for (const file of t.files as string[]) requireValue(!path.isAbsolute(file) && !file.split("/").some(p => !p || p === "." || p === "..") && !/[?*\\]/.test(file), "files must be normalized relative paths or directories, without globs");
     requireValue(Array.isArray(t.checks) && t.checks.length > 0 && t.checks.every(c => stringList(c) && c.length > 0), "checks must contain explicit command argument arrays");
-    requireValue(t.checkTimeoutMs === undefined || (Number.isSafeInteger(t.checkTimeoutMs) && (t.checkTimeoutMs as number) > 0), "checkTimeoutMs must be a positive integer when set");
+    requireValue(t.checkTimeoutMs === undefined || (Number.isSafeInteger(t.checkTimeoutMs) && (t.checkTimeoutMs as number) > 0 && (t.checkTimeoutMs as number) <= 2_147_483_647), "checkTimeoutMs must be an integer from 1 to 2147483647 when set");
     requireValue(!ids.has(t.id as string), "duplicate task id");
     requireValue(!tickets.has(t.ticket as string), "duplicate ticket ownership");
     requireValue(!trees.has(path.resolve(t.worktree as string)), "duplicate worktree ownership");
@@ -164,7 +169,7 @@ export function parseEngagement(value: unknown): Engagement {
   return config;
 }
 
-/** `otherRuns` carries the other engagements in the same store; reserve() and status must agree. */
+/** Dependency, capacity, and file-ownership checks; GruStore also checks reserved resources. */
 export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[] = []): string | null {
   if (run.mode !== "running") return `engagement is ${run.mode}`;
   if (!run.reconciled) return "reconcile existing workers first";
@@ -207,11 +212,17 @@ export class GruStore {
     return JSON.parse(row.body) as Run;
   }
   /** Every other engagement in this store, for cross-run ownership checks. */
-  others(id: string): Run[] {
+  private others(id: string): Run[] {
     return (this.db.prepare("SELECT body FROM runs WHERE id<>?").all(id) as { body: string }[]).map(row => JSON.parse(row.body) as Run);
   }
   readyReason(run: Run, task: Assignment): string | null {
-    return readyReason(run, task, this.others(run.config.id));
+    const reason = readyReason(run, task, this.others(run.config.id));
+    if (reason) return reason;
+    for (const resource of reservationResources(task)) {
+      const owner = this.db.prepare("SELECT run,task FROM owners WHERE resource=?").get(resource) as { run: string; task: string } | undefined;
+      if (owner && (owner.run !== run.config.id || owner.task !== task.spec.id)) return `resource already owned: ${resource}`;
+    }
+    return null;
   }
   create(input: unknown): Run {
     const config = parseEngagement(input);
@@ -256,9 +267,8 @@ export class GruStore {
   reserve(id: string, leader: string, revision: number, taskId: string): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId);
-      const reason = readyReason(run, task, this.others(id)); requireValue(reason === null, reason ?? "not ready");
-      this.own(run, task, [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
-        ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)]);
+      const reason = this.readyReason(run, task); requireValue(reason === null, reason ?? "not ready");
+      this.own(run, task, reservationResources(task));
       task.token = randomUUID(); task.attempts++; task.phase = "reserved";
       task.worker = undefined; task.observation = undefined; task.acknowledged = undefined;
       task.report = undefined; task.evidence = undefined; task.integrationBase = undefined;
@@ -348,8 +358,7 @@ export class GruStore {
       requireValue(!task.reconnect?.pending, "reconnect outcome is uncertain; observe it before replacement");
       requireValue(task.reconnect || task.recoveries >= run.config.maxRecoveries, "reconnect the existing session before replacement");
       requireValue(fresh(task.observation), "termination evidence is stale; reconcile again");
-      // A dead integrating worker is replaced too: the merge lock stays with this task, so the
-      // replacement re-runs integration and verification discovers whether the merge landed.
+      requireValue(task.phase !== "integrating" && task.stoppedFrom !== "integrating", "reconcile pending merge before recovery");
       task.phase = "pending";
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND resource LIKE 'exclusive:%'").run(id, taskId);
       this.event(run, "recovery", "old worker observed terminal; existing worktree must be preserved", taskId);
@@ -414,11 +423,7 @@ export class GruStore {
       task.evidence = structuredClone(evidence); task.phase = "done";
       // Completion releases integration gates, but a saved session still owns its tree.
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND (resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%' OR resource LIKE 'exclusive:%')").run(id, taskId);
-      if (run.tasks.every(t => t.phase === "done")) {
-        run.mode = "complete";
-        // A complete engagement cannot resume, so its tickets, trees, and identities are free again.
-        this.db.prepare("DELETE FROM owners WHERE run=?").run(id);
-      }
+      if (run.tasks.every(t => t.phase === "done")) run.mode = "complete";
       this.event(run, "verified", evidence.merge, taskId);
     });
   }

@@ -27,14 +27,14 @@
  *                  abandoned run silently resets HEAD onto the old codebase.
  *
  *   land           --repo O/R --branch NAME --title T --body TEXT
- *                  [--base main] [--ready]
+ *                  [--base main] [--lead claude|codex|gemini] [--ready]
  *                  [--known-prs "812,819"] [--repo-dir DIR]
  *                  [--dry-run] [--json]
  *                  Push the already-committed branch (never --force),
  *                  adopt an existing open PR for that head or open a
  *                  fresh one (draft by default, authored by `aryeh-stark`
  *                  via `gh`), and print `{pr, prs}`. `prs` includes all known
- *                  and landed PRs.
+ *                  and landed PRs. `--lead` records model attribution only.
  *
  * Arg-parsing house style mirrors `write_spec_land.ts` / `red_team_fold.ts`.
  */
@@ -62,7 +62,6 @@ function git(args: string[], cwd: string = process.cwd()): Shell {
 }
 
 function gh(args: string[], cwd: string = process.cwd()): Shell {
-  // A paginated PR listing is ~18 KB per PR; Node's 1 MiB default would ENOBUFS at ~58 open PRs.
   const r = spawnSync("gh", args, { cwd, encoding: "utf8", timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
   const stderr = [(r.stderr ?? "").trim(), r.error?.message ?? ""].filter(Boolean).join("; ");
   return { code: r.status ?? 1, stdout: (r.stdout ?? "").trim(), stderr };
@@ -121,7 +120,7 @@ subcommands:
                  --require-base SHA refuses a stale remote branch that
                  does not contain SHA, and asserts HEAD contains it.
   land           --repo OWNER/REPO --branch NAME --title TEXT --body TEXT
-                 [--base BRANCH] [--ready]
+                 [--base BRANCH] [--lead claude|codex|gemini] [--ready]
                  [--known-prs "812,819"] [--repo-dir DIR]
                  [--dry-run] [--json]
                  Push (never --force), adopt-or-create the PR, print
@@ -404,7 +403,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   const flags = parseFlags(
     argv,
     new Set(["json", "dry-run", "ready"]),
-    new Set(["repo", "branch", "title", "body", "base", "known-prs", "repo-dir"]),
+    new Set(["repo", "branch", "title", "body", "base", "lead", "known-prs", "repo-dir"]),
   );
   const json = flags["json"] === true;
   const dryRun = flags["dry-run"] === true;
@@ -413,6 +412,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   const branch = str(flags, "branch");
   const title = str(flags, "title");
   const body = str(flags, "body");
+  const lead = str(flags, "lead") || "claude";
   const base = str(flags, "base") || "main";
   const cwd = str(flags, "repo-dir") || process.cwd();
   const knownPrsCsv = str(flags, "known-prs");
@@ -436,6 +436,7 @@ async function cmdLand(argv: string[]): Promise<number> {
       repo,
       branch,
       base,
+      lead,
       ready,
       title,
       known_prs: knownPrs,
@@ -492,7 +493,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   let result;
   try {
     result = await landImpl(
-      { branch, base, title, body, ready, hasUpstream: hasUpstream(cwd), knownPrs },
+      { branch, base, title, body, lead, ready, hasUpstream: hasUpstream(cwd), knownPrs },
       deps,
     );
   } catch (err) {

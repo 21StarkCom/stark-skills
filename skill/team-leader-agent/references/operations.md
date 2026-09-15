@@ -155,6 +155,7 @@ Use the repository's squash-merge path and inspect the result.
 Never rely on a merge command's exit code alone.
 
 `verify` fetches the PR base and reviewed head, then verifies ancestry.
+Each invocation owns `refs/gru/verification/<uuid>/*`, without writing `FETCH_HEAD`.
 The fetched head must match the submitted review exactly.
 GitHub retains a fetchable [pull request head ref](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/checking-out-pull-requests-locally).
 It requires a submitted review covering the final PR head.
@@ -164,10 +165,12 @@ Do not rely on ignored dependencies from the worker's checkout.
 It retains command, directory, revision, and output logs.
 Its disposable verification checkout is removed after success or failure.
 Worker and session worktrees remain preserved.
-Checks close stdin and use the existing process-group timeout runner, with a
-five-minute limit per command. Keep declared setup and verification commands
-within that bound. A timeout preserves integration ownership for diagnosis and
-retry; it does not prove completion or worker death.
+Cleanup failures preserve the original check error and remain visible.
+Checks close stdin and use the existing process-group timeout runner.
+Each declared check has a 30-minute default timeout.
+Set task `checkTimeoutMs` from 1 through 2147483647 milliseconds to override it.
+A timeout preserves integration ownership for diagnosis and retry.
+It does not prove completion or worker death.
 It checks Alfred's actual ticket identity and completion state.
 
 Release milestones can require additional direct operator actions.
@@ -191,8 +194,12 @@ Retain its existing session and worktree when reconnection succeeds.
 Preserve uncertain launch and merge outcomes before further dispatch.
 Replace workers only after authoritatively observing old execution termination.
 Reconnects count against `maxRecoveries`; replacement launches count against `maxAttempts`.
-Once the reconnect budget is spent, a dead worker is replaced directly.
-A fully verified engagement releases its ticket, worktree, and identity ownership.
+After a settled reconnect, or with no reconnect budget, replacement remains bounded.
+Pending merges and uncertain startups still block replacement.
+Termination requires matching session, surface, and positive PID evidence with `alive=false`.
+Missing PIDs and stale hooks alone remain unknown.
+Verified workers release slots only when freshly observed idle or dead.
+Completed engagements retain ticket, worktree, and saved-session identity ownership.
 Exhausted budgets require operator input; resume never resets them.
 
 `resume` changes leadership, not worker identity or task ownership.

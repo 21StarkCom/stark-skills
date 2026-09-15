@@ -376,6 +376,8 @@ export interface GhJsonOpts {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   paginate?: boolean;
+  /** Optional subprocess environment overrides; never mutates process.env. */
+  envOverride?: Record<string, string>;
 }
 
 export interface GhJsonResult {
@@ -403,6 +405,11 @@ function rejectGraphqlPath(p: string): void {
   if (p.toLowerCase().includes("graph" + "ql")) {
     throw new Error(`REST-only contract violated: ${p} contains forbidden token`);
   }
+}
+
+function buildGhEnv(envOverride?: Record<string, string>): NodeJS.ProcessEnv {
+  if (!envOverride) return { ...process.env };
+  return { ...process.env, ...envOverride };
 }
 
 // ─── Progress logging ───────────────────────────────────────────────────────
@@ -546,7 +553,7 @@ export async function ghJsonOnce(p: string, opts: GhJsonOpts = {}): Promise<GhJs
   args.push(p);
   const input = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
   if (input !== undefined) args.push("--input", "-");
-  const res = await spawnCollect("gh", args, { input, env: { ...process.env } });
+  const res = await spawnCollect("gh", args, { input, env: buildGhEnv(opts.envOverride) });
   const { headers, body, status } = parseHttpStream(res.stdout);
   if (status === 0) {
     throw new GhError(-1, res.stderr || res.stdout, {}, `gh api ${p} failed: ${res.stderr.slice(0, 400)}`);
@@ -653,7 +660,7 @@ function parseConcatenatedJson(raw: string): unknown {
  */
 export async function ghText(args: string[]): Promise<string> {
   for (const a of args) rejectGraphqlPath(a);
-  const res = await spawnCollect("gh", args, { env: { ...process.env } });
+  const res = await spawnCollect("gh", args, { env: buildGhEnv() });
   if (res.status !== 0) {
     throw new Error(`gh ${args.join(" ")} failed (${res.status}): ${res.stderr.slice(0, 400)}`);
   }
@@ -2062,6 +2069,9 @@ export interface AppendAuditOpts {
   home: string;
   repo: string;
   pr: number;
+  /** Strings to redact from any audit value before writing. Used for token
+   * values; the writer scrubs each provided substring with `***REDACTED***`. */
+  redactInLogs?: string[];
 }
 
 export function auditLogPath(home: string, repo: string, pr: number): string {
@@ -2073,13 +2083,36 @@ export function auditLogPath(home: string, repo: string, pr: number): string {
   return path.join(base, repo, `${pr}.jsonl`);
 }
 
+function redactValue(val: unknown, redactions: string[]): unknown {
+  if (!redactions || redactions.length === 0) return val;
+  if (typeof val === "string") {
+    let out: string = val;
+    for (const s of redactions) {
+      if (s) out = out.split(s).join("***REDACTED***");
+    }
+    return out;
+  }
+  if (Array.isArray(val)) {
+    return val.map((v) => redactValue(v, redactions));
+  }
+  if (val && typeof val === "object") {
+    const o: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      o[k] = redactValue(v, redactions);
+    }
+    return o;
+  }
+  return val;
+}
+
 export function appendAudit(event: Omit<AuditEvent, "ts"> & { ts?: string }, opts: AppendAuditOpts): void {
   const filePath = auditLogPath(opts.home, opts.repo, opts.pr);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const enriched: AuditEvent = { ts: event.ts ?? new Date().toISOString(), ...event } as AuditEvent;
+  const redacted = redactValue(enriched, opts.redactInLogs ?? []);
   const fd = fs.openSync(filePath, fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND, 0o600);
   try {
-    fs.writeSync(fd, JSON.stringify(enriched) + "\n");
+    fs.writeSync(fd, JSON.stringify(redacted) + "\n");
   } finally {
     fs.closeSync(fd);
   }
@@ -2440,7 +2473,7 @@ export async function runTrustedTest(opts: RunTrustedTestOpts): Promise<RunTrust
 
 export interface PushTarget {
   /** When 'origin', push to the origin remote of the worktree (same-repo PR).
-   * When 'fork', push straight to `cloneUrl`; git resolves credentials by host. */
+   * When 'fork', push straight to cloneUrl using the existing credentials. */
   kind: "origin" | "fork";
   /** head ref (branch name) — what we push HEAD to. */
   ref: string;
@@ -2510,7 +2543,7 @@ export async function pushBranch(opts: PushOpts): Promise<PushResult> {
   if (!opts.target.cloneUrl) {
     return { ok: false, conflict: false, stderr: "fork push requires cloneUrl" };
   }
-  // A URL is a valid <repository> for git push: nothing to add, remove, or leave behind.
+  // A URL avoids changing remotes shared by concurrent review worktrees.
   return analyzePushResult(await spawn(
     "git", ["-C", opts.worktree, "push", opts.target.cloneUrl, `HEAD:${opts.target.ref}`],
     { env },
