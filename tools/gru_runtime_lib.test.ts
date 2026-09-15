@@ -118,7 +118,8 @@ test("Hermod discovery omissions and stale hooks never prove death", () => {
   assert.equal(observations(run(), d).task.liveness, "live");
   assert.equal(observations(run(), { ...d, peers: [{ ...peer(), cwd: "/worktree/" }] }).task.liveness, "live");
   assert.equal(observations(run(), { ...d, peers: [{ ...peer(), cwd: undefined }] }).task.liveness, "unknown");
-  assert.equal(observations(run(), { ...d, incomplete: true }).task.liveness, "unknown");
+  // A verified live peer is positive evidence even when Hermod could not inspect every process.
+  assert.equal(observations(run(), { ...d, incomplete: true }).task.liveness, "live");
   assert.equal(observations(run(), { ...d, peers: [] }).task.liveness, "unknown");
   assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale" }] }).task.liveness, "unknown");
   const saved = [{ sessionId: "session", agent: "codex", surfaceId: "surface", pid: 42, alive: false }];
@@ -127,14 +128,30 @@ test("Hermod discovery omissions and stale hooks never prove death", () => {
   const unassigned = run(); delete unassigned.tasks[0].worker;
   const malformed = JSON.parse('[{"agent":"codex","alive":false,"pid":42}]');
   assert.equal(observations(unassigned, { ...d, peers: [] }, malformed).task.liveness, "unknown");
+  // Hermod keeps a stale hook-record peer for the dead session; it is the same evidence, not life.
+  assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: 42 }] }, saved).task.liveness, "dead");
+  assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: 7 }] }, saved).task.liveness, "unknown");
+  // A record Hermod already stripped of its pid, beside that session's stale peer, is termination too.
+  const gone = [{ sessionId: "session", agent: "codex", surfaceId: "surface" }];
+  assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: undefined }] }, gone).task.liveness, "dead");
+  assert.equal(observations(run(), { ...d, peers: [] }, gone).task.liveness, "unknown");
+  assert.equal(observations(run(), { ...d, peers: [{ ...peer(), liveness: "stale", pid: 42 }] }, gone).task.liveness, "unknown");
+  // Absence inside an incomplete namespace proves nothing.
+  assert.equal(observations(run(), { ...d, peers: [], incomplete: true }, saved).task.liveness, "unknown");
+  // Discovery is collected per provider namespace.
+  assert.equal(observations(run(), { codex: d }).task.liveness, "live");
+  assert.throws(() => observations(run(), { claude: d }), /no Hermod discovery for provider codex/);
 });
 
 test("local PID absence cannot override incomplete Hermod identity evidence", async () => {
   const r = run(); r.tasks[0].worker!.pid = 999999999;
-  const result = await observeWorkers(r, async argv => response(argv[1] === "sessions"
+  const calls: string[][] = [];
+  const result = await observeWorkers(r, async argv => { calls.push(argv); return response(argv[1] === "sessions"
     ? { sessions: [], totalMatches: 0 }
-    : { peers: [], observedAt: new Date().toISOString(), incomplete: false }));
+    : { peers: [], observedAt: new Date().toISOString(), incomplete: false }); });
   assert.equal(result.task.liveness, "unknown");
+  // The peer query is scoped to the task's provider so one stray process elsewhere cannot taint it.
+  assert.ok(calls.some(argv => argv[1] === "msg" && argv.includes("--agent") && argv.includes("codex")));
 });
 
 test("dispatch packet uses the selected runtime and retains the full objective and limits", () => {
@@ -143,6 +160,7 @@ test("dispatch packet uses the selected runtime and retains the full objective a
   assert.ok(brief.startsWith("Run $team-minion-agent"));
   assert.ok(brief.includes(r.tasks[0].spec.objective));
   assert.ok(brief.includes("No new tickets"));
+  assert.match(brief, /STOP-LIST[^\n]*force-push/);
   r.tasks[0].spec.provider = "claude";
   assert.ok(packet(r, r.tasks[0]).startsWith("Run /team-minion-agent"));
   assert.throws(() => workerFromPeer({ ...peer(), threadId: undefined }), /identity/);
@@ -174,6 +192,9 @@ test("only a delivered message from the assigned session reaches the leader", as
     { ...record, from: "other-worker" }, { ...record, sender: { threadId: "other-session" } },
     { ...record, destination: { threadId: "other-leader" } },
   ]) await assert.rejects(receive(run(), messageId, async () => response(changed)));
+  // Hermod exits 4/5 for failed/uncertain records while still printing them: a verdict, not a transport error.
+  await assert.rejects(receive(run(), messageId, async () => ({ ...response({ ...record, state: "uncertain" }), code: 5 })), /not confirmed/);
+  await assert.rejects(receive(run(), messageId, async () => ({ code: 2, stdout: "", stderr: "socket closed" })), /hermod failed \(2\)/);
 });
 
 test("completion reruns behavior on fetched main and refuses an inaccurate green claim", async t => {

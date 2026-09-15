@@ -10,7 +10,7 @@ export function canonicalWorktree(value: string): string {
 
 export type Provider = "claude" | "codex";
 export type Phase = "pending" | "reserved" | "intake" | "working" | "blocked" |
-  "review" | "integrating" | "verifying" | "done" | "stopping" | "stopped" | "failed";
+  "review" | "integrating" | "done" | "stopping" | "stopped";
 export interface TaskSpec {
   id: string;
   ticket: string;
@@ -27,6 +27,8 @@ export interface TaskSpec {
   mergeResources: string[];
   doneWhen: string;
   checks: string[][];
+  /** Wall-clock bound per verification check; defaults to DEFAULT_CHECK_TIMEOUT_MS. */
+  checkTimeoutMs?: number;
 }
 export interface Engagement {
   id: string;
@@ -106,9 +108,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isProvider(value: unknown): value is Provider {
   return value === "codex" || value === "claude";
 }
-const active = (t: Assignment) => !["pending", "done", "stopped", "failed"].includes(t.phase);
+const active = (t: Assignment) => !["pending", "done", "stopped"].includes(t.phase);
 const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped";
-const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker && t.observation?.liveness !== "dead");
+// A verified-done task's retired or idle worker must not hold a dispatch slot.
+const occupiesSlot = (t: Assignment) => active(t) || (t.phase !== "done" && Boolean(t.worker && t.observation?.liveness !== "dead"));
 const overlap = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
 const repositoryKey = (t: TaskSpec) => t.repositoryKey ?? t.repo;
 const fresh = (o?: Observation) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
@@ -135,11 +138,12 @@ export function parseEngagement(value: unknown): Engagement {
     requireValue(t.repositoryKey === undefined || nonempty(t.repositoryKey), "invalid repository identity");
     for (const key of ["model", "effort"]) requireValue(t[key] === undefined || nonempty(t[key]), `${key} must be nonempty when selected`);
     requireValue(path.isAbsolute(t.repo as string) && path.isAbsolute(t.worktree as string), "repo and worktree must be absolute paths");
-    requireValue(t.repo !== t.worktree, "worker needs an isolated worktree");
+    requireValue(path.resolve(t.repo as string) !== path.resolve(t.worktree as string), "worker needs an isolated worktree");
     for (const key of ["dependsOn", "files", "exclusiveResources", "mergeResources"]) requireValue(stringList(t[key]), `${key} must be a string array`);
     requireValue((t.files as string[]).length > 0, "declare task files");
     for (const file of t.files as string[]) requireValue(!path.isAbsolute(file) && !file.split("/").some(p => !p || p === "." || p === "..") && !/[?*\\]/.test(file), "files must be normalized relative paths or directories, without globs");
     requireValue(Array.isArray(t.checks) && t.checks.length > 0 && t.checks.every(c => stringList(c) && c.length > 0), "checks must contain explicit command argument arrays");
+    requireValue(t.checkTimeoutMs === undefined || (Number.isSafeInteger(t.checkTimeoutMs) && (t.checkTimeoutMs as number) > 0), "checkTimeoutMs must be a positive integer when set");
     requireValue(!ids.has(t.id as string), "duplicate task id");
     requireValue(!tickets.has(t.ticket as string), "duplicate ticket ownership");
     requireValue(!trees.has(path.resolve(t.worktree as string)), "duplicate worktree ownership");
@@ -160,7 +164,8 @@ export function parseEngagement(value: unknown): Engagement {
   return config;
 }
 
-export function readyReason(run: Run, task: Assignment): string | null {
+/** `otherRuns` carries the other engagements in the same store; reserve() and status must agree. */
+export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[] = []): string | null {
   if (run.mode !== "running") return `engagement is ${run.mode}`;
   if (!run.reconciled) return "reconcile existing workers first";
   if (task.phase !== "pending") return `task is ${task.phase}`;
@@ -174,6 +179,12 @@ export function readyReason(run: Run, task: Assignment): string | null {
       return `file ownership conflicts with ${other.spec.id}`;
     }
     if (task.spec.exclusiveResources.some(r => other.spec.exclusiveResources.includes(r))) return `resource owned by ${other.spec.id}`;
+  }
+  // Directory overlap matters across engagements too, not just within this DAG.
+  for (const otherRun of otherRuns) for (const other of otherRun.tasks.filter(ownsFiles)) {
+    if (repositoryKey(task.spec) === repositoryKey(other.spec) && task.spec.files.some(a => other.spec.files.some(b => overlap(a, b)))) {
+      return `file ownership conflicts with ${other.spec.ticket}`;
+    }
   }
   return null;
 }
@@ -194,6 +205,13 @@ export class GruStore {
     const row = this.db.prepare("SELECT body FROM runs WHERE id=?").get(id) as { body: string } | undefined;
     requireValue(row, `unknown engagement ${id}`);
     return JSON.parse(row.body) as Run;
+  }
+  /** Every other engagement in this store, for cross-run ownership checks. */
+  others(id: string): Run[] {
+    return (this.db.prepare("SELECT body FROM runs WHERE id<>?").all(id) as { body: string }[]).map(row => JSON.parse(row.body) as Run);
+  }
+  readyReason(run: Run, task: Assignment): string | null {
+    return readyReason(run, task, this.others(run.config.id));
   }
   create(input: unknown): Run {
     const config = parseEngagement(input);
@@ -238,12 +256,7 @@ export class GruStore {
   reserve(id: string, leader: string, revision: number, taskId: string): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId);
-      const reason = readyReason(run, task); requireValue(reason === null, reason ?? "not ready");
-      // Directory overlap matters across engagements too, not just within this DAG.
-      const otherRuns = this.db.prepare("SELECT body FROM runs WHERE id<>?").all(id) as { body: string }[];
-      for (const row of otherRuns) for (const other of (JSON.parse(row.body) as Run).tasks.filter(ownsFiles)) {
-        requireValue(repositoryKey(task.spec) !== repositoryKey(other.spec) || !task.spec.files.some(a => other.spec.files.some(b => overlap(a, b))), `file ownership conflicts with ${other.spec.ticket}`);
-      }
+      const reason = readyReason(run, task, this.others(id)); requireValue(reason === null, reason ?? "not ready");
       this.own(run, task, [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
         ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)]);
       task.token = randomUUID(); task.attempts++; task.phase = "reserved";
@@ -279,11 +292,12 @@ export class GruStore {
       requireValue(nonempty(message), "report message is required");
       requireValue(["ack", "progress", "blocked", "ready", "complete"].includes(kind), "invalid report kind");
       if (kind === "ack") {
-        requireValue(task.phase === "intake", "intake already acknowledged or not started");
+        requireValue(!task.acknowledged && (task.phase === "intake" || task.phase === "blocked"), "intake already acknowledged or not started");
         requireValue(message === task.spec.doneWhen, "intake must acknowledge the exact done-when");
         task.acknowledged = new Date().toISOString(); task.phase = "working";
       } else {
-        requireValue(task.acknowledged, "intake acknowledgment required");
+        // An intake blocker (ambiguous done-when, missing limit) is reportable before any ack.
+        requireValue(task.acknowledged || kind === "blocked", "intake acknowledgment required");
         if (kind === "blocked" && task.phase !== "integrating") task.phase = "blocked";
         if (kind === "ready") {
           requireValue(["working", "blocked", "review"].includes(task.phase), "an in-flight integration cannot be superseded by a report");
@@ -329,11 +343,14 @@ export class GruStore {
       requireValue(run.mode === "running" && run.reconciled, "resume and reconcile first");
       requireValue(active(task) || task.phase === "stopped", "task is not recoverable");
       requireValue(task.observation?.liveness === "dead", "replacement requires observed termination; unknown is not dead");
-      requireValue(task.recoveries < run.config.maxRecoveries && task.attempts < run.config.maxAttempts, "recovery budget exhausted");
-      requireValue(task.reconnect && !task.reconnect.pending, "reconnect the existing session before replacement");
+      // Reconnects spend maxRecoveries; a replacement launch spends maxAttempts (reserve increments it).
+      requireValue(task.attempts < run.config.maxAttempts, "attempt budget exhausted");
+      requireValue(!task.reconnect?.pending, "reconnect outcome is uncertain; observe it before replacement");
+      requireValue(task.reconnect || task.recoveries >= run.config.maxRecoveries, "reconnect the existing session before replacement");
       requireValue(fresh(task.observation), "termination evidence is stale; reconcile again");
-      requireValue(task.phase !== "integrating" && task.stoppedFrom !== "integrating", "reconcile pending merge before recovery");
-      task.recoveries++; task.phase = "pending";
+      // A dead integrating worker is replaced too: the merge lock stays with this task, so the
+      // replacement re-runs integration and verification discovers whether the merge landed.
+      task.phase = "pending";
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND resource LIKE 'exclusive:%'").run(id, taskId);
       this.event(run, "recovery", "old worker observed terminal; existing worktree must be preserved", taskId);
     });
@@ -397,7 +414,11 @@ export class GruStore {
       task.evidence = structuredClone(evidence); task.phase = "done";
       // Completion releases integration gates, but a saved session still owns its tree.
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND (resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%' OR resource LIKE 'exclusive:%')").run(id, taskId);
-      if (run.tasks.every(t => t.phase === "done")) run.mode = "complete";
+      if (run.tasks.every(t => t.phase === "done")) {
+        run.mode = "complete";
+        // A complete engagement cannot resume, so its tickets, trees, and identities are free again.
+        this.db.prepare("DELETE FROM owners WHERE run=?").run(id);
+      }
       this.event(run, "verified", evidence.merge, taskId);
     });
   }

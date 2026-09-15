@@ -97,8 +97,6 @@ export interface LandInput {
   base: string;
   title: string;
   body: string;
-  /** Copilot's `--lead` value (`claude` | `codex` | `gemini`). */
-  lead: string;
   /** `--ready`/`--no-draft` — false opens/keeps a draft PR (repo default). */
   ready: boolean;
   /** Whether `branch` already tracks an origin ref (selects push argv). */

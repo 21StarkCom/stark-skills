@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
-import { GruStore, parseEngagement, readyReason, type Engagement, type Run, type Worker } from "./gru_lib.ts";
+import { GruStore, parseEngagement, readyReason, type CompletionEvidence, type Engagement, type Run, type Worker } from "./gru_lib.ts";
 
 const config = (): Engagement => ({ id: "demo", objective: "Implement independent tasks, then integrate",
   leader: "leader-one", maxWorkers: 2, maxAttempts: 2, maxRecoveries: 2,
@@ -34,6 +34,17 @@ function report(store: GruStore, run: Run, id: string, kind: "ack" | "ready" | "
   const task = run.tasks.find(t => t.spec.id === id)!;
   return store.report(run.config.id, run.config.leader, run.revision, id, task.token!, worker(id).session, kind, message ?? task.spec.doneWhen);
 }
+/** Drive an attached task through ack, ready, integrate, and verified completion. */
+function finish(store: GruStore, run: Run, id: string): Run {
+  run = report(store, run, id, "ack"); run = report(store, run, id, "ready");
+  const base = "a".repeat(40);
+  run = store.integrate(run.config.id, run.config.leader, run.revision, id, run.tasks.find(t => t.spec.id === id)!.token!, base);
+  const task = run.tasks.find(t => t.spec.id === id)!;
+  const evidence: CompletionEvidence = { head: "b".repeat(40), base, merge: "c".repeat(40), pr: "https://github.com/o/r/pull/1",
+    review: "https://github.com/o/r/pull/1#pullrequestreview-1", verifiedAt: new Date().toISOString(), ticketState: "done",
+    checks: task.spec.checks.map((argv, i) => ({ argv, exitCode: 0, log: `/evidence/check-${i}.log` })) };
+  return store.complete(run.config.id, run.config.leader, run.revision, id, task.token!, evidence);
+}
 
 test("attachment recognizes a symlink alias of the reserved worktree", t => {
   const { store, file } = fixture(t);
@@ -55,7 +66,12 @@ test("DAG and authority validation reject missing limits, cycles, duplicated own
     (c: any) => { c.tasks[0].dependsOn = ["missing"]; },
     (c: any) => { c.tasks[1].ticket = c.tasks[0].ticket; },
     (c: any) => { c.tasks[1].worktree = c.tasks[0].worktree; },
+    (c: any) => { c.tasks[0].checkTimeoutMs = 0; },
+    (c: any) => { c.tasks[0].worktree = c.tasks[0].repo + "/"; },
+    (c: any) => { c.tasks[0].checkTimeoutMs = "600000"; },
   ]) { const c = config(); change(c); assert.throws(() => parseEngagement(c)); }
+  const bounded = config(); bounded.tasks[0].checkTimeoutMs = 600_000;
+  assert.equal(parseEngagement(bounded).tasks[0].checkTimeoutMs, 600_000);
 });
 
 test("SQLite database and WAL sidecars stay private under a permissive umask", t => {
@@ -90,6 +106,10 @@ test("intake, worker identities, and dependency completion cannot be inferred fr
   let run = start(store, observe(store, store.create(config())), "one");
   assert.throws(() => report(store, run, "one", "complete", "Everything merged"), /intake acknowledgment/);
   assert.throws(() => report(store, run, "one", "ack", "I am ready"), /exact done-when/);
+  // An intake blocker is durable before any ack; the ack still follows once resolved.
+  run = report(store, run, "one", "blocked", "The done-when is ambiguous");
+  assert.equal(run.tasks[0].phase, "blocked");
+  assert.throws(() => report(store, run, "one", "ready", "Not yet"), /intake acknowledgment/);
   assert.throws(() => store.report("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "imposter", "ack", run.tasks[0].spec.doneWhen), /session/);
   run = report(store, run, "one", "ack");
   run = report(store, run, "one", "complete", "All checks green, PR merged, ticket done");
@@ -134,6 +154,66 @@ test("resume fences stale leaders and uncertain workers cannot consume another r
   assert.throws(() => store.recover("demo", "leader-two", run.revision, "one", run.tasks[0].token!), /budget exhausted/);
 });
 
+test("replacement stays reachable when the reconnect budget is small or spent", t => {
+  const { store } = fixture(t);
+  const tight = config(); tight.maxRecoveries = 1;
+  let run = start(store, observe(store, store.create(tight)), "one");
+  const token = run.tasks[0].token!;
+  run = observe(store, run, "dead");
+  run = store.beginReconnect("demo", "leader-one", run.revision, "one", token);
+  run = observe(store, run, "live");
+  run = store.finishReconnect("demo", "leader-one", run.revision, "one", token);
+  run = observe(store, run, "dead");
+  assert.throws(() => store.beginReconnect("demo", "leader-one", run.revision, "one", token), /budget exhausted/);
+  run = store.recover("demo", "leader-one", run.revision, "one", token);
+  assert.equal(run.tasks[0].phase, "pending");
+  assert.equal(run.tasks[0].recoveries, 1);
+  // With no reconnect budget at all, a dead worker is replaced directly.
+  const none = config(); none.id = "no-reconnects"; none.maxRecoveries = 0;
+  let other = start(store, observe(store, store.create(none)), "two");
+  other = observe(store, other, "dead");
+  other = store.recover("no-reconnects", "leader-one", other.revision, "two", other.tasks[1].token!);
+  assert.equal(other.tasks[1].phase, "pending");
+});
+
+test("a dead integrating worker is replaced while its merge lock stays with the task", t => {
+  const { store } = fixture(t);
+  const c = config(); c.maxRecoveries = 0;
+  let run = start(store, observe(store, store.create(c)), "one");
+  run = start(store, run, "two");
+  for (const id of ["one", "two"]) { run = report(store, run, id, "ack"); run = report(store, run, id, "ready"); }
+  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "a".repeat(40));
+  run = store.reconcile("demo", "leader-one", run.revision, Object.fromEntries(run.tasks.map(t => [t.spec.id,
+    { observedAt: new Date().toISOString(), liveness: t.spec.id === "one" ? "dead" : "live", activity: "idle", evidence: ["Hermod observation"] }])));
+  run = store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!);
+  assert.equal(run.tasks[0].phase, "pending");
+  assert.throws(() => store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "a".repeat(40)), /already owned/);
+  run = start(store, run, "one");
+  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "b".repeat(40));
+  assert.equal(run.tasks[0].phase, "integrating");
+});
+
+test("verified completion frees dispatch slots and releases the engagement's ownership", t => {
+  const { store } = fixture(t);
+  let run = start(store, observe(store, store.create(config())), "one");
+  run = start(store, run, "two");
+  run = finish(store, run, "one");
+  run = finish(store, run, "two");
+  // Retired or idle workers of verified-done tasks no longer hold a maxWorkers slot.
+  assert.equal(readyReason(run, run.tasks[2]), null);
+  run = observe(store, run, "unknown");
+  assert.equal(readyReason(run, run.tasks[2]), null);
+  run = start(store, run, "dependent");
+  run = finish(store, run, "dependent");
+  assert.equal(run.mode, "complete");
+  // A complete engagement cannot resume, so a follow-up may reuse its worktrees and tickets.
+  const next = config(); next.id = "follow-up";
+  let other = observe(store, store.create(next));
+  other = store.reserve("follow-up", "leader-one", other.revision, "one");
+  assert.equal(other.tasks[0].phase, "reserved");
+});
+
 test("shared integration resources serialize independently implemented tasks", t => {
   const { store } = fixture(t);
   let run = start(store, observe(store, store.create(config())), "one");
@@ -155,6 +235,9 @@ test("stopping freezes dispatch, requires terminal evidence, and retains resumab
   assert.equal(run.mode, "stopped");
   const otherConfig = config(); otherConfig.id = "competing-run";
   let other = observe(store, store.create(otherConfig));
+  // status and reserve share one readiness verdict, across engagements too.
+  assert.match(store.readyReason(other, other.tasks[0])!, /file ownership conflicts with STARK-100/);
+  assert.equal(readyReason(other, other.tasks[0]), null);
   assert.throws(() => store.reserve("competing-run", "leader-one", other.revision, "one"), /ownership|owned/);
 });
 

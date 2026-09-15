@@ -15,7 +15,7 @@
  *   --changed            review only HCL changed vs the merge-base / working tree
  *   --no-tools           skip host scanners (review by reading only)
  *   --min-severity S     drop findings below S (critical|high|medium|low)
- *   --pr N --repo O/R    post findings to PR N (authored by the first agent's App)
+ *   --pr N --repo O/R    post findings to PR N (through the operator's gh login)
  *   --timeout SEC        per-agent timeout (default from config)
  *   --dry-run            resolve agents + files, dispatch nothing
  *   --json               print the receipt as JSON instead of the markdown report

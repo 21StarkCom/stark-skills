@@ -1,10 +1,9 @@
 /**
- * Pre-flight environment validation — TypeScript port of
- * `scripts/preflight.py`.
+ * Pre-flight environment validation.
  *
- * Runs a fixed registry of checks (CLI presence, keychain entries, App
- * auth, working-dir cleanliness, agent rotation, cost hard-stop, stale
- * locks, red-team config) and aggregates results into a
+ * Runs a fixed registry of checks (CLI presence, gh identity, working-dir
+ * cleanliness, model resolution, cost hard-stop, stale locks, deprecated
+ * config) and aggregates results into a
  * `PreFlightResult` whose `overall` field is one of `ready` /
  * `degraded` / `blocked`. Critical-tagged check failures escalate the
  * aggregate to `blocked`; non-critical failures or warns escalate to
@@ -127,12 +126,18 @@ export function checkCliGemini(): [CheckStatus, string] {
   return ok ? ["pass", out] : ["fail", out];
 }
 
-export function checkGithubUser(): [CheckStatus, string] {
-  const { ok, out } = runCmd(["gh", "api", "user", "--jq", ".login"]);
+/** Every PR action authors as this login; review posting rides the same gh session. */
+export const EXPECTED_GH_LOGIN = "aryeh-stark";
+
+export function checkGithubUser(env: NodeJS.ProcessEnv = process.env): [CheckStatus, string] {
+  const { ok, out } = runCmd(["gh", "api", "user", "--jq", ".login"], 10_000);
   if (!ok) return ["fail", `gh: ${out}`];
-  return out.trim() === "aryeh-stark"
-    ? ["pass", "gh authenticated as aryeh-stark"]
-    : ["fail", `gh identity is ${out.trim() || "unknown"}; expected aryeh-stark`];
+  const login = out.trim();
+  if (login === EXPECTED_GH_LOGIN) return ["pass", `gh authenticated as ${EXPECTED_GH_LOGIN}`];
+  // The human-only `idun user --swap` relief window exports GH_TOKEN; name the way back.
+  const swap = env.GH_TOKEN || env.GITHUB_TOKEN || env.STARK_GH_USER
+    ? " (identity swap active: unset GH_TOKEN GITHUB_TOKEN STARK_GH_USER when the rate-limited command is done)" : "";
+  return ["fail", `gh identity is ${login || "unknown"}; expected ${EXPECTED_GH_LOGIN}${swap}`];
 }
 
 export function checkWorkingDir(): [CheckStatus, string] {
@@ -277,6 +282,10 @@ export function checkDeprecatedConfig(): [CheckStatus, string] {
       "automation.model_pins found in org/repo config override — remove it; use the 'models' block instead",
     ];
   }
+  // The review GitHub Apps are retired; a leftover block is inert but misleading.
+  if ("github_apps" in config) {
+    return ["warn", "github_apps found in config — remove it; reviews post through the operator's gh login"];
+  }
   return ["pass", "no deprecated config keys"];
 }
 
@@ -322,7 +331,7 @@ export const CHECKS: ReadonlyArray<CheckDefinition> = [
   { name: "check_cli_claude", fn: checkCliClaude, critical: false },
   { name: "check_cli_codex", fn: checkCliCodex, critical: false },
   { name: "check_cli_gemini", fn: checkCliGemini, critical: false },
-  { name: "check_github_user", fn: checkGithubUser, critical: true },
+  { name: "check_github_user", fn: () => checkGithubUser(), critical: true },
   { name: "check_working_dir", fn: checkWorkingDir, critical: false },
   {
     name: "check_model_resolution",
