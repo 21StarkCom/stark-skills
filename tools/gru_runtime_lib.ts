@@ -88,28 +88,31 @@ export function observations(run: Run, discoveries: Discoveries, sessions: Saved
       (p.threadId || p.sessionId) === task.worker!.session && p.agent === task.spec.provider);
     // A verified live peer is positive evidence even when Hermod could not inspect every
     // process in the namespace; only the death inference below needs a complete view.
-    // Normalize the worktree the same way attach() did (path.resolve): a benign
+    // Normalize the worktree the same way attach() did: a benign
     // path-representation drift from Hermod must not demote a live worker to "unknown".
     const live = peer?.liveness === "live" &&
       peer.surfaceId === task.worker?.surface && typeof peer.cwd === "string" &&
       canonicalWorktree(peer.cwd) === canonicalWorktree(task.worker!.worktree);
     const saved = sessions.filter(s => s.sessionId === task.worker?.session && s.agent === task.spec.provider);
-    // Hermod keeps a "stale" hook-record peer for a session it has watched die; that is the
-    // same record `hermod sessions` reports as alive=false, not a sign of life. Absence from
-    // an incomplete discovery is still not proof of anything.
-    const stale = peer?.liveness === "stale";
-    const gone = !peer || (stale && peer.pid === saved[0]?.pid);
-    // Termination evidence: a probed pid reported alive=false, or a record Hermod has already
-    // stripped of its pid ("absent once the process is gone") alongside that session's stale peer.
+    // A stale peer can coexist with explicit termination evidence. A missing PID or
+    // incomplete discovery remains uncertain, including startup without a recorded worker.
+    const gone = !peer || (peer.liveness === "stale" && peer.pid === saved[0]?.pid &&
+      peer.surfaceId === task.worker?.surface);
     const terminated = saved.length === 1 && saved[0].surfaceId === task.worker?.surface &&
-      (saved[0].alive === false ? Number.isSafeInteger(saved[0].pid) : stale && saved[0].pid === undefined && saved[0].alive === undefined);
+      saved[0].alive === false && Number.isSafeInteger(saved[0].pid) && saved[0].pid! > 1;
     const dead = !!task.worker && !discovery.incomplete && !live && gone && terminated;
+    // A confirmed idle-surface closure frees capacity without claiming PID death.
+    // A resumed session, or an incomplete view, revokes that capacity evidence.
+    const retired = Boolean(task.retired && task.retired.surface === task.worker?.surface && !discovery.incomplete &&
+      !discovery.peers.some(p => p.agent === task.spec.provider &&
+        (p.threadId || p.sessionId) === task.worker?.session && p.liveness === "live") &&
+      !saved.some(s => s.alive === true));
     return [task.spec.id, { observedAt: discovery.observedAt, liveness: live ? "live" : dead ? "dead" : "unknown",
       activity: live && ["busy", "idle"].includes(peer!.activity) ? peer!.activity : "unknown",
+      ...(retired ? { retired: true } : {}),
       ...(live && peer!.pid ? { pid: peer!.pid } : {}),
-      evidence: live ? peer!.evidence : dead ? [saved[0].pid === undefined
-        ? `Hermod session ${saved[0].sessionId}: process gone (no pid), peer stale`
-        : `Hermod session ${saved[0].sessionId}: pid ${saved[0].pid} alive=false`] : [] } as Observation];
+      evidence: live ? peer!.evidence : dead ? [`Hermod session ${saved[0].sessionId}: pid ${saved[0].pid} alive=false`]
+        : retired ? [`Hermod closed surface ${task.retired!.surface}; complete discovery finds no live session`] : [] } as Observation];
   }));
 }
 export async function observeWorkers(run: Run, call: Command = command): Promise<Record<string, Observation>> {
@@ -125,7 +128,8 @@ export async function observeWorkers(run: Run, call: Command = command): Promise
   ]);
   const sessions = JSON.parse(saved);
   if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
-  return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions.sessions)));}
+  return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions.sessions)));
+}
 /** Find the recorded worker's current Hermod peer and refuse if its identity moved. */
 async function locateWorker(task: Assignment, call: Command, action: string): Promise<{ peer: HermodPeer; actual: Worker }> {
   if (!task.worker) throw new Error(`identify the worker before ${action}`);
@@ -147,12 +151,13 @@ export async function interruptWorker(task: Assignment, call: Command = command)
   if (peer.activity === "busy") await checked(call, ["hermod", "send-key", actual.surface, "escape"]);
   else if (peer.activity !== "idle") throw new Error("worker activity unknown; interruption withheld");
 }
-export async function retireWorker(task: Assignment, call: Command = command): Promise<void> {
+export async function retireWorker(task: Assignment, call: Command = command): Promise<string> {
   if (task.phase !== "done") throw new Error("only verified completed workers can be retired");
   const { peer, actual } = await locateWorker(task, call, "retirement");
   if (peer.activity !== "idle") throw new Error("completed worker must be idle before retirement");
   // Surface closure preserves the session worktree. close-session removes it.
   await checked(call, ["hermod", "close", actual.surface, "--workspace", actual.workspace]);
+  return actual.surface;
 }
 export function validateReconnect(task: Assignment): void {
   if (!task.worker) throw new Error("reconnect requires a recorded worker");
@@ -186,6 +191,11 @@ export function packet(run: Run, task: Assignment): string {
     `Objective: ${task.spec.objective}`,
     `Done-when: ${task.spec.doneWhen}`,
     `Files/directories: ${JSON.stringify(task.spec.files)}`,
+    "Keep edits within those declared files/directories; report any needed scope expansion to Gru.",
+    ...(task.integrationBase ? [
+      `Pending integration base: ${task.integrationBase}. Existing report: ${JSON.stringify(task.report ?? null)}`,
+      "Before new work, ask Gru to inspect the existing PR's merge outcome. Verify an existing merge or resume that PR; do not duplicate it.",
+    ] : []),
     `Dependencies: ${JSON.stringify(task.spec.dependsOn)}`,
     `Exclusive resources: ${JSON.stringify(task.spec.exclusiveResources)}`,
     `Integration resources: ${JSON.stringify(task.spec.mergeResources)}`,
@@ -203,8 +213,6 @@ export function packet(run: Run, task: Assignment): string {
     "authentication, destructive teardown, and external communication behind existing human gates.",
     "Do not create tickets or spawn workers without explicit operator authorization.",
     "Preserve active and resumable worktrees. Do not run cleanup sweeps.",
-    "STOP-LIST (halt and ask Gru first): force-push or history rewrite; deleting files; edits outside",
-    "the declared files/directories; new external dependencies; spend; production or cloud mutation.",
     "Report blockers immediately. Send meaningful progress; do not exceed 30 minutes silently.",
     "Reports are JSON: {run, task, token, kind: ack|progress|blocked|ready|complete, message}.",
     "The ack message equals the exact done-when. Completion reports remain unverified claims.",
@@ -238,7 +246,7 @@ export async function receive(run: Run, messageId: string, call: Command = comma
 /** Read authoritative PR/commit state and rerun declared checks in a fresh verification worktree. */
 export async function verifyCompletion(task: Assignment, prNumber: number, reviewId: number, evidenceDir: string,
   call: Command = command): Promise<CompletionEvidence> {
-  if (task.phase !== "integrating" || !task.integrationBase || !task.token) throw new Error("integration reservation required");
+  if (["done", "stopping"].includes(task.phase) || !task.integrationBase || !task.token) throw new Error("integration reservation required");
   if (!Number.isSafeInteger(prNumber) || prNumber < 1 || !Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
   const repoDir = task.spec.repo;
   const git = (args: string[]) => checked(call, ["git", ...args], repoDir);
@@ -252,13 +260,14 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   const review = await api(`pulls/${prNumber}/reviews/${reviewId}`);
   if (review.commit_id !== pr.head.sha || !review.submitted_at || !["COMMENTED", "APPROVED"].includes(review.state)) throw new Error("posted review does not cover the merged PR head");
   await git(["check-ref-format", `refs/heads/${pr.base.ref}`]);
-  // Private refs: FETCH_HEAD is shared with every other fetch in this checkout.
-  const refs = { base: `refs/gru/${task.token}/base`, head: `refs/gru/${task.token}/head` };
+  // Each invocation owns its refs, including concurrent verification of the same task.
+  const prefix = `refs/gru/verification/${randomUUID()}`;
+  const refs = { base: `${prefix}/base`, head: `${prefix}/head` };
   const cleanup: string[][] = [["update-ref", "-d", refs.base], ["update-ref", "-d", refs.head]];
   let primary: unknown;
   try {
     // Squash merges do not make the reviewed head reachable from the base.
-    await git(["fetch", "origin", `+refs/heads/${pr.base.ref}:${refs.base}`, `+refs/pull/${prNumber}/head:${refs.head}`]);
+    await git(["fetch", "--no-write-fetch-head", "origin", `refs/heads/${pr.base.ref}:${refs.base}`, `refs/pull/${prNumber}/head:${refs.head}`]);
     const baseTip = await git(["rev-parse", "--verify", `${refs.base}^{commit}`]);
     if (await git(["rev-parse", "--verify", `${refs.head}^{commit}`]) !== pr.head.sha) throw new Error("fetched PR head differs from the reviewed head");
     await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);
@@ -274,7 +283,7 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
       const result = await call(argv, verifyTree, task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS);
       const log = path.join(evidenceDir, `check-${task.token}-${i}.log`);
       fs.writeFileSync(log, JSON.stringify({ argv, cwd: verifyTree, head: baseTip, ...result }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-      if (result.code !== 0) throw new Error(`independent check ${result.timedOut ? "timed out" : "failed"}; evidence: ${log}`);
+      if (result.code !== 0 || result.timedOut) throw new Error(`independent check ${result.timedOut ? "timed out" : "failed"}; evidence: ${log}`);
       checks.push({ argv, exitCode: result.code, log });
     }
     const ticket = JSON.parse(await checked(call, ["alfred", "task", "show", task.spec.ticket, "--json"], repoDir));
@@ -289,8 +298,12 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
     // Only this invocation's disposable checkout and private refs go; evidence remains.
     const failures: string[] = [];
     for (const args of cleanup) {
-      const result = await call(["git", ...args], repoDir);
-      if (result.code !== 0) failures.push(`git ${args.join(" ")}: ${(result.stderr || result.stdout).trim()}`);
+      try {
+        const result = await call(["git", ...args], repoDir);
+        if (result.code !== 0) failures.push(`git ${args.join(" ")}: ${(result.stderr || result.stdout).trim()}`);
+      } catch (error) {
+        failures.push(`git ${args.join(" ")}: ${String(error)}`);
+      }
     }
     // Cleanup trouble must never replace the verification verdict already in flight.
     if (failures.length > 0 && primary === undefined) throw new Error(`verification cleanup failed: ${failures.join("; ")}`);

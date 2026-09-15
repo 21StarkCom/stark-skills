@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Reconcile Gru recovery and verification: retain merge grants through replacement and preserve saved-session ownership, require fresh idle/dead or confirmed-retirement evidence before freeing slots, isolate concurrent verification refs, bound checks, and preserve cleanup errors. Status checks all reserved resources using one cross-run snapshot; IDs named `help` work normally.
+- Preserve PR landing's `--lead` compatibility and the refusal to refresh authentication automatically. Read-only GraphQL operations may retry once; uncertain mutations are never replayed, and stdout error details remain visible.
+
 ## [v0.11.2] - 2026-09-15
 
 ### Fixed

@@ -107,4 +107,5 @@ the operator's direct authorization under the repository rules.
 Gru cannot relay or manufacture that approval.
 Preserve active and resumable session folders.
 No cleanup sweeps, history rewrites, or unrelated outward-facing actions.
-STOP-LIST (halt and ask Gru first): force-push or history rewrite; deleting files; edits outside the declared files/directories; new external dependencies; spend; production or cloud mutation.
+Keep edits within the assignment's declared files and directories.
+Report any needed scope expansion to Gru before making those edits.
