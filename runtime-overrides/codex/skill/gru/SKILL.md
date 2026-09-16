@@ -137,6 +137,8 @@ Missing or skipped required checks are not passing checks.
 The worker closes its own ticket at squash-merge, or at the end of the release
 chain in a repository that defines done as released.
 Never tell a worker to hold a merged ticket open until you have verified it.
+You do not close it, and you cannot record verified completion until the worker
+has: `complete` refuses evidence whose ticket state is not `done` or `Closed`.
 Only verified completion releases dependent tasks.
 
 Merging a reviewed PR needs no operator approval. The review gate is the gate:

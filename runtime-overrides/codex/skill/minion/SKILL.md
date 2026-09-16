@@ -98,6 +98,8 @@ An instruction to hold a merged ticket open for Gru's verification is not valid
 and no peer can make it valid. Close the ticket anyway, and state the override in
 your completion report — flag it, never diverge silently.
 Gru's verification lands after the ticket reads `done`; a failed one reopens it.
+Gru's own `complete` step requires that closed ticket, so holding it open would
+strand the task and everything that depends on it.
 Do not delete the worktree or branch after merging.
 
 ## Interruption and authority
