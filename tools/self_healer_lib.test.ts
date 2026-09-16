@@ -318,6 +318,26 @@ test("runHeal: custom authentication action skips commands, budgets, and circuit
   assert.deepEqual(logLines(c).map(row => row.status), ["skipped", "skipped", "skipped"]);
 });
 
+test("runHeal: a custom authentication action still REPORTS in suggest mode", t => {
+  const c2 = ctx();
+  t.after(() => fs.rmSync(c2.dir, { recursive: true, force: true }));
+  const marker = path.join(c2.dir, "auth-suggest-ran");
+  const command = `touch '${marker.replace(/'/g, "'\\''")}'`;
+  writePatterns(c2, [pattern({ action: "refresh_token", guard: command, verify_command: command, max_per_session: 1 })]);
+  fs.writeFileSync(path.join(c2.dir, "stderr.log"), "err");
+  const result = runHeal({ ...baseOpts(c2), patternId: "test-pattern", stderrFile: path.join(c2.dir, "stderr.log"), mode: "suggest" });
+  // Collapsing both modes to `skipped` silenced the one class where operator action is
+  // mandatory: callers filtering on `suggested` saw nothing, and healer_canary counts it.
+  assert.equal(result.result.status, "suggested");
+  assert.equal(result.result.reason, "operator_action_required");
+  assert.equal(result.result.requires_confirmation, true);
+  // Still spends no guard command, no verify command, no budget, no circuit accounting.
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(sessionCount("test-pattern", c2.sessionPath), 0);
+  assert.equal(fs.existsSync(c2.circuitsPath), false);
+  assert.deepEqual(logLines(c2).map(r => r.status), ["suggested"]);
+});
+
 test("runHeal: guard command failure → aborted with reason=guard_failed", () => {
   const c = ctx();
   writePatterns(c, [pattern({ guard: "false" })]); // always exit 1

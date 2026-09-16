@@ -105,6 +105,25 @@ test("gru CLI: a sitting leader cannot replace its own limits, an incoming one c
   assert.deepEqual(JSON.parse(still.out).config.limits, ["OPERATOR LIMIT: no publishing"]);
 });
 
+test("gru CLI: --limits-file refuses a self-supplied --leader identity", async t => {
+  const { dir, state, file } = engagement(t);
+  const init = await run(["init", "--file", file, "--state", state], "leader-one");
+  assert.equal(init.code, 0, init.error);
+  const limits = path.join(dir, "limits.json");
+  fs.writeFileSync(limits, JSON.stringify(["RELAXED: publishing is fine now"]));
+  // Without a runtime session id, `identity` falls back to --leader, so ONE process can
+  // supply both sides of a 'transfer': hand to L2 with new limits, then take it back as L.
+  // Two commands and a leader sits under limits it wrote. Measured before this guard.
+  const { CODEX_THREAD_ID: _a, CLAUDE_CODE_SESSION_ID: _b, CLAUDE_SESSION_ID: _c, ...bare } = process.env;
+  const child = spawnSync(process.execPath, [CLI, "resume", "--run", "cli", "--state", state,
+    "--revision", "0", "--leader", "leader-two", "--limits-file", limits], { encoding: "utf8", env: bare });
+  assert.equal(child.status, 2);
+  assert.match(child.stderr, /requires a runtime session identity/);
+  const after = await run(["status", "--run", "cli", "--state", state], "leader-one");
+  assert.deepEqual(JSON.parse(after.out).config.limits, ["OPERATOR LIMIT: no publishing"]);
+  assert.equal(JSON.parse(after.out).config.leader, "leader-one");
+});
+
 test("verifyBlocker names the command that actually repairs each phase", () => {
   const spec = { id: "t" } as never;
   const at = (phase: string, extra: Record<string, unknown> = {}) =>

@@ -337,9 +337,18 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
   // The `refresh_token` action can never become an automatic repair, including from a
   // custom pattern that reuses the name. This keys on that action specifically — it is
   // not a general operator-only gate; `requires_confirmation` is the per-pattern opt-out.
+  //
+  // Suggest mode still REPORTS. Collapsing both modes to `skipped` silenced the one
+  // class where operator action is mandatory: a caller filtering on `suggested` to
+  // surface the instruction saw nothing for authentication failures, and
+  // `healer_canary` counts `suggested` runs. Neither branch spends a guard command,
+  // a verify command, a session budget, or circuit accounting, which was the point.
   if (pattern.action === "refresh_token") {
-    const result = { status: "skipped", reason: "operator_action_required", pattern_id: pattern.id,
-      action: pattern.action, verify_passed: false };
+    const result = opts.mode === "suggest"
+      ? { status: "suggested", reason: "operator_action_required", pattern_id: pattern.id,
+          action: pattern.action, requires_confirmation: true, verify_passed: false }
+      : { status: "skipped", reason: "operator_action_required", pattern_id: pattern.id,
+          action: pattern.action, verify_passed: false };
     appendLog({ timestamp: ts, mode: opts.mode, ...result }, logPath);
     return { exit: 0, result };
   }

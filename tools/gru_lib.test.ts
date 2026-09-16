@@ -288,20 +288,33 @@ test("cancelling a working replacement leaves it resumable, not verifiable", t =
   assert.equal(run.tasks[0].phase, "working");
 });
 
-test("a landed merge stays settleable when the replacement launch never attaches", t => {
+test("an undiscoverable reservation settles its merge only after cancellation observes it", t => {
   const { store } = fixture(t);
   let run = grantThenLoseWorker(store);
   const proof = landedProof(run);
   // maxAttempts is 2 and worker #1 spent one; this reservation spends the last.
   run = store.reserve("demo", "leader-one", run.revision, "one");
+  const token = run.tasks[0].token!;
   assert.equal(run.tasks[0].phase, "reserved");
-  // The launch produces no discoverable peer, so `attach` can never run. `recover`
-  // is refused twice over — the attempt budget is spent and there is no observation.
-  assert.throws(() => store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!),
+  // A bare `reserved` must NOT verify. It is equally the state of a launch still coming
+  // up, and marking the task done under a live Minion orphans it: `attach` would then
+  // refuse forever and its exclusive resources would be released to another engagement.
+  assert.throws(() => store.complete("demo", "leader-one", run.revision, "one", token, proof),
+    /integration and independent verification required/);
+  // `recover` is refused twice over — the attempt budget is spent and nothing was observed.
+  assert.throws(() => store.recover("demo", "leader-one", run.revision, "one", token),
     /replacement requires observed termination|attempt budget exhausted/);
-  // Without `reserved` in verificationReady this merge could never be settled and
-  // the engagement could never reach `complete`.
-  const done = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof);
+  // The door is cancellation, which forces the leader to observe the reservation terminal
+  // first. Complete discovery finding no live peer is what records `dead`.
+  run = store.stop("demo", "leader-one", run.revision);
+  assert.equal(run.tasks[0].stoppedFrom, "reserved");
+  run = observe(store, run, "dead");
+  run = store.stopped("demo", "leader-one", run.revision, "one", token);
+  assert.equal(run.tasks[0].phase, "stopped");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = observe(store, run, "dead");
+  // Now the merge that actually landed can be settled, so a spent budget cannot strand it.
+  const done = store.complete("demo", "leader-two", run.revision, "one", token, proof);
   assert.equal(done.tasks[0].phase, "done");
 });
 
@@ -309,17 +322,21 @@ test("verificationReady admits only the pre-attach and own-integration windows",
   const base = { spec: config().tasks[0], attempts: 1, recoveries: 0 };
   const at = (phase: string, extra: Record<string, unknown> = {}) =>
     verificationReady({ ...base, phase, integrationBase: BASE, ...extra } as never);
-  // Pre-attach: no replacement owns the work, so the landed merge is free to settle.
-  for (const phase of ["pending", "reserved"]) assert.equal(at(phase), true, `${phase} must verify`);
+  // Pre-attach and unowned: the landed merge is free to settle.  is NOT here —
+  // it is equally a launch still coming up, and verifying then orphans a live Minion.
+  assert.equal(at("pending"), true, "pending must verify");
+  assert.equal(at("reserved"), false, "reserved must NOT verify");
   // This task's own integration, live or frozen by cancellation.
   assert.equal(at("integrating"), true, "integrating must verify");
   assert.equal(at("stopped", { stoppedFrom: "integrating" }), true, "stopped-from-integrating must verify");
+  // Cancellation is the observed door out of an undiscoverable reservation.
+  assert.equal(at("stopped", { stoppedFrom: "reserved" }), true, "stopped-from-reserved must verify");
   // A replacement holds the work: it must report ready and earn its own grant.
-  for (const phase of ["intake", "working", "blocked", "review", "stopping", "done"]) {
+  for (const phase of ["intake", "working", "blocked", "review", "stopping", "done", "reserved"]) {
     assert.equal(at(phase), false, `${phase} must not verify`);
   }
   // Cancelling before integration leaves the worker resumable, not verifiable.
-  for (const from of ["reserved", "intake", "working", "review"]) {
+  for (const from of ["intake", "working", "review"]) {
     assert.equal(at("stopped", { stoppedFrom: from }), false, `stopped-from-${from} must not verify`);
   }
   // No grant at all, and an unsettled reconnect, each refuse on their own.

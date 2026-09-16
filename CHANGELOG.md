@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Refuse Gru limits replacement under a self-supplied `--leader` identity: with no session env var exported one process supplied both sides of the transfer, so a leader could round-trip leadership and end up under limits it wrote itself.
+- Stop admitting a bare `reserved` task to verification. It is equally a launch still coming up, so verifying then marked the task done under a live Minion that `attach` would refuse forever; the strand escape is now cancellation (`stopped` from `reserved`), which requires observing the launch terminal first.
+- Keep reporting `suggested` for an operator-only healer action in suggest mode instead of collapsing every mode to `skipped`, which hid the one class where operator action is mandatory.
+
 ### Added
 - Gru leadership transfer can replace operating limits that named the previous leader or held an already-finished phase (`resume --limits-file`), revalidated like `init`. Only an incoming leader may replace them — a sitting leader cannot rewrite the limits binding itself — and the event records both the removed and the installed array. The flag is refused on every other verb rather than ignored.
 

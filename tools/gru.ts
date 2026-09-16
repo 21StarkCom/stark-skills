@@ -97,7 +97,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return Number(value);
     };
     // Claude Code exports CLAUDE_CODE_SESSION_ID to its shells; CLAUDE_SESSION_ID is the older name.
-    const identity = process.env.CODEX_THREAD_ID || process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID || values.leader;
+    const runtimeIdentity = process.env.CODEX_THREAD_ID || process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID;
+    const identity = runtimeIdentity || values.leader;
     if (!identity || typeof identity !== "string") throw new Error("current session identity unavailable; supply --leader SESSION");
     if (values.leader && values.leader !== identity) throw new Error("--leader differs from the runtime session identity");
     const statePath = typeof values.state === "string" ? path.resolve(values.state) : path.join(os.homedir(), ".stark", "gru", "state.sqlite");
@@ -157,6 +158,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         // Read BEFORE the transfer check. That check performs live Hermod discovery, so a
         // mistyped path would otherwise surface only after a slow network round trip — and
         // report a discovery failure instead of the typo that actually caused it.
+        // `newLeader !== run.config.leader` alone does not make a transfer real. With no
+        // session env var exported, `identity` falls back to `--leader`, so one process
+        // supplies BOTH sides: `resume --leader L2 --limits-file relaxed.json` then
+        // `resume --leader L` leaves L sitting under limits L wrote — the round trip
+        // defeats the guard in two commands (measured). Replacing limits therefore
+        // requires an identity the runtime exported, which a caller cannot choose.
+        if (values["limits-file"] !== undefined && !runtimeIdentity) {
+          throw new Error("--limits-file requires a runtime session identity (CODEX_THREAD_ID or CLAUDE_CODE_SESSION_ID); --leader cannot authorize replacing limits");
+        }
         const limits = values["limits-file"] === undefined ? undefined
           : JSON.parse(fs.readFileSync(flag("limits-file"), "utf8"));
         await checkLeadershipTransfer(run.config.leader, identity);

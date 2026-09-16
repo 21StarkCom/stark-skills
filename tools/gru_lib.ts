@@ -137,14 +137,24 @@ const fresh = (o?: Observation) => Boolean(o && Date.now() - Date.parse(o.observ
  * `reserved` after `reserve`), so settling the landed merge costs nothing. After it
  * the replacement must report ready and receive its own grant — cancelling an intake
  * or working replacement must not reopen the inherited one, because that worker stays
- * resumable through `continueWorker`. `reserved` is load-bearing, not cosmetic: a
- * launch that never produces a discoverable peer leaves the task unattachable, and
- * with the attempt budget spent `recover` also refuses — without it, a merge that
- * actually landed could never be settled and the engagement could never complete. */
+ * resumable through `continueWorker`.
+ *
+ * `reserved` itself is deliberately NOT here, and the omission cost a round to learn.
+ * It was admitted so a launch that never produced a discoverable peer could not strand
+ * a merge that actually landed. But `reserved` is equally the state of a launch still
+ * coming up, and the two are indistinguishable from the assignment alone — so admitting
+ * it let `complete` mark the task done under a live Minion, after which `attach` refuses
+ * forever ("no pending launch to attach"), `interrupt`/`stop`/`retire` are all
+ * unreachable, and the worker keeps editing a worktree whose exclusive resources have
+ * been handed to another engagement. The strand still needs a door, so the door is
+ * `stop` → `stopped` with `stoppedFrom === "reserved"`: the leader must first observe
+ * the reservation terminal through Hermod (complete discovery with no live peer records
+ * `dead`), which is exactly the evidence that separates a failed launch from a live one.
+ * Deliberate and observed, rather than silent and ambiguous. */
 export function verificationReady(task: Assignment): task is Assignment & { integrationBase: string } {
   return Boolean(task.integrationBase && !task.reconnect?.pending &&
-    (task.phase === "integrating" || task.phase === "pending" || task.phase === "reserved" ||
-      (task.phase === "stopped" && task.stoppedFrom === "integrating")));
+    (task.phase === "integrating" || task.phase === "pending" ||
+      (task.phase === "stopped" && (task.stoppedFrom === "integrating" || task.stoppedFrom === "reserved"))));
 }
 
 /** Reject a malformed DAG or unspecified authority before creating any state. */
