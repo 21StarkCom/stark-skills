@@ -58,8 +58,10 @@ No command publishes, changes authentication, or deletes worker/session worktree
 
 /** Explain why `verificationReady` refused, naming the command that actually repairs it.
  * `integrate` only accepts phase `review`, so it is the wrong instruction everywhere else;
- * a stopped worker needs `continue` (or a fresh `reserve`, if it never attached), an
- * in-flight one needs its own READY report first.
+ * a stopped worker needs `continue`, an in-flight one needs its own READY report
+ * first. NOT `reserve` for either: `readyReason` refuses every phase except
+ * `pending`, so prescribing it hands over a command that throws — the exact defect
+ * this function exists to remove. The `stopped` branch below says the same thing.
  *
  * No `stopping` case on purpose: `verify` refuses unless `run.mode === "running"` (see the
  * call site), and `stop()` is the only writer of phase `stopping` — it sets the whole run to
