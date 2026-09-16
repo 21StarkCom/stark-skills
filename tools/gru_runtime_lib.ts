@@ -181,7 +181,7 @@ export async function reconnectWorker(task: Assignment, call: Command = command)
 
 export function packet(run: Run, task: Assignment): string {
   if (!task.token) throw new Error("reserve this task before generating its dispatch packet");
-  const invocation = task.spec.provider === "codex" ? "$team-minion-agent" : "/team-minion-agent";
+  const invocation = task.spec.provider === "codex" ? "$minion" : "/minion";
   return [
     `Run ${invocation} before intake if available. You are a Minion reporting to Gru.`,
     `Assignment: ${run.config.id}/${task.spec.id}; token: ${task.token}`,
