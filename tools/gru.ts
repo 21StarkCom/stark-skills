@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Gru's durable action boundary. The team-leader skill owns the agentic loop. */
+/** Gru's durable action boundary. The `gru` skill owns the agentic loop. */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

@@ -133,7 +133,7 @@ test("Codex runtime override inventory is exact", () => {
 });
 
 test("required Codex parity skills remain model-discoverable", () => {
-  for (const name of ["stark-bury", "simple-gate", "team-leader-agent", "team-minion-agent"]) {
+  for (const name of ["stark-bury", "simple-gate", "gru", "team-minion-agent"]) {
     const body = fs.readFileSync(
       path.join(CODEX_ROOT, "skill", name, "SKILL.md"),
       "utf8",
