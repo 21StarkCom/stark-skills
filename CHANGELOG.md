@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Gru leadership transfer can replace operating limits that named the previous leader or held an already-finished phase (`resume --limits-file`), revalidated like `init`. Only an incoming leader may replace them — a sitting leader cannot rewrite the limits binding itself — and the event records both the removed and the installed array. The flag is refused on every other verb rather than ignored.
 
 ### Changed
-- Renamed the `/team-leader-agent` skill to `/gru`, matching the name its own body, tooling (`tools/gru*.ts`), and state (`~/.stark/gru/state.sqlite`) already used. Hard rename with no alias or shim: after publish, `/team-leader-agent` stops resolving until `/plugin update`. `/team-minion-agent` is unchanged.
+- Renamed the `/team-leader-agent` skill to `/gru`, matching the name its own body, tooling (`tools/gru*.ts`), and state (`~/.stark/gru/state.sqlite`) already used. Hard rename with no alias or shim: an installed plugin keeps serving `/team-leader-agent` until `/plugin update`, after which only `/gru` resolves. Publishing needs bifrost's `catalog/stark-ops/bundle.yaml` membership renamed in lockstep — `stark sync` treats an unknown member name as a hard error, so `marketplace-sync` fails until both repos agree. `/team-minion-agent` is unchanged.
 
 ### Fixed
 <!-- idun:pr-merge pr=963 runId=963 -->
