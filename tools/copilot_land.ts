@@ -24,7 +24,7 @@
  *                  Adopt-or-create the branch on the CURRENT checkout
  *                  (refuses a dirty tree; ff-only merge for an existing
  *                  local — a non-ff divergence is a HARD error, never
- *                  force). Mirrors `write_spec_land.ts prepare-branch`.
+ *                  force).
  *                  --require-base SHA refuses to adopt a remote branch that
  *                  does not contain SHA, and asserts HEAD contains it after
  *                  every path. Without it, a leftover remote branch from an
@@ -41,7 +41,10 @@
  *                  and landed PRs. `--lead NAME` is inert: accepted for caller compatibility and echoed
  *                  only by `--dry-run`. It selects nothing.
  *
- * Arg-parsing house style mirrors `write_spec_land.ts` / `red_team_fold.ts`.
+ * Arg-parsing house style: explicit boolean/value flag sets, unknown flags are a
+ * hard error, and every refusal prints through `fail()` so `--json` callers get
+ * one shape. (This line used to cite `write_spec_land.ts` / `red_team_fold.ts` as
+ * the source of the style; both files were deleted, so it pointed nowhere.)
  */
 import { spawnSync } from "node:child_process";
 import { isMainModule } from "./main_module_lib.ts";
@@ -219,9 +222,10 @@ function cmdBranchName(argv: string[]): number {
 
 // ── Subcommand: prepare-branch ──────────────────────────────────────────────
 //
-// Mirrors write_spec_land.ts's `prepare-branch` (same three-way decision:
-// existing local wins + ff-only, else track an existing remote, else create).
-// Kept as its own copy rather than a shared import: the git side effects here
+// Three-way decision: an existing local branch wins (ff-only), else track an
+// existing remote, else create. Kept here rather than behind a shared import
+// (the `write_spec_land.ts` this once pointed at no longer exists): the git
+// side effects here
 // are CLI-owned, not the pure decision (which copilot_land_lib.ts does not
 // need to re-derive — the branch/PR existence checks below are what matter).
 
@@ -499,7 +503,7 @@ async function cmdLand(argv: string[]): Promise<number> {
       }
       return { number, html_url: url };
     },
-    // Un-draft through the operator's gh login (mirrors write_spec_land.ts).
+    // Un-draft through the operator's gh login.
     markReady: async (prNumber) => {
       const r = gh(["pr", "ready", String(prNumber), "--repo", repo], cwd);
       return { ok: r.code === 0, stderr: r.stderr };

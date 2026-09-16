@@ -132,6 +132,15 @@ test("verifyBlocker names the command that actually repairs each phase", () => {
   assert.match(review, /integrate/);
   assert.doesNotMatch(review, /must report ready/);
 
+  // The SAME correction on the path a leader actually hits. A grant only reaches `review`
+  // when `reserve` hands a replacement its predecessor's unsettled one, so the switch case
+  // above is the rare path; a first attempt reports ready with no grant and is answered by
+  // the `!integrationBase` guard, which said "integrate after its READY report" — naming a
+  // prerequisite already behind the task, the very defect the `review` case removed.
+  const ungranted = verifyBlocker({ spec, phase: "review", attempts: 1, recoveries: 0 } as never);
+  assert.match(ungranted, /integrate/);
+  assert.doesNotMatch(ungranted, /after its READY report/);
+
   // No `stopping` case: `verify` refuses unless run.mode === "running", and a `stopping`
   // task forces run.mode to `stopping`. gru_lib.test.ts pins that invariant; here we only
   // assert the branch is gone rather than re-asserting a message nothing can read.

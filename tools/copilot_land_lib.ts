@@ -7,11 +7,11 @@
  * STARK-2100. The branch prefix keeps the name so already-pushed branches stay
  * adoptable; nothing in the fleet invokes that skill any more.
  *
- * Mirrors the shape established by `write_spec_land_lib.ts`
- * (branch adopt-or-create, never force-push, find-by-branch adopt-or-create
- * PR, draft-by-default) and `red_team_fold_lib.ts::openOrEditFoldPr`
- * (injectable PR side effects so the decision logic is testable without
- * network).
+ * Shape: branch adopt-or-create, never force-push, find-by-branch adopt-or-create
+ * PR, draft-by-default, with injectable PR side effects so the decision logic is
+ * testable without network. (That shape was established by `write_spec_land_lib.ts`
+ * and `red_team_fold_lib.ts::openOrEditFoldPr`, both since deleted — the citations
+ * are recorded here as history rather than left as live pointers.)
  *
  * The CLI (`copilot_land.ts`) owns every real git/gh side effect; this module
  * owns the decisions that make the flow idempotent and provable.
@@ -129,9 +129,8 @@ export interface LandDeps {
   }) => Promise<{ number: number; html_url?: string }>;
   /**
    * Mark an adopted PR ready-for-review. Only called on the adopt path when
-   * `input.ready` is set AND the adopted PR is currently a draft — mirrors
-   * `write_spec_land.ts`'s `gh pr ready` path. Optional so existing stubs/tests that never
-   * exercise this branch don't need to supply it.
+   * `input.ready` is set AND the adopted PR is currently a draft. Optional so existing
+   * stubs/tests that never exercise this branch don't need to supply it.
    */
   markReady?: (prNumber: number) => Promise<{ ok: boolean; stderr?: string }>;
 }
@@ -145,8 +144,8 @@ export interface LandDeps {
  *  2. List open PRs and adopt one whose head is `input.branch` if it exists
  *     — `createPr` is NOT called in this path, so a bare re-invocation never
  *     opens a duplicate. When `input.ready` is set and the adopted PR is
- *     still a draft, mark it ready via `deps.markReady` (mirrors
- *     `write_spec_land.ts`'s `gh pr ready` path). Adopting an already-ready PR with
+ *     still a draft, mark it ready via `deps.markReady` (a `gh pr ready`
+ *     call). Adopting an already-ready PR with
  *     `--ready` is a harmless no-op (`markReady` is not called); adopting a
  *     draft WITHOUT `--ready` leaves it a draft.
  *  3. Otherwise open a fresh PR, draft by default (`draft: !input.ready`),

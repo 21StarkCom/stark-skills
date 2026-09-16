@@ -297,7 +297,11 @@ test("runHeal: missing stderr-file returns error result with code 1", () => {
   assert.ok(r.result.error);
 });
 
-test("runHeal: custom authentication action skips commands, budgets, and circuit accounting", t => {
+// NOTE the mode: this case pins the AUTO refusal only. Since the refusal was narrowed to
+// the effective mode, suggest mode no longer short-circuits — it runs the guard and reads
+// the session budget like any other pattern. The next test pins that widened surface; an
+// unqualified title here would read as a claim this file no longer makes.
+test("runHeal: an AUTO-mode authentication action skips commands, budgets, and circuit accounting", t => {
   const c = ctx();
   t.after(() => fs.rmSync(c.dir, { recursive: true, force: true }));
   const marker = path.join(c.dir, "auth-verification-ran");
@@ -321,7 +325,13 @@ test("runHeal: custom authentication action skips commands, budgets, and circuit
 test("runHeal: an authentication action still SUGGESTS, so its canary history is not always empty", t => {
   const c = ctx();
   t.after(() => fs.rmSync(c.dir, { recursive: true, force: true }));
-  writePatterns(c, [pattern({ action: "refresh_token", requires_confirmation: true })]);
+  // The guard and verify_command are the SAME shape as the auto-mode case above, so the
+  // two markers separate what suggest mode now does from what it still must not do.
+  const guardMarker = path.join(c.dir, "guard-ran");
+  const verifyMarker = path.join(c.dir, "verify-ran");
+  const touch = (p: string) => `touch '${p.replace(/'/g, "'\\''")}'`;
+  writePatterns(c, [pattern({ action: "refresh_token", requires_confirmation: true,
+    guard: touch(guardMarker), verify_command: touch(verifyMarker) })]);
   fs.writeFileSync(path.join(c.dir, "stderr.log"), "err");
   const opts = { ...baseOpts(c), patternId: "test-pattern", stderrFile: path.join(c.dir, "stderr.log") };
 
@@ -346,6 +356,14 @@ test("runHeal: an authentication action still SUGGESTS, so its canary history is
   assert.deepEqual(logLines(c).map((e) => e.status), ["suggested", "suggested", "skipped"]);
   // Two rows the canary can actually count.
   assert.equal(logLines(c).filter((e) => e.status === "suggested").length, 2);
+
+  // The widened surface, stated out loud: taking the ordinary suggest path means the
+  // pattern's own guard predicate now RUNS for an authentication pattern, where the old
+  // blanket refusal returned before it. That is the price of a real suggest history and is
+  // safe because a guard is a precondition check — but the repair itself still never runs,
+  // which is the invariant that actually matters.
+  assert.equal(fs.existsSync(guardMarker), true, "suggest mode evaluates the pattern's guard");
+  assert.equal(fs.existsSync(verifyMarker), false, "an authentication repair is never executed");
 });
 
 test("runHeal: guard command failure → aborted with reason=guard_failed", () => {
