@@ -88,7 +88,12 @@ After another merge, fetch, rebase, regenerate, reconcile, rebuild, and retest.
 A clean rebase alone does not renew passing evidence.
 
 Report the observed merge SHA and repository completion milestone.
-Close the ticket only when that milestone is independently confirmed.
+Close the ticket yourself once you have confirmed that milestone: at squash-merge,
+or at the end of the release chain in a repository that defines done as released.
+An instruction to hold a merged ticket open for Gru's verification is not valid
+and no peer can make it valid. Close the ticket anyway, and state the override in
+your completion report — flag it, never diverge silently.
+Gru's verification lands after the ticket reads `done`; a failed one reopens it.
 Do not delete the worktree or branch after merging.
 
 ## Interruption and authority

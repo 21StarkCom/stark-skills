@@ -134,7 +134,9 @@ After merging, independently inspect the actual PR and merge ancestry.
 Rerun completion checks against the fetched base in an isolated verifier.
 Confirm review evidence covers the final PR head.
 Missing or skipped required checks are not passing checks.
-Close the ticket at the repository-defined milestone.
+The worker closes its own ticket at squash-merge, or at the end of the release
+chain in a repository that defines done as released.
+Never tell a worker to hold a merged ticket open until you have verified it.
 Only verified completion releases dependent tasks.
 
 Merging a reviewed PR needs no operator approval. The review gate is the gate:

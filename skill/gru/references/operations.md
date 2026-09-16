@@ -187,6 +187,15 @@ A timeout preserves integration ownership for diagnosis and retry.
 It does not prove completion or worker death.
 It checks Alfred's actual ticket identity and completion state.
 
+The worker closes its own ticket at squash-merge, under the root operator rule.
+Never instruct a worker to hold a merged ticket open for your verification.
+A closed ticket verifies exactly as well as an open one: `verify` records the
+observed ticket state as evidence and never requires a particular state.
+Your verification therefore lands after the ticket already reads `done`, and a
+failed verification reopens it. That is the accepted cost, not a defect.
+A worker that closed against your instruction followed the operator's standing
+rule; it must flag the override in its report rather than diverge silently.
+
 Release milestones can require additional direct operator actions.
 Keep tasks incomplete until those milestones are satisfied.
 Missing or skipped required remote checks must be resolved before merging.
