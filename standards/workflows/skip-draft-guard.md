@@ -110,10 +110,19 @@ at all.
 - **Never require a check whose step carries `continue-on-error: true`.** It
   reports SUCCESS whether the step passed or not, so requiring it satisfies the
   gate unconditionally — the same false-green shape, wearing a different hat.
+  Drop the flag first, then require the check. `tests.yml`'s `typecheck` job sat
+  in exactly that trap: it was left out of the ruleset because it was advisory,
+  and was advisory because of this flag (STARK-5008). Both were fixed together.
+- **List EVERY job of a workflow whose checks are required, or decide out loud
+  that one is not.** Sibling jobs share triggers and look interchangeable, so a
+  new one silently reports a check nobody gates on. `typecheck` sat unrequired
+  next to `test` for five weeks that way. `tools/typecheck_gate.test.ts` pins
+  the job set, so adding a job to `tests.yml` fails the suite until someone
+  updates the list.
 
 `.github/workflows/tests.yml` in this repo is the reference: no `if:` on either
-job, `cancel-in-progress: false`, and the advisory `typecheck` job explicitly
-marked as not-requirable while it stays advisory.
+job, `cancel-in-progress: false`, no `continue-on-error` anywhere, and both jobs
+(`test`, `typecheck`) required by the branch ruleset.
 
 ## Reference implementations in this repo
 
