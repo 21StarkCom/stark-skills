@@ -119,9 +119,15 @@ at all.
   next to `test` for five weeks that way. `tools/typecheck_gate.test.ts` pins
   the job set, so adding a job to `tests.yml` fails the suite until someone
   updates the list.
+- **`if:` is not the only way to lose a run.** A *step*-level `if:` leaves the
+  job concluding SUCCESS with nothing executed; a job-level `name:` renames the
+  check-run so the required context never reports; a narrowed `types:` or a
+  `paths:` filter means no run exists for the head sha at all. Ban all four
+  alongside the guard, not just the job-level conditional.
 
 `.github/workflows/tests.yml` in this repo is the reference: no `if:` on either
-job, `cancel-in-progress: false`, no `continue-on-error` anywhere, and both jobs
+job or any of their steps, no job-level `name:`, no path filter,
+`cancel-in-progress: false`, no `continue-on-error` anywhere, and both jobs
 (`test`, `typecheck`) required by the branch ruleset.
 
 ## Reference implementations in this repo

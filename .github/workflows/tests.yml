@@ -6,8 +6,9 @@
 # already run on PRs are code scanning, not tests.
 #
 # The suite needs no dependency install — every import is a `node:` builtin, and
-# `tools/`'s only devDependencies (typescript, @types/node) are for the optional
-# typecheck below. So there is no `npm ci` on the test path.
+# `tools/`'s only devDependencies (typescript, @types/node) belong to the
+# `typecheck` job below, which is its own required check (STARK-5008). So there
+# is no `npm ci` on the test path.
 
 name: tests
 
@@ -117,6 +118,12 @@ jobs:
       # false-green shape this workflow was rewritten to remove. Re-adding it
       # would silently turn a required check back into decoration, so
       # `tools/typecheck_gate.test.ts` fails the suite if it reappears.
+      #
+      # `npm run typecheck`, NOT `npx tsc -p .`: with no TTY on stdin, `npx`
+      # downloads a missing package from the registry instead of failing, so a
+      # dropped devDependency would move this required gate onto an unpinned
+      # latest TypeScript without a word. `npm run` resolves the locked local
+      # binary or errors.
       - name: Typecheck
         working-directory: tools
-        run: npx tsc -p .
+        run: npm run typecheck

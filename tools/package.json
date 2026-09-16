@@ -12,7 +12,7 @@
     "test": "./check-rest-only.sh && node --test *.test.ts"
   },
   "devDependencies": {
-    "@types/node": "^22.9.0",
+    "@types/node": "^24.13.5",
     "typescript": "^5.6.0"
   }
 }
