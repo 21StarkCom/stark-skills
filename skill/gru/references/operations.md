@@ -187,7 +187,8 @@ A timeout preserves integration ownership for diagnosis and retry.
 It does not prove completion or worker death.
 It checks Alfred's actual ticket identity and completion state.
 
-The worker closes its own ticket at squash-merge, under the root operator rule.
+The worker closes its own ticket at squash-merge, under the root operator rule,
+or at the end of the release chain in a repository that defines done as released.
 Never instruct a worker to hold a merged ticket open for your verification.
 A closed ticket is not merely compatible with verification; it is a precondition.
 `complete` refuses evidence whose `ticketState` is not `done` or `Closed`, raising
@@ -195,10 +196,15 @@ A closed ticket is not merely compatible with verification; it is a precondition
 reaches phase `done`, its dependents stay `prerequisite <id> is unverified`, and
 the engagement never reaches mode `complete`. Holding the ticket open deadlocks
 your own store.
+Where done means released, that chain gates `complete` itself: run it only once
+the release lands, and expect dependents to stay blocked until then.
 Your verification therefore lands after the ticket already reads `done`, and a
-failed verification reopens it. That ordering is the accepted cost, not a defect.
+failed verification reopens it: you move the ticket back out of `done` with
+`alfred task move` and reassign the work. That ordering is the accepted cost, not
+a defect.
 A worker that closed against your instruction followed the operator's standing
-rule; it must flag the override in its report rather than diverge silently.
+rule; it must flag the override in its report rather than diverge silently, and
+you accept that flagged override rather than treating it as insubordination.
 
 Release milestones can require additional direct operator actions.
 Keep tasks incomplete until those milestones are satisfied.
