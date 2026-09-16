@@ -125,10 +125,14 @@ const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`
 const fresh = (o?: Observation) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
 /** A replacement must finish intake and receive integration before verification.
- * A retained merge can still be settled before replacement starts. */
+ * A retained merge can still be settled before replacement starts (`pending`), or
+ * after cancellation froze an in-flight integration (`stopped` from `integrating`).
+ * Cancelling an intake or working replacement must not reopen that grant: a stopped
+ * worker stays resumable through `continueWorker`, so its task is not verifiable. */
 export function verificationReady(task: Assignment): task is Assignment & { integrationBase: string } {
   return Boolean(task.integrationBase && !task.reconnect?.pending &&
-    ["integrating", "pending", "stopped"].includes(task.phase));
+    (task.phase === "integrating" || task.phase === "pending" ||
+      (task.phase === "stopped" && task.stoppedFrom === "integrating")));
 }
 
 /** Reject a malformed DAG or unspecified authority before creating any state. */

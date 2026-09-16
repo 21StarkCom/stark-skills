@@ -3,8 +3,10 @@
  *
  * Given a stderr capture and a pattern id, decides whether to suggest a
  * fix or auto-apply it. Walks a gate ladder:
- *   guard cmd → max_per_session → auto-mode allowlist → circuit breaker
- *   → suggest/auto branch → execute → outcome → circuit update.
+ *   operator-only action → guard cmd → max_per_session → auto-mode allowlist
+ *   → circuit breaker → suggest/auto branch → execute → outcome → circuit update.
+ * The operator-only gate runs first so an authentication pattern never spends a
+ * guard command, a verify command, a session budget, or circuit accounting.
  *
  * Improvements over the Python (matches the healer_canary precedent):
  *   - Atomic writes for `healer-session.json` and `healer-circuits.json`
@@ -236,27 +238,22 @@ function runVerify(cmd: string): boolean {
 }
 
 interface ExecutionOutcome {
-  success: boolean;
   verify_passed: boolean;
 }
 
 /**
- * Execute a configured repair action. Authentication stays operator-owned.
+ * Execute a configured repair action. Authentication stays operator-owned and is
+ * refused in `runHeal` before this runs. Every remaining action is a logged stub,
+ * so the verify command is the only outcome signal.
  */
 function executeAction(
   pattern: HealerPattern,
   logFn: (msg: string) => void,
 ): ExecutionOutcome {
-  let success = true;
-  if (pattern.action === "release_stale_lock") {
-    logFn("no lock path specified, skipping");
-    success = true;
-  } else {
-    logFn(`action ${pattern.action} not yet implemented`);
-    success = true;
-  }
-  const verifyPassed = runVerify(pattern.verify_command ?? "true");
-  return { success, verify_passed: verifyPassed };
+  logFn(pattern.action === "release_stale_lock"
+    ? "no lock path specified, skipping"
+    : `action ${pattern.action} not yet implemented`);
+  return { verify_passed: runVerify(pattern.verify_command ?? "true") };
 }
 
 // ---------------------------------------------------------------------------
@@ -477,7 +474,7 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
 
   // -------- Auto mode: execute --------
   const execution = executeAction(pattern, logFn);
-  if (typeof pattern.max_per_session === "number" && execution.success) {
+  if (typeof pattern.max_per_session === "number") {
     sessionIncrement(pattern.id, sessionPath);
   }
 
@@ -499,7 +496,7 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
   );
 
   // -------- Circuit update based on outcome --------
-  if (execution.success && execution.verify_passed) {
+  if (execution.verify_passed) {
     recordCircuitSuccess(pattern.id, { now, circuitsPath });
   } else {
     const newlyTripped = recordCircuitFailure(pattern.id, threshold, {

@@ -45,6 +45,20 @@ function finish(store: GruStore, run: Run, id: string): Run {
     checks: task.spec.checks.map((argv, i) => ({ argv, exitCode: 0, log: `/evidence/check-${i}.log` })) };
   return store.complete(run.config.id, run.config.leader, run.revision, id, task.token!, evidence);
 }
+const BASE = "a".repeat(40);
+/** Drive task `one` to an integration grant, then lose its worker to a replacement. */
+function grantThenLoseWorker(store: GruStore): Run {
+  const c = config(); c.maxRecoveries = 0;
+  let run = start(store, observe(store, store.create(c)), "one");
+  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, BASE);
+  run = observe(store, run, "dead");
+  return store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!);
+}
+const landedProof = (run: Run): CompletionEvidence => ({ base: BASE, head: "b".repeat(40), merge: "c".repeat(40),
+  pr: "https://github.com/o/r/pull/1", review: "https://github.com/o/r/pull/1#pullrequestreview-1",
+  verifiedAt: new Date().toISOString(), ticketState: "done",
+  checks: run.tasks[0].spec.checks.map(argv => ({ argv, exitCode: 0, log: "/evidence/check.log" })) });
 
 test("attachment recognizes a symlink alias of the reserved worktree", t => {
   const { store, file } = fixture(t);
@@ -177,7 +191,7 @@ test("replacement stays reachable when the reconnect budget is small or spent", 
   assert.equal(other.tasks[1].phase, "pending");
 });
 
-test("replacement retains the pending merge grant and can verify its original base", t => {
+test("replacement retains the pending merge grant but must re-earn integration to verify", t => {
   const { store } = fixture(t);
   const c = config(); c.maxRecoveries = 0;
   let run = start(store, observe(store, store.create(c)), "one");
@@ -203,6 +217,35 @@ test("replacement retains the pending merge grant and can verify its original ba
   run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof);
   run = store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "c".repeat(40));
   assert.equal(run.tasks[1].phase, "integrating");
+});
+
+test("the inherited grant settles a landed merge before the replacement launches", t => {
+  const { store } = fixture(t);
+  const run = grantThenLoseWorker(store);
+  assert.equal(run.tasks[0].phase, "pending");
+  const done = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, landedProof(run));
+  assert.equal(done.tasks[0].phase, "done");
+});
+
+test("cancelling a working replacement leaves it resumable, not verifiable", t => {
+  const { store } = fixture(t);
+  let run = grantThenLoseWorker(store);
+  const proof = landedProof(run);
+  run = start(store, run, "one");
+  run = report(store, run, "one", "ack");
+  const replacement = run.tasks[0].token!;
+  run = store.stop("demo", "leader-one", run.revision);
+  run = observe(store, run, "live");
+  run = store.stopped("demo", "leader-one", run.revision, "one", replacement);
+  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = observe(store, run, "live");
+  assert.equal(run.tasks[0].phase, "stopped");
+  assert.equal(run.tasks[0].integrationBase, BASE);
+  assert.throws(() => store.complete("demo", "leader-two", run.revision, "one", replacement, proof),
+    /integration and independent verification required/);
+  // The interrupted worker resumes its own implementation instead.
+  run = store.continueWorker("demo", "leader-two", run.revision, "one", replacement);
+  assert.equal(run.tasks[0].phase, "working");
 });
 
 test("confirmed retirement frees capacity while uncertain or resumed workers count", t => {

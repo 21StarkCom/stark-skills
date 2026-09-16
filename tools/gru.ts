@@ -44,7 +44,9 @@ reconcile never equates missing discovery with death. Keep uncertain reservation
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
 It requires a merged PR, posted head-matching review, and Alfred completion.
-Replacement retains pending merge grants; verify can settle an earlier merge.
+Replacement retains pending merge grants; verify can settle an earlier merge
+before the replacement is reserved, and never while a reconnect is unsettled.
+Once reserved, the replacement must report ready and receive integration first.
 Each check is bounded by the task's checkTimeoutMs (default 30 minutes).
 Verification removes its disposable checkout and retains its logs.
 When every task is verified the engagement completes; session ownership remains.
@@ -142,7 +144,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         const assigned = task(flag("token"));
         // complete() will refuse these anyway; refuse before spending a full verification run.
         if (run.mode !== "running" || !run.reconciled) throw new Error("resume and reconcile before verification");
-        if (!verificationReady(assigned)) throw new Error(`task is ${assigned.phase}; integrate before verification`);
+        // Name the actual blocker: "integrate" is the wrong repair for an unsettled reconnect.
+        if (!verificationReady(assigned)) throw new Error(assigned.reconnect?.pending
+          ? "reconnect outcome is uncertain; observe it before verification"
+          : `task is ${assigned.phase}; integrate before verification`);
         const evidenceRoot = path.join(path.dirname(statePath), "evidence", id);
         fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
         const evidenceDir = fs.mkdtempSync(path.join(evidenceRoot, "verification-"));

@@ -199,9 +199,10 @@ Uncertain reconnect startups still block replacement.
 Replacement retains the original integration base, report, and merge ownership.
 Before further work, inspect the existing PR's outcome.
 Use `verify` to settle an existing merge with that retained base before replacement starts.
-After reservation or attachment, the replacement must report ready and receive integration
-before verification. Intake or working replacements remain interruptible; verification
-cannot silently mark them done. An uncertain reconnect also blocks verification.
+After reservation or attachment, the replacement must report ready and receive integration first.
+Intake or working replacements remain interruptible, and interrupting one does not reopen that grant.
+A cancelled replacement stays resumable through `continue`; only a frozen integration stays verifiable.
+An uncertain reconnect also blocks verification.
 Otherwise resume the existing PR; request integration with the updated base when ready.
 Termination requires matching session, surface, and positive PID evidence with `alive=false`.
 Missing PIDs and stale hooks alone remain unknown.
