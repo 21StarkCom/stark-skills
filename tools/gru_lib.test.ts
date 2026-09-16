@@ -144,14 +144,22 @@ test("provider mismatch preserves reservation and worker concurrency includes un
   assert.throws(() => store.reserve("demo", "leader-one", run.revision, "dependent"), /worker limit/);
 });
 
-test("leadership transfer can replace limits that named the previous leader", t => {
+test("only an incoming leader can replace limits, and never the sitting one", t => {
   const { store } = fixture(t);
   let run = start(store, observe(store, store.create(config())), "one");
   const original = run.config.limits;
-  // An ordinary resume is unchanged: omitting limits keeps the frozen array.
+  const replacement = ["Leader is leader-three; the previous leader is gone", "No new tickets"];
+  // THE hazard: a same-session resume is a legal no-op transfer, so without a gate the
+  // sitting leader rewrites the limits binding itself — the act operations.md forbids.
+  assert.throws(() => store.resume("demo", "leader-one", run.revision, "leader-one", replacement),
+    /a leader cannot rewrite the limits binding itself/);
+  assert.deepEqual(store.read("demo").config.limits, original);
+  // A same-session resume WITHOUT limits stays legal, and keeps the frozen array.
+  run = store.resume("demo", "leader-one", run.revision, "leader-one");
+  assert.deepEqual(run.config.limits, original);
   run = store.resume("demo", "leader-one", run.revision, "leader-two");
   assert.deepEqual(run.config.limits, original);
-  // A limits array is validated exactly like `init`, so a transfer cannot install junk.
+  // Validated exactly like `init`, so a transfer cannot install junk either.
   for (const bad of [[], "not a list", [""], ["ok", 7], null]) {
     assert.throws(() => store.resume("demo", "leader-two", run.revision, "leader-three", bad),
       /replacement limits must be a non-empty list of strings/, `accepted ${JSON.stringify(bad)}`);
@@ -159,11 +167,15 @@ test("leadership transfer can replace limits that named the previous leader", t 
   // The refusals above are thrown inside the transaction, so nothing advanced.
   assert.deepEqual(store.read("demo").config.limits, original);
   assert.equal(store.read("demo").config.leader, "leader-two");
-  const replacement = ["Leader is leader-three; the previous leader is gone", "No new tickets"];
   run = store.resume("demo", "leader-two", run.revision, "leader-three", replacement);
   assert.deepEqual(run.config.limits, replacement);
   assert.equal(run.config.leader, "leader-three");
-  assert.match(run.events.at(-1)!.detail, /limits replaced/);
+  // The event records BOTH arrays; "limits replaced" alone leaves no auditable trail of
+  // which authority line was dropped.
+  const detail = run.events.at(-1)!.detail;
+  assert.match(detail, /limits replaced from/);
+  assert.match(detail, /No publishing, authentication, infrastructure changes, or extra tickets/);
+  assert.match(detail, /the previous leader is gone/);
   // Stored by value: mutating the caller's array cannot reach through into the run.
   replacement[0] = "tampered";
   assert.equal(store.read("demo").config.limits[0], "Leader is leader-three; the previous leader is gone");

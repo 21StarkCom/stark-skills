@@ -104,6 +104,13 @@ function nonempty(value: unknown): value is string {
 function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(nonempty);
 }
+/** The single limits rule, shared by `init` and by a transfer that replaces them.
+ * `resume` promises limits are "revalidated like `init`"; two copies of the predicate
+ * would let a future tightening reach one path and quietly break that promise on the
+ * other, with no test to notice. */
+function requireLimits(value: unknown, message: string): asserts value is string[] {
+  requireValue(stringList(value) && value.length > 0, message);
+}
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -148,7 +155,7 @@ export function parseEngagement(value: unknown): Engagement {
   for (const key of ["maxWorkers", "maxAttempts", "maxRecoveries"]) {
     requireValue(Number.isSafeInteger(value[key]) && Number(value[key]) >= (key === "maxRecoveries" ? 0 : 1), `${key} must be an explicit bounded integer`);
   }
-  requireValue(stringList(value.limits) && value.limits.length > 0, "explicit operating limits are required");
+  requireLimits(value.limits, "explicit operating limits are required");
   requireValue(Array.isArray(value.tasks) && value.tasks.length > 0, "tasks are required");
   const ids = new Set<string>();
   const tickets = new Set<string>();
@@ -382,14 +389,25 @@ export class GruStore {
     return this.transaction(id, oldLeader, revision, run => {
       requireValue(nonempty(newLeader), "leader identity is required");
       requireValue(run.mode !== "complete", "engagement already complete");
+      let replaced: string[] | undefined;
       if (limits !== undefined) {
-        requireValue(stringList(limits) && limits.length > 0, "replacement limits must be a non-empty list of strings");
-        run.config.limits = structuredClone(limits as string[]);
+        // A same-session resume is a legal no-op transfer, so without this the sitting
+        // leader could rewrite the limits binding IT — the exact "rewrite state to escape
+        // a limit" the doc above forbids. Only an incoming leader may replace them, and
+        // `checkLeadershipTransfer` has already required the outgoing one to be not-live.
+        requireValue(newLeader !== run.config.leader,
+          "limits can only be replaced by an incoming leader; a leader cannot rewrite the limits binding itself");
+        requireLimits(limits, "replacement limits must be a non-empty list of strings");
+        replaced = run.config.limits;
+        run.config.limits = structuredClone(limits);
       }
       run.config.leader = newLeader; run.epoch++; run.reconciled = false;
       if (run.mode === "stopped") run.mode = "running";
       for (const task of run.tasks) task.observation = undefined;
-      this.event(run, "resumed", `leader ${newLeader}; reconnect before dispatch${limits === undefined ? "" : "; limits replaced"}`);
+      // Record BOTH arrays. An operator auditing `status` later must be able to see which
+      // authority line was dropped and what replaced it; "limits replaced" alone is unauditable.
+      this.event(run, "resumed", `leader ${newLeader}; reconnect before dispatch${replaced === undefined ? ""
+        : `; limits replaced from ${JSON.stringify(replaced)} to ${JSON.stringify(run.config.limits)}`}`);
     });
   }
   recover(id: string, leader: string, revision: number, taskId: string, token: string): Run {

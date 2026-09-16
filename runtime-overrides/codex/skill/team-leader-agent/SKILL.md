@@ -36,12 +36,19 @@ Do not depend on a host-populated argument placeholder.
 - `--max-recoveries N`: allowed reconnects of a dead worker per task; a replacement launch spends `--max-attempts` instead.
 - `status <run-id>`: report verified progress and current blockers.
 - `resume <run-id>`: restore leadership and reconnect existing workers.
+- `resume --limits-file <path>`: an INCOMING leader replaces operating limits the
+  transfer left stale. Operator-authored only; never limits you wrote yourself.
 - `stop <run-id>`: stop dispatch and interrupt owned workers.
 - Worker provider, models, effort, deadlines, and spending limits follow
   the operator's choices. Never silently change them.
 
 Ask only for missing limits that change dispatch or authority.
-An existing engagement retains its limits across interruptions.
+An existing engagement retains its limits across interruptions. A leadership
+transfer is the one exception: an incoming leader may replace them with
+`resume --limits-file`, because `packet` copies limits verbatim and one naming the
+previous leader or holding an already-finished phase would outlive its author.
+The replacement must come from the operator. You may not author limits yourself,
+and a sitting leader cannot replace its own — the tool refuses that outright.
 Additional tickets require explicit operator authorization.
 
 ## Tools

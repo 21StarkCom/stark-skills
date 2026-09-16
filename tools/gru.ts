@@ -84,6 +84,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       if (typeof value !== "string" || !value) throw new Error(`--${name} is required`);
       return value;
     };
+    // parseArgs registers one option set for every verb, so a flag only `resume` reads is
+    // silently accepted everywhere else. An operator who puts --limits-file on `reconcile`
+    // would get exit 0 and believe the dead-leader limits were replaced while `packet` kept
+    // shipping the old text — the precise failure this flag exists to fix. Refuse instead.
+    if (verb !== "resume" && values["limits-file"] !== undefined) {
+      throw new Error(`--limits-file applies to resume, not ${verb}`);
+    }
     const integer = (name: string): number => {
       const value = flag(name);
       if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error(`--${name} must be an integer`);
@@ -143,16 +150,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         emit(store.report(id, identity, revision, report.task, report.token, report.session, report.kind, report.message, flag("message"))); break;
       }
       case "resume": {
-        await checkLeadershipTransfer(run.config.leader, identity);
         // --limits-file replaces the frozen limits array; omitted keeps it. Read as a file,
         // not an inline string: limits are prose the operator authored, and shell quoting is
         // exactly where an authority line gets silently truncated.
-        const limitsFile = values["limits-file"];
-        let limits: unknown;
-        if (typeof limitsFile === "string") {
-          if (!limitsFile) throw new Error("--limits-file requires a path");
-          limits = JSON.parse(fs.readFileSync(limitsFile, "utf8"));
-        }
+        //
+        // Read BEFORE the transfer check. That check performs live Hermod discovery, so a
+        // mistyped path would otherwise surface only after a slow network round trip — and
+        // report a discovery failure instead of the typo that actually caused it.
+        const limits = values["limits-file"] === undefined ? undefined
+          : JSON.parse(fs.readFileSync(flag("limits-file"), "utf8"));
+        await checkLeadershipTransfer(run.config.leader, identity);
         emit(store.resume(id, run.config.leader, revision, identity, limits)); break;
       }
       case "recover": emit(store.recover(id, identity, revision, flag("task"), flag("token"))); break;
