@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- idun:pr-merge pr=964 runId=964 -->
-- Renamed the `/team-leader-agent` skill to `/gru` (tooling, state, and body already used that name; only the invocation name lagged).
 - Renamed the `/team-leader-agent` skill to `/gru`, matching the name its own body, tooling (`tools/gru*.ts`), and state (`~/.stark/gru/state.sqlite`) already used. Hard rename with no alias or shim: an installed plugin keeps serving `/team-leader-agent` until `/plugin update`, after which only `/gru` resolves. Publishing needs bifrost's `catalog/stark-ops/bundle.yaml` membership renamed in lockstep — `stark sync` treats an unknown member name as a hard error, so `marketplace-sync` fails until both repos agree. `/team-minion-agent` is unchanged.
 
 ### Fixed
