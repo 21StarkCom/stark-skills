@@ -58,13 +58,22 @@ No command publishes, changes authentication, or deletes worker/session worktree
 
 /** Explain why `verificationReady` refused, naming the command that actually repairs it.
  * `integrate` only accepts phase `review`, so it is the wrong instruction everywhere else;
- * a stopped worker needs `continue`, an in-flight one needs its own READY report first. */
+ * a stopped worker needs `continue`, an in-flight one needs its own READY report first.
+ *
+ * No `stopping` case on purpose: `verify` refuses unless `run.mode === "running"` (see the
+ * call site), and `stop()` is the only writer of phase `stopping` — it sets the whole run to
+ * `stopping`/`stopped` in the same transaction, and `resume()` only maps `stopped` back to
+ * `running`, which requires no task to be active, which `stopping` is. So a `stopping` task
+ * can never reach this function; a branch for it is dead text that reads as live guidance.
+ * `gru_lib.test.ts` pins that invariant. */
 export function verifyBlocker(task: Assignment): string {
   if (task.reconnect?.pending) return "reconnect outcome is uncertain; observe it before verification";
   if (!task.integrationBase) return `task is ${task.phase} with no integration grant; integrate after its READY report`;
   switch (task.phase) {
     case "done": return "task is already verified";
-    case "stopping": return "task is stopping; observe termination and record stopped first";
+    // Reaching `review` IS the READY report (gru_lib.ts report()), so telling this task to
+    // report ready names a step it already took. `integrate` is the one command that applies.
+    case "review": return "task reported ready but holds a stale integration grant; integrate it at its current base, then verify";
     case "stopped": return "task was cancelled before integration; continue it, then integrate after its READY report";
     default: return `task is ${task.phase}; its worker must report ready and receive integration before verification`;
   }
@@ -157,8 +166,21 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         // Read BEFORE the transfer check. That check performs live Hermod discovery, so a
         // mistyped path would otherwise surface only after a slow network round trip — and
         // report a discovery failure instead of the typo that actually caused it.
-        const limits = values["limits-file"] === undefined ? undefined
-          : JSON.parse(fs.readFileSync(flag("limits-file"), "utf8"));
+        //
+        // Attribute the failure to the flag AND the path. A bare `JSON.parse` surfaces
+        // "Unexpected token } in JSON at position 41" — an offset into an unnamed buffer.
+        // The operator is running several files through several flags; a parser offset
+        // that names neither tells them nothing they can act on, which is precisely the
+        // early-read's stated purpose.
+        let limits: unknown;
+        if (values["limits-file"] !== undefined) {
+          const limitsPath = flag("limits-file");
+          try {
+            limits = JSON.parse(fs.readFileSync(limitsPath, "utf8"));
+          } catch (error) {
+            throw new Error(`--limits-file ${limitsPath}: ${(error as Error).message}`);
+          }
+        }
         await checkLeadershipTransfer(run.config.leader, identity);
         emit(store.resume(id, run.config.leader, revision, identity, limits)); break;
       }

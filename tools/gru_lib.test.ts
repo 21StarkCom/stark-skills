@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
-import { packet } from "./gru_runtime_lib.ts";
+import { observations, packet, type HermodPeer } from "./gru_runtime_lib.ts";
 import { GruStore, parseEngagement, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker } from "./gru_lib.ts";
 
 const config = (): Engagement => ({ id: "demo", objective: "Implement independent tasks, then integrate",
@@ -393,6 +393,70 @@ test("shared integration resources serialize independently implemented tasks", t
   run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "a".repeat(40));
   assert.throws(() => store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "a".repeat(40)), /already owned/);
   assert.equal(store.read("demo").tasks[1].phase, "review");
+});
+
+/** Hermod's live view of `worker(id)`, in the shape `observations()` actually parses. */
+const livePeer = (id: string): HermodPeer => ({ id: `codex:${id}`, agent: "codex", threadId: `session-${id}`,
+  surfaceId: `surface-${id}`, workspaceId: "workspace", cwd: `/worktrees/${id}`, liveness: "live",
+  activity: "idle", evidence: ["live-process", "root-thread"], messaging: { available: true } });
+
+/** Reconcile through the PRODUCTION observation builder instead of hand-written rows.
+ * The `observe()` helper above writes Observation objects straight into `reconcile`, so a
+ * state it reaches may be one `observations()` can never produce — that blind spot is how a
+ * green suite sat over an unreachable path in the closed #966. Tests that assert a phase
+ * transition is reachable compose the real builder. */
+function reconcileLive(store: GruStore, run: Run, leader = run.config.leader): Run {
+  const peers = run.tasks.filter(t => t.worker).map(t => livePeer(t.spec.id));
+  return store.reconcile(run.config.id, leader, run.revision,
+    observations(run, { peers, observedAt: new Date().toISOString(), incomplete: false }));
+}
+
+test("verified completion clears stoppedFrom when it settles a frozen integration", t => {
+  const { store } = fixture(t);
+  let run = start(store, reconcileLive(store, store.create(config())), "one");
+  const token = run.tasks[0].token!;
+  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+  run = store.integrate("demo", "leader-one", run.revision, "one", token, BASE);
+  // Cancellation freezes the in-flight integration; `verificationReady` still admits it,
+  // because the merge may already have landed on the other side of the stop.
+  run = store.stop("demo", "leader-one", run.revision);
+  assert.equal(run.tasks[0].stoppedFrom, "integrating");
+  run = reconcileLive(store, run);
+  run = store.stopped("demo", "leader-one", run.revision, "one", token);
+  assert.equal(run.mode, "stopped");
+  run = store.resume("demo", "leader-one", run.revision, "leader-one");
+  run = reconcileLive(store, run);
+  const done = store.complete("demo", "leader-one", run.revision, "one", token, landedProof(run));
+  assert.equal(done.tasks[0].phase, "done");
+  // `reserve` (line ~312) and `finishReconnect` (line ~452) both clear this; `complete` did
+  // not, so `gru status` reported a verified task still claiming it was cancelled mid-
+  // integration — the exact field a leader reads to decide whether work is outstanding.
+  assert.equal(done.tasks[0].stoppedFrom, undefined,
+    `verified task still claims stoppedFrom: ${done.tasks[0].stoppedFrom}`);
+  assert.equal(store.read("demo").tasks[0].stoppedFrom, undefined, "and it must not come back on reopen");
+});
+
+test("a stopping task always forces the run out of running mode", t => {
+  // This is the premise `verifyBlocker` relies on to omit a `stopping` branch: `verify`
+  // refuses unless run.mode === "running", so a `stopping` task can never reach it. Pinned
+  // here rather than asserted in a comment, because the branch it justifies deleting is
+  // invisible once deleted.
+  const { store } = fixture(t);
+  let run = start(store, reconcileLive(store, store.create(config())), "one");
+  const token = run.tasks[0].token!;
+  run = report(store, run, "one", "ack");
+  run = store.stop("demo", "leader-one", run.revision);
+  assert.equal(run.tasks[0].phase, "stopping");
+  assert.equal(run.mode, "stopping");
+  // `resume` only maps `stopped` back to `running`, and `stopped` needs no active task —
+  // which `stopping` is. So no transfer can restore `running` over a stopping task.
+  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  assert.equal(run.mode, "stopping");
+  assert.equal(run.tasks[0].phase, "stopping");
+  run = reconcileLive(store, run, "leader-two");
+  // Therefore every caller that would consult verifyBlocker is refused by the mode gate.
+  assert.throws(() => store.complete("demo", "leader-two", run.revision, "one", token, landedProof(run)),
+    /integration and independent verification required/);
 });
 
 test("stopping freezes dispatch, requires terminal evidence, and retains resumable ownership", t => {

@@ -83,7 +83,7 @@ Gru preserves session worktrees and ownership after completion. Native worker ob
 
 ## Distribution
 
-PR landing retains `--lead` as a compatibility argument, echoed only in dry-run output. Legacy authentication patterns return `skipped` with `operator_action_required` before guard commands, verification, budgets, or circuit accounting. Read-only GraphQL operations may retry once; uncertain mutations never retry.
+PR landing retains `--lead` as a compatibility argument, echoed in dry-run output only when supplied, and requires `--body` like every other documented-required flag. Authentication patterns return `skipped` with `operator_action_required` in auto mode, before guard commands, verification, budgets, or circuit accounting; in suggest mode they return `suggested` like any other pattern, so canary promotion history is real. Read-only GraphQL operations may retry once; uncertain mutations never retry.
 
 Skills + tools ship as separate self-contained **Claude Code** and native **Codex** plugin packages via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.
 

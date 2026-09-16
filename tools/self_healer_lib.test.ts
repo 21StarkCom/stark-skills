@@ -318,6 +318,36 @@ test("runHeal: custom authentication action skips commands, budgets, and circuit
   assert.deepEqual(logLines(c).map(row => row.status), ["skipped", "skipped", "skipped"]);
 });
 
+test("runHeal: an authentication action still SUGGESTS, so its canary history is not always empty", t => {
+  const c = ctx();
+  t.after(() => fs.rmSync(c.dir, { recursive: true, force: true }));
+  writePatterns(c, [pattern({ action: "refresh_token", requires_confirmation: true })]);
+  fs.writeFileSync(path.join(c.dir, "stderr.log"), "err");
+  const opts = { ...baseOpts(c), patternId: "test-pattern", stderrFile: path.join(c.dir, "stderr.log") };
+
+  // Explicit suggest mode.
+  const suggested = runHeal({ ...opts, mode: "suggest" });
+  assert.equal(suggested.result.status, "suggested");
+  assert.equal(suggested.result.requires_confirmation, true);
+
+  // And auto mode DOWNGRADED to suggest, because the pattern is not in auto_patterns.
+  // The gate keyed on the raw action, so both of these returned {status: "skipped"} and
+  // wrote a `skipped` row. computeStats counts only `suggested` rows as successful_suggests,
+  // so the pattern's suggest history stayed permanently empty and it could never be
+  // evaluated for promotion at all — the promotion pipeline had a hole, not a guard.
+  const downgraded = runHeal({ ...opts, mode: "auto", autoPatterns: ["some-other-pattern"] });
+  assert.equal(downgraded.result.status, "suggested");
+
+  // The auto refusal is unchanged: an authentication repair is never applied automatically.
+  const refused = runHeal({ ...opts, mode: "auto", autoPatterns: ["test-pattern"] });
+  assert.equal(refused.result.status, "skipped");
+  assert.equal(refused.result.reason, "operator_action_required");
+
+  assert.deepEqual(logLines(c).map((e) => e.status), ["suggested", "suggested", "skipped"]);
+  // Two rows the canary can actually count.
+  assert.equal(logLines(c).filter((e) => e.status === "suggested").length, 2);
+});
+
 test("runHeal: guard command failure → aborted with reason=guard_failed", () => {
   const c = ctx();
   writePatterns(c, [pattern({ guard: "false" })]); // always exit 1

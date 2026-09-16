@@ -1,9 +1,11 @@
 /**
  * copilot_land_lib.ts — pure, individually-testable helpers for the
- * `/stark-copilot` create-or-adopt impl-PR landing flow (#773, the copilot
- * slice of #772). `copilot` is the merge point for the
- * `impl` artifact — it cannot reach `done` without a non-empty
- * `artifact_prs.impl`, so this is a blocking channel.
+ * create-or-adopt impl-PR landing flow driven by `/stark-build` Phase 1.
+ *
+ * THE `copilot` NAME IS LEGACY, NOT A LIVE COMMAND. These helpers were written
+ * for the copilot skill (#773, the copilot slice of #772), which was buried in
+ * STARK-2100. The branch prefix keeps the name so already-pushed branches stay
+ * adoptable; nothing in the fleet invokes that skill any more.
  *
  * Mirrors the shape established by `write_spec_land_lib.ts`
  * (branch adopt-or-create, never force-push, find-by-branch adopt-or-create
