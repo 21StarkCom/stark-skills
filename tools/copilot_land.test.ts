@@ -54,6 +54,12 @@ test("copilot_land land: --dry-run echoes lead only when the caller supplied it"
 
   const supplied = JSON.parse(run([...LAND, "--lead", "codex", "--dry-run"]).out);
   assert.equal(supplied.lead, "codex");
+
+  // `--lead "$UNSET_VAR"` is present-but-blank. A `present()` check treats that as
+  // supplied and echoes `"lead": ""`, which reads as a selected-but-nameless agent —
+  // the same wrong signal the old "claude" default gave, just harder to spot.
+  const blank = JSON.parse(run([...LAND, "--lead", "", "--dry-run"]).out);
+  assert.equal("lead" in blank, false, `blank --lead leaked into the plan: ${JSON.stringify(blank)}`);
 });
 
 test("copilot_land: the header and help name a live command, never the buried copilot skill", () => {

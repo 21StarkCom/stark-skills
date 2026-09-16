@@ -427,7 +427,10 @@ async function cmdLand(argv: string[]): Promise<number> {
   // actually supplied. A default here made `--dry-run` print `"lead": "claude"`
   // for a run that passed no --lead, which reads as a selected agent and
   // contradicts the header's claim that the flag selects nothing.
-  const lead = present(flags, "lead") ? str(flags, "lead") : null;
+  // `str(...) || null`, not `present(...)`: `--lead ""` (an unset shell var) is
+  // present-but-blank, and echoing `"lead": ""` reads as a selected-but-nameless
+  // agent — the same wrong signal the default produced.
+  const lead = str(flags, "lead") || null;
   const base = str(flags, "base") || "main";
   const cwd = str(flags, "repo-dir") || process.cwd();
   const knownPrsCsv = str(flags, "known-prs");
