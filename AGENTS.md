@@ -32,7 +32,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 ## Repo Layout
 
 - `tools/` — **all** TypeScript tooling: dispatchers, agent utilities, session/state, GitHub transport, skill meta-tooling. The only executable surface.
-- `skill/` — all skills (`skill/*/SKILL.md`, **27** skills: 24 `stark-*` plus `simple-gate`, `team-leader-agent`, `team-minion-agent`), packaged as marketplace plugins
+- `skill/` — all skills (`skill/*/SKILL.md`, **27** skills: 24 `stark-*` plus `gru`, `simple-gate`, `team-minion-agent`), packaged as marketplace plugins
 - `global/` — global config + prompts, vendored into each plugin
 - `scripts/` — shell helpers + JSON only (`healer_patterns.json`). **No Python lives here any more.**
 - `runtime-overrides/codex/` — **your tree.** Complete Codex-only skill/command variants plus changed support files; mirrors source-relative paths. Bifrost imports it as runtime overrides into a separate `dist/codex-plugins/` surface. **Never** make a canonical Claude file "portable" to satisfy Codex, and **never** layer a Codex override into `dist/claude/`.
@@ -64,7 +64,7 @@ All skills live in `skill/*/SKILL.md`. Full per-skill detail — arguments, fail
 | `/simple-gate [spec-path]` | Walk the human sign-off gate in short, jargon-free language; Codex uses structured choices when available and a one-question conversational fallback otherwise. |
 | `/stark-session [start\|end]` | Briefing on start, cleanup on end. |
 | `/stark-handover [save\|resume\|status]` | Cross-`/clear` continuity under `~/Code/Handovers/`. |
-| `/team-leader-agent start\|status\|resume\|stop` | **Gru**, the active Minion leader. Explicit concurrency/recovery limits, durable ownership, Hermod transport, Alfred tickets, verified integration. Codex uses `$team-leader-agent` from its native override. |
+| `/gru start\|status\|resume\|stop` | **Gru**, the active Minion leader. Explicit concurrency/recovery limits, durable ownership, Hermod transport, Alfred tickets, verified integration. Codex uses `$gru` from its native override. |
 | `/team-minion-agent` | Gru's worker intake, reporting, and integration contract. Separate Claude and Codex variants. |
 | `/stark-bury <corpse>` | Retire code into the Náströnd graveyard — a subsystem of a living repo, or a whole repo. Footprint verification, interment PR **before** any deletion, deletion PR, optional sealed dump + table drop. The fleet's only destructive ritual: five non-negotiable laws, operator-gated at every prod mutation. The Codex override is model-discoverable; Claude and Codex variants share the same mutation gates. |
 | `/stark-fresh-eyes <doc>` | One-shot zero-context review of a doc before it ships. One dispatch per revision, never a round 2. |
@@ -99,7 +99,7 @@ codex plugin add stark-plan@bifrost
 /plugin update  stark-analyze@bifrost
 ```
 
-Canonical `skill/` and shared assets are the Claude-authored source. Host-specific Codex behavior belongs **only** under `runtime-overrides/codex/`. `.github/workflows/marketplace-sync.yml` prepares versioned release notes and opens a draft Bifrost sync PR. It waits up to 20 minutes for `aryeh-stark`'s completed review attestation on the exact head, then runs the ready/CI/merge chain. CI alone never authorizes publication. See the [review attestation contract](skill/team-leader-agent/references/operations.md#verification-and-integration). Every changed runtime advances Bifrost's root release version, including Claude-only changes.
+Canonical `skill/` and shared assets are the Claude-authored source. Host-specific Codex behavior belongs **only** under `runtime-overrides/codex/`. `.github/workflows/marketplace-sync.yml` prepares versioned release notes and opens a draft Bifrost sync PR. It waits up to 20 minutes for `aryeh-stark`'s completed review attestation on the exact head, then runs the ready/CI/merge chain. CI alone never authorizes publication. See the [review attestation contract](skill/gru/references/operations.md#verification-and-integration). Every changed runtime advances Bifrost's root release version, including Claude-only changes.
 
 **Local dev is not live.** Editing a file here does nothing until it is published (merge to `main` → `marketplace-sync` PR → merge) and the plugin is updated. To test an in-progress edit against a real install, run `stark sync` in the marketplace repo, then `/plugin update` locally.
 

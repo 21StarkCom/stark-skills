@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Gru leadership transfer can replace operating limits that named the previous leader or held an already-finished phase (`resume --limits-file`), revalidated like `init`. Only an incoming leader may replace them — a sitting leader cannot rewrite the limits binding itself — and the event records both the removed and the installed array. The flag is refused on every other verb rather than ignored.
 
+### Changed
+- Renamed the `/team-leader-agent` skill to `/gru`, matching the name its own body, tooling (`tools/gru*.ts`), and state (`~/.stark/gru/state.sqlite`) already used. Hard rename with no alias or shim: after publish, `/team-leader-agent` stops resolving until `/plugin update`. `/team-minion-agent` is unchanged.
+
 ### Fixed
 <!-- idun:pr-merge pr=963 runId=963 -->
 - Fixed: gate leadership-transfer limits replacement on a real transfer and document the Hermod delivery-ack requirement for `receive` (STARK-4919)

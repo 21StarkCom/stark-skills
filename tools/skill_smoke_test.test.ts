@@ -233,7 +233,7 @@ function extractReferenceLinks(text: string): string[] {
 function listSkills(): string[] {
   // Discover every skill dir that carries a SKILL.md — NOT just `stark-*`.
   // The old `startsWith("stark-")` filter silently skipped the non-`stark-`
-  // skills (`simple-gate`, `team-leader-agent`, `team-minion-agent`), so
+  // skills (`gru`, `simple-gate`, `team-minion-agent`), so
   // nothing validated their frontmatter, refs, or --help contract — that is how
   // the team-minion-agent colon-space frontmatter bug (see the strict-YAML
   // check below) reached bifrost. Keying on SKILL.md presence also excludes
