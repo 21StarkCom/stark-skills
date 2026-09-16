@@ -369,14 +369,27 @@ export class GruStore {
       this.event(run, "reconciled", "observations refreshed; reservations retained");
     });
   }
-  resume(id: string, oldLeader: string, revision: number, newLeader: string): Run {
+  /** `limits` is frozen at `init`, but `packet` copies it into every brief verbatim while
+   * substituting only the leader header. Across a leadership transfer the two disagree: an
+   * entry naming the *previous* leader, its surface, or its workspace as "current" sends the
+   * worker to an identity that no longer exists, and a phase-scoped entry (an intake hold for
+   * an already-finished task) parks its successor indefinitely. Both read as authority, so a
+   * leader cannot ignore them and must not rewrite state to escape them. Replacing them is
+   * therefore allowed at exactly this boundary — leadership transfer is already the
+   * authority-changing operation, and it re-validates like `init` and is recorded as an event.
+   * Omitting `limits` keeps the existing array, so an ordinary resume is unchanged. */
+  resume(id: string, oldLeader: string, revision: number, newLeader: string, limits?: unknown): Run {
     return this.transaction(id, oldLeader, revision, run => {
       requireValue(nonempty(newLeader), "leader identity is required");
       requireValue(run.mode !== "complete", "engagement already complete");
+      if (limits !== undefined) {
+        requireValue(stringList(limits) && limits.length > 0, "replacement limits must be a non-empty list of strings");
+        run.config.limits = structuredClone(limits as string[]);
+      }
       run.config.leader = newLeader; run.epoch++; run.reconciled = false;
       if (run.mode === "stopped") run.mode = "running";
       for (const task of run.tasks) task.observation = undefined;
-      this.event(run, "resumed", `leader ${newLeader}; reconnect before dispatch`);
+      this.event(run, "resumed", `leader ${newLeader}; reconnect before dispatch${limits === undefined ? "" : "; limits replaced"}`);
     });
   }
   recover(id: string, leader: string, revision: number, taskId: string, token: string): Run {

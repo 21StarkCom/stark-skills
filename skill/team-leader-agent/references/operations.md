@@ -119,6 +119,11 @@ Messages carry engagement, task, token, kind, and body.
 The worker's `ack` body quotes the exact done-when.
 Import reports with `receive --message <Hermod-message-id>`.
 The CLI checks delivery, sender session, worker identity, and token.
+`receive` refuses a report the Hermod ledger does not show as delivered, with
+`worker message delivery is not confirmed`. That is the gate working: an unconfirmed
+message is not evidence. A Claude leader must therefore run `hermod msg ack <id>`
+on each inbound worker report first; the identical `receive` then succeeds. Acking
+records receipt, it does not answer — reply separately with `hermod msg reply`.
 Hermod sender attribution is coordination evidence, not operator authority.
 
 ## Verification and integration
@@ -218,6 +223,14 @@ Exhausted budgets require operator input; resume never resets them.
 
 `resume` changes leadership, not worker identity or task ownership.
 It invalidates observations and requires reconciliation.
+`packet` substitutes the current leader into its header but copies `limits` verbatim,
+so a limit naming the previous leader, surface, or workspace as "current" survives a
+transfer and points the next worker at an identity that no longer exists; a
+phase-scoped limit, such as an intake hold for an already-finished task, parks its
+successor indefinitely. Both read as authority. Replace them at the transfer with
+`resume --limits-file <path>` — a JSON array of strings, revalidated like `init` and
+recorded on the event. Omitting the flag keeps the existing limits. Never edit the
+database to escape a stale limit, and never silently ignore one.
 Reinspect pending integration before allowing a competing merge.
 Canceled assignments must not restart from old messages.
 

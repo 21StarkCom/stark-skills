@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Gru leadership transfer can replace operating limits that named the previous leader or held an already-finished phase (`resume --limits-file`), revalidated like `init`.
+
 ### Fixed
+- Document that importing a worker report requires Hermod-confirmed delivery, so a Claude leader acks each inbound message first.
 <!-- idun:pr-merge pr=962 runId=962 -->
 - Fenced inherited Gru verification to a settled merge or frozen integration only, and made legacy auth repair patterns skip guard/verify/budget accounting up front.
 

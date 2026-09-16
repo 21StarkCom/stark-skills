@@ -20,7 +20,7 @@ Usage: node tools/gru.ts <command> [options]
   packet       --run ID --task ID
   attach       --run ID --revision N --task ID --token TOKEN --peer PEER_ID
   receive      --run ID --revision N --message HERMOD_MESSAGE_ID
-  resume       --run ID --revision N
+  resume       --run ID --revision N [--limits-file limits.json]
   continue     --run ID --revision N --task ID --token TOKEN
   reconnect    --run ID --revision N --task ID --token TOKEN
   reconnected  --run ID --revision N --task ID --token TOKEN
@@ -78,7 +78,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     const verb = argv[0];
     const { values } = parseArgs({ args: argv.slice(1), strict: true, options: Object.fromEntries(
-      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader"].map(key => [key, { type: "string" as const }])) });
+      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader", "limits-file"].map(key => [key, { type: "string" as const }])) });
     const flag = (name: string): string => {
       const value = values[name];
       if (typeof value !== "string" || !value) throw new Error(`--${name} is required`);
@@ -144,7 +144,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }
       case "resume": {
         await checkLeadershipTransfer(run.config.leader, identity);
-        emit(store.resume(id, run.config.leader, revision, identity)); break;
+        // --limits-file replaces the frozen limits array; omitted keeps it. Read as a file,
+        // not an inline string: limits are prose the operator authored, and shell quoting is
+        // exactly where an authority line gets silently truncated.
+        const limitsFile = values["limits-file"];
+        let limits: unknown;
+        if (typeof limitsFile === "string") {
+          if (!limitsFile) throw new Error("--limits-file requires a path");
+          limits = JSON.parse(fs.readFileSync(limitsFile, "utf8"));
+        }
+        emit(store.resume(id, run.config.leader, revision, identity, limits)); break;
       }
       case "recover": emit(store.recover(id, identity, revision, flag("task"), flag("token"))); break;
       case "continue": emit(store.continueWorker(id, identity, revision, flag("task"), flag("token"))); break;
