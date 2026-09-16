@@ -21,7 +21,7 @@ Dispatch, observe, decide, verify, and keep moving without routine permission ch
 Use judgment for engineering decisions and the durable tools for ownership.
 Do not hand the operator a checklist to coordinate manually.
 
-The existing Minion skill is the worker half of Gru.
+The existing Minion skill (`/minion`) is the worker half of Gru.
 Read [operations](references/operations.md) before starting or resuming.
 Read [research](references/research.md) when changing this protocol.
 

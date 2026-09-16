@@ -95,10 +95,11 @@ function parseFrontmatter(text: string): Frontmatter | null {
 // Strict-YAML frontmatter lint. `parseFrontmatter` above is deliberately
 // lenient — it hand-rolls the parse and accepts things a real YAML parser
 // rejects. That gap shipped a live bug: the `minion` skill's `description`
-// held an unquoted colon-space ("a minion runs under: untrusted-content"), which
-// strict YAML reads as a nested mapping. This smoke test passed; bifrost's Go
-// importer rejected it with `mapping values are not allowed in this context`
-// and blocked the marketplace sync. tools/ carries no YAML dependency (node:
+// (it shipped under its old name, `team-minion-agent`) held an unquoted
+// colon-space ("a minion runs under: untrusted-content"), which strict YAML
+// reads as a nested mapping. This smoke test passed; bifrost's Go importer
+// rejected it with `mapping values are not allowed in this context` and
+// blocked the marketplace sync. tools/ carries no YAML dependency (node:
 // builtins only), so this is a TARGETED check for the mapping-indicator trap: a
 // plain scalar must not contain a colon that YAML reads as a key. That is a
 // colon followed by a space/tab (": ") OR a colon at end-of-line — BOTH are
@@ -235,9 +236,9 @@ function listSkills(): string[] {
   // The old `startsWith("stark-")` filter silently skipped the non-`stark-`
   // skills (`gru`, `simple-gate`, `minion`), so nothing validated their
   // frontmatter, refs, or --help contract — that is how the `minion`
-  // colon-space frontmatter bug (see the strict-YAML check below) reached
-  // bifrost. Keying on SKILL.md presence also excludes
-  // non-skill dirs like `evals/`.
+  // colon-space frontmatter bug (it shipped under its old name,
+  // `team-minion-agent`; see the strict-YAML check ABOVE) reached bifrost.
+  // Keying on SKILL.md presence also excludes non-skill dirs like `evals/`.
   return fs
     .readdirSync(SKILLS_ROOT)
     .filter((n) => {
