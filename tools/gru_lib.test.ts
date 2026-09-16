@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
+import { packet } from "./gru_runtime_lib.ts";
 import { GruStore, parseEngagement, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker } from "./gru_lib.ts";
 
 const config = (): Engagement => ({ id: "demo", objective: "Implement independent tasks, then integrate",
@@ -141,6 +142,45 @@ test("provider mismatch preserves reservation and worker concurrency includes un
   run = store.reserve("demo", "leader-one", run.revision, "two");
   assert.equal(run.tasks.filter(t => t.phase === "reserved").length, 2);
   assert.throws(() => store.reserve("demo", "leader-one", run.revision, "dependent"), /worker limit/);
+});
+
+test("only an incoming leader can replace limits, and never the sitting one", t => {
+  const { store } = fixture(t);
+  let run = start(store, observe(store, store.create(config())), "one");
+  const original = run.config.limits;
+  const replacement = ["Leader is leader-three; the previous leader is gone", "No new tickets"];
+  // THE hazard: a same-session resume is a legal no-op transfer, so without a gate the
+  // sitting leader rewrites the limits binding itself — the act operations.md forbids.
+  assert.throws(() => store.resume("demo", "leader-one", run.revision, "leader-one", replacement),
+    /a leader cannot rewrite the limits binding itself/);
+  assert.deepEqual(store.read("demo").config.limits, original);
+  // A same-session resume WITHOUT limits stays legal, and keeps the frozen array.
+  run = store.resume("demo", "leader-one", run.revision, "leader-one");
+  assert.deepEqual(run.config.limits, original);
+  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  assert.deepEqual(run.config.limits, original);
+  // Validated exactly like `init`, so a transfer cannot install junk either.
+  for (const bad of [[], "not a list", [""], ["ok", 7], null]) {
+    assert.throws(() => store.resume("demo", "leader-two", run.revision, "leader-three", bad),
+      /replacement limits must be a non-empty list of strings/, `accepted ${JSON.stringify(bad)}`);
+  }
+  // The refusals above are thrown inside the transaction, so nothing advanced.
+  assert.deepEqual(store.read("demo").config.limits, original);
+  assert.equal(store.read("demo").config.leader, "leader-two");
+  run = store.resume("demo", "leader-two", run.revision, "leader-three", replacement);
+  assert.deepEqual(run.config.limits, replacement);
+  assert.equal(run.config.leader, "leader-three");
+  // The event records BOTH arrays; "limits replaced" alone leaves no auditable trail of
+  // which authority line was dropped.
+  const detail = run.events.at(-1)!.detail;
+  assert.match(detail, /limits replaced from/);
+  assert.match(detail, /No publishing, authentication, infrastructure changes, or extra tickets/);
+  assert.match(detail, /the previous leader is gone/);
+  // Stored by value: mutating the caller's array cannot reach through into the run.
+  replacement[0] = "tampered";
+  assert.equal(store.read("demo").config.limits[0], "Leader is leader-three; the previous leader is gone");
+  // The new limits reach the worker, which is the entire point.
+  assert.match(packet(store.read("demo"), store.read("demo").tasks[0]), /the previous leader is gone/);
 });
 
 test("resume fences stale leaders and uncertain workers cannot consume another retry", t => {

@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Gru leadership transfer can replace operating limits that named the previous leader or held an already-finished phase (`resume --limits-file`), revalidated like `init`. Only an incoming leader may replace them — a sitting leader cannot rewrite the limits binding itself — and the event records both the removed and the installed array. The flag is refused on every other verb rather than ignored.
+
 ### Fixed
+<!-- idun:pr-merge pr=963 runId=963 -->
+- Fixed: gate leadership-transfer limits replacement on a real transfer and document the Hermod delivery-ack requirement for `receive` (STARK-4919)
+- Document that importing a worker report requires Hermod-confirmed delivery, so a Claude leader acks each inbound message first.
 <!-- idun:pr-merge pr=962 runId=962 -->
 - Fenced inherited Gru verification to a settled merge or frozen integration only, and made legacy auth repair patterns skip guard/verify/budget accounting up front.
 

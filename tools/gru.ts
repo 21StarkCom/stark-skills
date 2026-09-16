@@ -20,7 +20,7 @@ Usage: node tools/gru.ts <command> [options]
   packet       --run ID --task ID
   attach       --run ID --revision N --task ID --token TOKEN --peer PEER_ID
   receive      --run ID --revision N --message HERMOD_MESSAGE_ID
-  resume       --run ID --revision N
+  resume       --run ID --revision N [--limits-file limits.json]
   continue     --run ID --revision N --task ID --token TOKEN
   reconnect    --run ID --revision N --task ID --token TOKEN
   reconnected  --run ID --revision N --task ID --token TOKEN
@@ -78,12 +78,19 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     const verb = argv[0];
     const { values } = parseArgs({ args: argv.slice(1), strict: true, options: Object.fromEntries(
-      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader"].map(key => [key, { type: "string" as const }])) });
+      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader", "limits-file"].map(key => [key, { type: "string" as const }])) });
     const flag = (name: string): string => {
       const value = values[name];
       if (typeof value !== "string" || !value) throw new Error(`--${name} is required`);
       return value;
     };
+    // parseArgs registers one option set for every verb, so a flag only `resume` reads is
+    // silently accepted everywhere else. An operator who puts --limits-file on `reconcile`
+    // would get exit 0 and believe the dead-leader limits were replaced while `packet` kept
+    // shipping the old text — the precise failure this flag exists to fix. Refuse instead.
+    if (verb !== "resume" && values["limits-file"] !== undefined) {
+      throw new Error(`--limits-file applies to resume, not ${verb}`);
+    }
     const integer = (name: string): number => {
       const value = flag(name);
       if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error(`--${name} must be an integer`);
@@ -143,8 +150,17 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         emit(store.report(id, identity, revision, report.task, report.token, report.session, report.kind, report.message, flag("message"))); break;
       }
       case "resume": {
+        // --limits-file replaces the frozen limits array; omitted keeps it. Read as a file,
+        // not an inline string: limits are prose the operator authored, and shell quoting is
+        // exactly where an authority line gets silently truncated.
+        //
+        // Read BEFORE the transfer check. That check performs live Hermod discovery, so a
+        // mistyped path would otherwise surface only after a slow network round trip — and
+        // report a discovery failure instead of the typo that actually caused it.
+        const limits = values["limits-file"] === undefined ? undefined
+          : JSON.parse(fs.readFileSync(flag("limits-file"), "utf8"));
         await checkLeadershipTransfer(run.config.leader, identity);
-        emit(store.resume(id, run.config.leader, revision, identity)); break;
+        emit(store.resume(id, run.config.leader, revision, identity, limits)); break;
       }
       case "recover": emit(store.recover(id, identity, revision, flag("task"), flag("token"))); break;
       case "continue": emit(store.continueWorker(id, identity, revision, flag("task"), flag("token"))); break;

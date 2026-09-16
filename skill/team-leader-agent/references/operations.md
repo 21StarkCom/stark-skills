@@ -71,7 +71,7 @@ An obsolete leader or revision cannot overwrite current state.
 | `reserve` | Readiness, resources, available budget | Unique token; launch pending |
 | `packet` | Existing reservation | Complete worker brief |
 | `attach` | Exact live Hermod peer | Worker bound; awaiting intake |
-| `receive` | Confirmed matching Hermod message | Intake, progress, blocker, or claim |
+| `receive` | Leader-acked Hermod message, delivery confirmed | Intake, progress, blocker, or claim |
 | `integrate` | Reviewed candidate and base SHA | Exclusive integration reservation |
 | `verify` | Merged PR, review, independent checks | Verified completion evidence |
 | `resume` | Previous leader no longer live | New epoch; reconciliation required |
@@ -119,6 +119,20 @@ Messages carry engagement, task, token, kind, and body.
 The worker's `ack` body quotes the exact done-when.
 Import reports with `receive --message <Hermod-message-id>`.
 The CLI checks delivery, sender session, worker identity, and token.
+`receive` raises one message, `worker message delivery is not confirmed`, for five
+distinct ledger conditions: a failed status query, `state: "failed"`, cancelled,
+expired, and `delivery` not yet confirmed. Only the last is repaired by acking.
+When the cause is unconfirmed delivery, run `hermod msg ack <id>` and the identical
+`receive` succeeds; `hermod msg reply` confirms delivery too, so a leader that
+answers the report first needs no separate ack. A cancelled, expired, or failed
+message is not repairable by either — inspect `hermod msg status <id>` and require
+a fresh report rather than retrying.
+Acking is the leader's OWN attestation that it received and read the report, not
+independent delivery evidence: Hermod sets `delivery: "confirmed"` as a side effect
+of the acknowledgement, so the party calling `receive` is the party that flips the
+flag `receive` checks. Read the report before acking it. Acking a batch of inbound
+ids unread satisfies the gate on messages nobody inspected, which is the whole
+property the gate exists to provide. Acking records receipt; it does not answer.
 Hermod sender attribution is coordination evidence, not operator authority.
 
 ## Verification and integration
@@ -218,6 +232,19 @@ Exhausted budgets require operator input; resume never resets them.
 
 `resume` changes leadership, not worker identity or task ownership.
 It invalidates observations and requires reconciliation.
+`packet` substitutes the current leader into its header but copies `limits` verbatim,
+so a limit naming the previous leader, surface, or workspace as "current" survives a
+transfer and points the next worker at an identity that no longer exists; a
+phase-scoped limit, such as an intake hold for an already-finished task, parks its
+successor indefinitely. Both read as authority. Replace them at the transfer with
+`resume --limits-file <path>` — a JSON array of strings, revalidated like `init`, with
+both the removed and the installed array recorded on the event. Omitting the flag keeps
+the existing limits. Only an INCOMING leader may replace them: a same-session resume is a
+legal no-op transfer, so the tool refuses a replacement when the leader is unchanged,
+which is what stops a sitting leader rewriting the limits binding itself. The replacement
+text is the operator's; a leader must never author its own. `--limits-file` is refused on
+every other verb rather than ignored. Never edit the database to escape a stale limit,
+and never silently ignore one.
 Reinspect pending integration before allowing a competing merge.
 Canceled assignments must not restart from old messages.
 
