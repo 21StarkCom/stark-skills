@@ -357,6 +357,17 @@ export function checkPromotionCriteria(
   if (pattern.requires_confirmation === true) {
     reasons.push("requires_confirmation is true");
   }
+  // `self_healer_lib.ts::runHeal` refuses `refresh_token` outright once the EFFECTIVE mode
+  // is auto, so promotion writes a pattern into `auto_patterns` that can then only ever
+  // return `{status: "skipped", reason: "operator_action_required"}` — a permanently inert
+  // auto pattern whose `skipped` rows also drag its success_rate down. This used to be
+  // unreachable by construction: the refusal fired in suggest mode too, so the pattern's
+  // `successful_suggests` was pinned at 0 and the first criterion above always blocked it.
+  // Gating that refusal on the effective mode made the suggest history real AND opened this
+  // hole, so the blocker has to be stated here instead of emerging from an empty log.
+  if (pattern.action === "refresh_token") {
+    reasons.push("action 'refresh_token' is operator-only and is refused in auto mode");
+  }
   return reasons;
 }
 

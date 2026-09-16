@@ -334,10 +334,27 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
 
   const ts = isoZ(now);
 
+  // -------- Auto-mode gate (effective mode downgrade) --------
+  // Computed here rather than after the gates below because the `refresh_token` refusal
+  // must fire on the EFFECTIVE mode, and this downgrade is a pure set lookup with no
+  // side effects — moving it earlier changes nothing but what the next gate can read.
+  let effectiveMode: HealMode = opts.mode;
+  if (opts.mode === "auto" && !autoPatterns.has(pattern.id)) {
+    effectiveMode = "suggest";
+  }
+
   // The `refresh_token` action can never become an automatic repair, including from a
   // custom pattern that reuses the name. This keys on that action specifically — it is
   // not a general operator-only gate; `requires_confirmation` is the per-pattern opt-out.
-  if (pattern.action === "refresh_token") {
+  //
+  // `effectiveMode === "auto"`, NOT `pattern.action === "refresh_token"` alone: the refusal
+  // exists to stop an automatic APPLY, and suggest mode applies nothing. Gating both modes
+  // returned `{status: "skipped"}` where suggest mode owes `{status: "suggested",
+  // requires_confirmation}`, and it wrote a `skipped` row to the performance log. Those rows
+  // are what `healer_canary_lib.ts::computeStats` counts as `successful_suggests`, so such a
+  // pattern's suggest history stayed permanently empty and it could never be evaluated at all.
+  // No shipped pattern in `healer_patterns.json` uses this action; operator-authored ones do.
+  if (pattern.action === "refresh_token" && effectiveMode === "auto") {
     const result = { status: "skipped", reason: "operator_action_required", pattern_id: pattern.id,
       action: pattern.action, verify_passed: false };
     appendLog({ timestamp: ts, mode: opts.mode, ...result }, logPath);
@@ -388,12 +405,6 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
         },
       };
     }
-  }
-
-  // -------- Auto-mode gate (effective mode downgrade) --------
-  let effectiveMode: HealMode = opts.mode;
-  if (opts.mode === "auto" && !autoPatterns.has(pattern.id)) {
-    effectiveMode = "suggest";
   }
 
   // -------- Gate: circuit breaker (auto mode only) --------

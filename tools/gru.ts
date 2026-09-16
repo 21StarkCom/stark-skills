@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { GruStore, parseEngagement, verificationReady } from "./gru_lib.ts";
-import type { Assignment } from "./gru_lib.ts";
+import type { Assignment, Engagement } from "./gru_lib.ts";
 import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
@@ -58,14 +58,38 @@ No command publishes, changes authentication, or deletes worker/session worktree
 
 /** Explain why `verificationReady` refused, naming the command that actually repairs it.
  * `integrate` only accepts phase `review`, so it is the wrong instruction everywhere else;
- * a stopped worker needs `continue`, an in-flight one needs its own READY report first. */
+ * a stopped worker needs `continue` (or a fresh `reserve`, if it never attached), an
+ * in-flight one needs its own READY report first.
+ *
+ * No `stopping` case on purpose: `verify` refuses unless `run.mode === "running"` (see the
+ * call site), and `stop()` is the only writer of phase `stopping` — it sets the whole run to
+ * `stopping`/`stopped` in the same transaction, and `resume()` only maps `stopped` back to
+ * `running`, which requires no task to be active, which `stopping` is. So a `stopping` task
+ * can never reach this function; a branch for it is dead text that reads as live guidance.
+ * `gru_lib.test.ts` pins that invariant. */
 export function verifyBlocker(task: Assignment): string {
   if (task.reconnect?.pending) return "reconnect outcome is uncertain; observe it before verification";
-  if (!task.integrationBase) return `task is ${task.phase} with no integration grant; integrate after its READY report`;
+  if (!task.integrationBase) {
+    // Phase-aware, because this branch — not the switch — is the one an ordinary `review`
+    // task reaches. A grant only survives into `review` when `reserve` hands a replacement
+    // its predecessor's unsettled one, so the switch's `review` case covers the RARE path;
+    // the first attempt reports ready with no grant at all and lands here. Telling it to
+    // "integrate after its READY report" names a prerequisite already behind it — exactly
+    // the misdirection the `review` case below exists to remove.
+    return task.phase === "review"
+      ? "task reported ready and holds no integration grant; integrate it at its observed base, then verify"
+      : `task is ${task.phase} with no integration grant; integrate after its READY report`;
+  }
   switch (task.phase) {
     case "done": return "task is already verified";
-    case "stopping": return "task is stopping; observe termination and record stopped first";
-    case "stopped": return "task was cancelled before integration; continue it, then integrate after its READY report";
+    // Reaching `review` IS the READY report (gru_lib.ts report()), so telling this task to
+    // report ready names a step it already took. `integrate` is the one command that applies.
+    case "review": return "task reported ready but holds a stale integration grant; integrate it at its current base, then verify";
+    // Reachable only WITH a grant (the guard above took the ungranted case), so "cancelled
+    // before integration" would contradict its own precondition. `continue` is the repair
+    // when a worker attached; a replacement stopped while still `reserved` has none, and
+    // `continueWorker` refuses without an observed live idle worker.
+    case "stopped": return "task was cancelled holding an unsettled integration grant; continue it — or reserve a replacement if it never attached — then integrate at its current base";
     default: return `task is ${task.phase}; its worker must report ready and receive integration before verification`;
   }
 }
@@ -91,6 +115,19 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (verb !== "resume" && values["limits-file"] !== undefined) {
       throw new Error(`--limits-file applies to resume, not ${verb}`);
     }
+    // Read a JSON file named by a flag, attributing any failure to the FLAG and the PATH.
+    // A bare `JSON.parse` surfaces "Unexpected token } in JSON at position 41" — an offset
+    // into an unnamed buffer. The operator is running several files through several flags;
+    // a parser offset that names neither tells them nothing they can act on. Shared by
+    // `init --file` and `resume --limits-file` so neither can drift back to the bare form.
+    const readJsonFlag = (name: string): unknown => {
+      const filePath = flag(name);
+      try {
+        return JSON.parse(fs.readFileSync(filePath, "utf8"));
+      } catch (error) {
+        throw new Error(`--${name} ${filePath}: ${(error as Error).message}`);
+      }
+    };
     const integer = (name: string): number => {
       const value = flag(name);
       if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error(`--${name} must be an integer`);
@@ -104,7 +141,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     store = new GruStore(statePath);
     const emit = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + "\n");
     if (verb === "init") {
-      const input = JSON.parse(fs.readFileSync(flag("file"), "utf8"));
+      // Shape is asserted by `parseEngagement` two lines down, not by this cast.
+      const input = readJsonFlag("file") as Engagement;
       if (input.leader !== identity) throw new Error("engagement leader differs from current session");
       // Validate first: realpath would silently absolutize a relative path against this cwd.
       parseEngagement(input);
@@ -157,8 +195,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         // Read BEFORE the transfer check. That check performs live Hermod discovery, so a
         // mistyped path would otherwise surface only after a slow network round trip — and
         // report a discovery failure instead of the typo that actually caused it.
-        const limits = values["limits-file"] === undefined ? undefined
-          : JSON.parse(fs.readFileSync(flag("limits-file"), "utf8"));
+        //
+        // `readJsonFlag` attributes any failure to the flag AND the path, which is precisely
+        // the early-read's stated purpose; `init --file` shares it for the same reason.
+        const limits = values["limits-file"] === undefined ? undefined : readJsonFlag("limits-file");
         await checkLeadershipTransfer(run.config.leader, identity);
         emit(store.resume(id, run.config.leader, revision, identity, limits)); break;
       }

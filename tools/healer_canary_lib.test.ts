@@ -361,6 +361,32 @@ test("checkPromotionCriteria: flags requires_confirmation true", () => {
   assert.ok(unmet.some((r) => r.includes("requires_confirmation")));
 });
 
+test("checkPromotionCriteria: flags an operator-only refresh_token action", () => {
+  // `runHeal` refuses `refresh_token` once the EFFECTIVE mode is auto, so promoting one
+  // installs an auto pattern that can only ever return `operator_action_required` — and
+  // every such run writes a `skipped` row that drags its success_rate down. Before the
+  // refusal was narrowed to auto mode this was blocked by accident (suggest mode also
+  // returned `skipped`, so `successful_suggests` was pinned at 0); narrowing it made the
+  // suggest history real and left nothing holding the promotion gate shut.
+  const stats = computeStats(
+    "test-pattern",
+    Array.from({ length: 5 }, () => entry({ status: "suggested" })),
+    {},
+    { gate: DEFAULT_GATE, now: new Date("2026-05-18T12:00:00Z") },
+  );
+  const unmet = checkPromotionCriteria(
+    pattern({ action: "refresh_token" }),
+    stats,
+    DEFAULT_GATE,
+  );
+  assert.ok(
+    unmet.some((r) => r.includes("refresh_token")),
+    `an operator-only action was eligible for promotion: ${JSON.stringify(unmet)}`,
+  );
+  // And an ordinary action with the same history is still promotable.
+  assert.deepEqual(checkPromotionCriteria(pattern({ action: "clear_cache" }), stats, DEFAULT_GATE), []);
+});
+
 test("checkPromotionCriteria: honors a configurable min_successful_suggests", () => {
   const stats = computeStats(
     "test-pattern",

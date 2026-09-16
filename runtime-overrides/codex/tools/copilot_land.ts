@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 /**
- * copilot_land.ts — the create-or-adopt idempotent impl-PR landing CLI for
- * `$stark-copilot` (#773). This CLI owns EVERY git + PR side effect; the
- * deterministic decisions live in `copilot_land_lib.ts` (pure, unit-proven).
+ * copilot_land.ts — the create-or-adopt idempotent impl-PR landing CLI.
+ * Its live caller is `$stark-build` Phase 1. This CLI owns EVERY git + PR side
+ * effect; the deterministic decisions live in `copilot_land_lib.ts` (pure,
+ * unit-proven).
  *
- * `copilot` is the merge point for the `impl` artifact: a run is not done
- * without a non-empty `artifact_prs.impl`. (The `$stark-forge` chainer that
- * enforced this was retired 2026-07-26; the invariant outlived it.)
- * Copilot itself only commits locally (SKILL.md §2g); this CLI runs AFTER
- * that work is committed and lands it: adopt-or-create the impl branch,
- * push (never force), adopt-or-create the PR, report its number(s).
+ * THE `copilot` NAME IS LEGACY, NOT A LIVE COMMAND. The tool was written for
+ * the copilot skill (#773), which was buried in STARK-2100 and now lives only
+ * in the nastrond graveyard. Do not cite that skill as a command to run. The
+ * branch prefix (`copilot/<slug>`) kept the name because renaming it would
+ * orphan every branch already pushed under it.
+ *
+ * The caller only commits locally; this CLI runs AFTER that work is committed
+ * and lands it: adopt-or-create the impl branch, push (never force),
+ * adopt-or-create the PR, report its number(s).
  *
  * Subcommands:
  *   branch-name    --plan-slug SLUG|"" --fallback-slug SLUG
@@ -20,7 +24,7 @@
  *                  Adopt-or-create the branch on the CURRENT checkout
  *                  (refuses a dirty tree; ff-only merge for an existing
  *                  local — a non-ff divergence is a HARD error, never
- *                  force). Mirrors `write_spec_land.ts prepare-branch`.
+ *                  force).
  *                  --require-base SHA refuses to adopt a remote branch that
  *                  does not contain SHA, and asserts HEAD contains it after
  *                  every path. Without it, a leftover remote branch from an
@@ -37,7 +41,10 @@
  *                  and landed PRs. `--lead NAME` is inert: accepted for caller compatibility and echoed
  *                  only by `--dry-run`. It selects nothing.
  *
- * Arg-parsing house style mirrors `write_spec_land.ts` / `red_team_fold.ts`.
+ * Arg-parsing house style: explicit boolean/value flag sets, unknown flags are a
+ * hard error, and every refusal prints through `fail()` so `--json` callers get
+ * one shape. (This line used to cite `write_spec_land.ts` / `red_team_fold.ts` as
+ * the source of the style; both files were deleted, so it pointed nowhere.)
  */
 import { spawnSync } from "node:child_process";
 import { isMainModule } from "./main_module_lib.ts";
@@ -111,7 +118,8 @@ function hasUpstream(cwd: string): boolean {
 
 const HELP = `usage: copilot_land.ts <subcommand> [options]
 
-Create-or-adopt idempotent impl-PR landing helper for $stark-copilot.
+Create-or-adopt idempotent impl-PR landing helper for $stark-build Phase 1.
+(The "copilot" name is legacy: the tool outlived the retired skill it served.)
 
 subcommands:
   branch-name    --plan-slug SLUG --fallback-slug SLUG [--json]
@@ -214,9 +222,10 @@ function cmdBranchName(argv: string[]): number {
 
 // ── Subcommand: prepare-branch ──────────────────────────────────────────────
 //
-// Mirrors write_spec_land.ts's `prepare-branch` (same three-way decision:
-// existing local wins + ff-only, else track an existing remote, else create).
-// Kept as its own copy rather than a shared import: the git side effects here
+// Three-way decision: an existing local branch wins (ff-only), else track an
+// existing remote, else create. Kept here rather than behind a shared import
+// (the `write_spec_land.ts` this once pointed at no longer exists): the git
+// side effects here
 // are CLI-owned, not the pure decision (which copilot_land_lib.ts does not
 // need to re-derive — the branch/PR existence checks below are what matter).
 
@@ -414,8 +423,11 @@ async function cmdLand(argv: string[]): Promise<number> {
   const branch = str(flags, "branch");
   const title = str(flags, "title");
   const body = str(flags, "body");
-  // Accepted for caller compatibility; echoed only in --dry-run.
-  const lead = str(flags, "lead") || "claude";
+  // Accepted for caller compatibility; echoed only in --dry-run, and only when
+  // actually supplied. A default here made `--dry-run` print `"lead": "claude"`
+  // for a run that passed no --lead, which reads as a selected agent and
+  // contradicts the header's claim that the flag selects nothing.
+  const lead = present(flags, "lead") ? str(flags, "lead") : null;
   const base = str(flags, "base") || "main";
   const cwd = str(flags, "repo-dir") || process.cwd();
   const knownPrsCsv = str(flags, "known-prs");
@@ -423,6 +435,10 @@ async function cmdLand(argv: string[]): Promise<number> {
   if (!repo) return fail(json, "--repo OWNER/REPO is required");
   if (!branch) return fail(json, "--branch is required");
   if (!title) return fail(json, "--title is required");
+  // --body is documented required and is passed straight to `gh pr create --body`.
+  // Unvalidated, omitting it opened a REAL PR with an empty description — a side
+  // effect no later run can undo, since `land` then adopts that PR by head ref.
+  if (!body) return fail(json, "--body is required");
 
   let knownPrs: number[];
   try {
@@ -439,7 +455,8 @@ async function cmdLand(argv: string[]): Promise<number> {
       repo,
       branch,
       base,
-      lead,
+      // Absent unless the caller supplied it; see the `lead` binding above.
+      ...(lead === null ? {} : { lead }),
       ready,
       title,
       known_prs: knownPrs,
@@ -486,7 +503,7 @@ async function cmdLand(argv: string[]): Promise<number> {
       }
       return { number, html_url: url };
     },
-    // Un-draft through the operator's gh login (mirrors write_spec_land.ts).
+    // Un-draft through the operator's gh login.
     markReady: async (prNumber) => {
       const r = gh(["pr", "ready", String(prNumber), "--repo", repo], cwd);
       return { ok: r.code === 0, stderr: r.stderr };

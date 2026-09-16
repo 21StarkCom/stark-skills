@@ -484,7 +484,13 @@ export class GruStore {
       requireValue(evidence.ticketState === "done" || evidence.ticketState === "Closed", "repository completion milestone not recorded in Alfred");
       requireValue(evidence.checks.length === task.spec.checks.length, "missing completion checks");
       task.spec.checks.forEach((argv, i) => requireValue(JSON.stringify(evidence.checks[i].argv) === JSON.stringify(argv) && evidence.checks[i].exitCode === 0 && nonempty(evidence.checks[i].log), "check failed, changed, or missing output"));
-      task.evidence = structuredClone(evidence); task.phase = "done";
+      // Clear `stoppedFrom` with the phase, as `reserve` and `finishReconnect` already do.
+      // `verificationReady` admits `stopped` + `stoppedFrom: "integrating"` (a stop that froze
+      // an in-flight integration), so settling that merge leaves a verified task reporting
+      // `phase: "done", stoppedFrom: "integrating"` in `gru status` — a done task that still
+      // claims it was cancelled mid-integration, which is the state a leader reads to decide
+      // whether work is outstanding.
+      task.evidence = structuredClone(evidence); task.phase = "done"; task.stoppedFrom = undefined;
       // Completion releases integration gates, but a saved session still owns its tree.
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND (resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%' OR resource LIKE 'exclusive:%')").run(id, taskId);
       if (run.tasks.every(t => t.phase === "done")) run.mode = "complete";

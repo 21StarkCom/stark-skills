@@ -83,6 +83,14 @@ test("gru CLI: resume rejects a missing, malformed, or empty --limits-file path"
   const broken = await run([...base, "--limits-file", malformed], "leader-two");
   assert.equal(broken.code, 2);
   assert.match(broken.error, /JSON/i);
+  // The whole point of reading the file BEFORE the slow Hermod transfer check is to
+  // attribute a typo to the typo. A bare JSON.parse said only "Unexpected token ... at
+  // position N" — an offset into an unnamed buffer, naming neither the flag nor the path,
+  // while the operator has several files and several flags in play.
+  assert.match(broken.error, /--limits-file/);
+  assert.ok(broken.error.includes(malformed), `error did not name the path: ${broken.error}`);
+  assert.match(missing.error, /--limits-file/);
+  assert.ok(missing.error.includes(path.join(dir, "nope.json")), `error did not name the path: ${missing.error}`);
   // Every refusal above left the engagement alone.
   const after = await run(["status", "--run", "cli", "--state", state], "leader-one");
   assert.deepEqual(JSON.parse(after.out).config.limits, ["OPERATOR LIMIT: no publishing"]);
@@ -112,8 +120,29 @@ test("verifyBlocker names the command that actually repairs each phase", () => {
   assert.match(at("integrating", { reconnect: { pending: true } }), /reconnect outcome is uncertain/);
   assert.match(verifyBlocker({ spec, phase: "working", attempts: 1, recoveries: 0 } as never), /no integration grant/);
   assert.match(at("done"), /already verified/);
-  assert.match(at("stopping"), /observe termination/);
   // `integrate` only accepts phase `review`, so a stopped task must hear `continue`.
   assert.match(at("stopped"), /continue it/);
   assert.match(at("working"), /report ready and receive integration/);
+
+  // Reaching `review` IS the READY report, so the generic default told a task to take a
+  // step it had already taken and never named `integrate` — the one command that applies.
+  // (A `review` task CAN hold an integrationBase: `reserve` hands a replacement the
+  // predecessor's unsettled grant, and the replacement then works its way back to `review`.)
+  const review = at("review");
+  assert.match(review, /integrate/);
+  assert.doesNotMatch(review, /must report ready/);
+
+  // The SAME correction on the path a leader actually hits. A grant only reaches `review`
+  // when `reserve` hands a replacement its predecessor's unsettled one, so the switch case
+  // above is the rare path; a first attempt reports ready with no grant and is answered by
+  // the `!integrationBase` guard, which said "integrate after its READY report" — naming a
+  // prerequisite already behind the task, the very defect the `review` case removed.
+  const ungranted = verifyBlocker({ spec, phase: "review", attempts: 1, recoveries: 0 } as never);
+  assert.match(ungranted, /integrate/);
+  assert.doesNotMatch(ungranted, /after its READY report/);
+
+  // No `stopping` case: `verify` refuses unless run.mode === "running", and a `stopping`
+  // task forces run.mode to `stopping`. gru_lib.test.ts pins that invariant; here we only
+  // assert the branch is gone rather than re-asserting a message nothing can read.
+  assert.doesNotMatch(at("stopping"), /observe termination/);
 });
