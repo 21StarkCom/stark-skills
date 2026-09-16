@@ -1,8 +1,9 @@
 // Tests for `tools/self_healer_lib.ts` — port of `scripts/self_healer.py`
 // (which had ZERO tests for a module that auto-applies fixes to files).
-// Coverage focuses on the gate ladder: operator-only action → guard →
-// session cap → auto-mode gate → circuit breaker → suggest/auto branch →
-// execute → outcome recorded → circuit updated → alerts on critical transitions.
+// Coverage focuses on the gate ladder: auto-mode allowlist (effective-mode
+// downgrade) → refresh_token refusal → guard → session cap → circuit breaker →
+// suggest/auto branch → execute → outcome recorded → circuit updated → alerts
+// on critical transitions.
 
 import { strict as assert } from "node:assert";
 import fs from "node:fs";

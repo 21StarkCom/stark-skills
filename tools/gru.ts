@@ -86,10 +86,12 @@ export function verifyBlocker(task: Assignment): string {
     // report ready names a step it already took. `integrate` is the one command that applies.
     case "review": return "task reported ready but holds a stale integration grant; integrate it at its current base, then verify";
     // Reachable only WITH a grant (the guard above took the ungranted case), so "cancelled
-    // before integration" would contradict its own precondition. `continue` is the repair
-    // when a worker attached; a replacement stopped while still `reserved` has none, and
-    // `continueWorker` refuses without an observed live idle worker.
-    case "stopped": return "task was cancelled holding an unsettled integration grant; continue it — or reserve a replacement if it never attached — then integrate at its current base";
+    // before integration" would contradict its own precondition. `continue` is the ONLY
+    // repair: it needs an observed live idle worker, which is exactly the recoverable case.
+    // Do NOT name `reserve` here — `readyReason` refuses every phase except `pending`, so
+    // suggesting it hands the operator a command that throws, which is the defect this
+    // function exists to remove.
+    case "stopped": return "task was cancelled holding an unsettled integration grant; continue it once its worker is observed live and idle, then integrate at its current base";
     default: return `task is ${task.phase}; its worker must report ready and receive integration before verification`;
   }
 }

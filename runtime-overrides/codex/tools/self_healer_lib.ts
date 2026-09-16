@@ -3,10 +3,13 @@
  *
  * Given a stderr capture and a pattern id, decides whether to suggest a
  * fix or auto-apply it. Walks a gate ladder:
- *   operator-only action → guard cmd → max_per_session → auto-mode allowlist
- *   → circuit breaker → suggest/auto branch → execute → outcome → circuit update.
- * The operator-only gate runs first so an authentication pattern never spends a
- * guard command, a verify command, a session budget, or circuit accounting.
+ *   auto-mode allowlist (effective-mode downgrade) → refresh_token refusal
+ *   → guard cmd → max_per_session → circuit breaker → suggest/auto branch
+ *   → execute → outcome → circuit update.
+ * The allowlist downgrade runs FIRST because the `refresh_token` refusal keys on
+ * the EFFECTIVE mode, not the requested one. That refusal therefore fires only in
+ * effective-auto: a `refresh_token` pattern in suggest mode proceeds normally and
+ * DOES spend a guard command, which is what makes its suggestion worth reading.
  *
  * Improvements over the Python (matches the healer_canary precedent):
  *   - Atomic writes for `healer-session.json` and `healer-circuits.json`
