@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+<!-- idun:pr-merge pr=962 runId=962 -->
+- Fenced inherited Gru verification to a settled merge or frozen integration only, and made legacy auth repair patterns skip guard/verify/budget accounting up front.
+
 ## [v0.11.3] - 2026-09-15
 
 ### Fixed
