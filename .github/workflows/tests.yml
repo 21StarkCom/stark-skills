@@ -6,8 +6,9 @@
 # already run on PRs are code scanning, not tests.
 #
 # The suite needs no dependency install — every import is a `node:` builtin, and
-# `tools/`'s only devDependencies (typescript, @types/node) are for the optional
-# typecheck below. So there is no `npm ci` on the test path.
+# `tools/`'s only devDependencies (typescript, @types/node) belong to the
+# `typecheck` job below, which is its own required check (STARK-5008). So there
+# is no `npm ci` on the test path.
 
 name: tests
 
@@ -30,7 +31,8 @@ on:
   # (and therefore every merge gate reading it) still carried `test: SKIPPED`.
   workflow_dispatch: {}
 
-# Serialize per PR / branch, but NEVER cancel — `test` is a required check.
+# Serialize per PR / branch, but NEVER cancel — `test` and `typecheck` are both
+# required checks.
 #
 # `cancel-in-progress: true` was correct while the jobs were draft-guarded: they
 # finished in ~5 seconds, so there was never anything in flight to cancel. Now
@@ -99,15 +101,29 @@ jobs:
         working-directory: tools
         run: npm ci
 
-      # Typecheck remains advisory and reports separately from the test gate.
+      # `typecheck` is a REQUIRED status check on `main` (ruleset 20607400,
+      # STARK-5008), and this step reports the real `tsc` result, so a type
+      # regression blocks the merge instead of landing.
       #
-      # CONSEQUENCE: `continue-on-error` means the `typecheck` CHECK reports
-      # SUCCESS whether or not tsc passed — the errors are visible only in the
-      # step log. So `typecheck` must NOT be added to the branch ruleset's
-      # required checks: it would satisfy the gate unconditionally, which is the
-      # same false-green shape this workflow was rewritten to remove. Drop
-      # `continue-on-error` first, THEN require it.
-      - name: Typecheck (advisory)
+      # It has to be its own gate because `node --test` does NOT typecheck: the
+      # suite runs `.ts` through Node's type-stripping, which erases annotations
+      # rather than checking them. A wrong generic, a bad annotation or an
+      # unsound cast passes every test in the `test` job.
+      #
+      # NEVER put `continue-on-error: true` back on this step. It carried that
+      # flag while the check was advisory, which made the CHECK report SUCCESS
+      # whether or not `tsc` passed — errors visible only in the step log. That
+      # is why the check could not simply be added to the ruleset: requiring a
+      # `continue-on-error` step satisfies the gate unconditionally, the same
+      # false-green shape this workflow was rewritten to remove. Re-adding it
+      # would silently turn a required check back into decoration, so
+      # `tools/typecheck_gate.test.ts` fails the suite if it reappears.
+      #
+      # `npm run typecheck`, NOT `npx tsc -p .`: with no TTY on stdin, `npx`
+      # downloads a missing package from the registry instead of failing, so a
+      # dropped devDependency would move this required gate onto an unpinned
+      # latest TypeScript without a word. `npm run` resolves the locked local
+      # binary or errors.
+      - name: Typecheck
         working-directory: tools
-        continue-on-error: true
-        run: npx tsc -p .
+        run: npm run typecheck
