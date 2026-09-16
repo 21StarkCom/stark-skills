@@ -124,14 +124,19 @@ const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
 const fresh = (o?: Observation) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
-/** A replacement must finish intake and receive integration before verification.
- * A retained merge can still be settled before replacement starts (`pending`), or
- * after cancellation froze an in-flight integration (`stopped` from `integrating`).
- * Cancelling an intake or working replacement must not reopen that grant: a stopped
- * worker stays resumable through `continueWorker`, so its task is not verifiable. */
+/** A retained merge is settleable only while no replacement owns the work, or while
+ * this task's own integration is live or frozen. `attach` is the ownership line:
+ * before it the replacement has implemented nothing (`pending` after `recover`,
+ * `reserved` after `reserve`), so settling the landed merge costs nothing. After it
+ * the replacement must report ready and receive its own grant — cancelling an intake
+ * or working replacement must not reopen the inherited one, because that worker stays
+ * resumable through `continueWorker`. `reserved` is load-bearing, not cosmetic: a
+ * launch that never produces a discoverable peer leaves the task unattachable, and
+ * with the attempt budget spent `recover` also refuses — without it, a merge that
+ * actually landed could never be settled and the engagement could never complete. */
 export function verificationReady(task: Assignment): task is Assignment & { integrationBase: string } {
   return Boolean(task.integrationBase && !task.reconnect?.pending &&
-    (task.phase === "integrating" || task.phase === "pending" ||
+    (task.phase === "integrating" || task.phase === "pending" || task.phase === "reserved" ||
       (task.phase === "stopped" && task.stoppedFrom === "integrating")));
 }
 

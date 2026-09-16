@@ -237,23 +237,19 @@ function runVerify(cmd: string): boolean {
   return result.status === 0;
 }
 
-interface ExecutionOutcome {
-  verify_passed: boolean;
-}
-
 /**
  * Execute a configured repair action. Authentication stays operator-owned and is
  * refused in `runHeal` before this runs. Every remaining action is a logged stub,
- * so the verify command is the only outcome signal.
+ * so the verify command is the only outcome signal — hence a bare boolean.
  */
 function executeAction(
   pattern: HealerPattern,
   logFn: (msg: string) => void,
-): ExecutionOutcome {
+): boolean {
   logFn(pattern.action === "release_stale_lock"
     ? "no lock path specified, skipping"
     : `action ${pattern.action} not yet implemented`);
-  return { verify_passed: runVerify(pattern.verify_command ?? "true") };
+  return runVerify(pattern.verify_command ?? "true");
 }
 
 // ---------------------------------------------------------------------------
@@ -338,7 +334,9 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
 
   const ts = isoZ(now);
 
-  // Authentication cannot become an automatic repair, even through custom patterns.
+  // The `refresh_token` action can never become an automatic repair, including from a
+  // custom pattern that reuses the name. This keys on that action specifically — it is
+  // not a general operator-only gate; `requires_confirmation` is the per-pattern opt-out.
   if (pattern.action === "refresh_token") {
     const result = { status: "skipped", reason: "operator_action_required", pattern_id: pattern.id,
       action: pattern.action, verify_passed: false };
@@ -473,7 +471,7 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
   }
 
   // -------- Auto mode: execute --------
-  const execution = executeAction(pattern, logFn);
+  const verifyPassed = executeAction(pattern, logFn);
   if (typeof pattern.max_per_session === "number") {
     sessionIncrement(pattern.id, sessionPath);
   }
@@ -482,7 +480,7 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
     status: "applied",
     pattern_id: pattern.id,
     action: pattern.action,
-    verify_passed: execution.verify_passed,
+    verify_passed: verifyPassed,
   };
   appendLog(
     {
@@ -496,7 +494,7 @@ export function runHeal(opts: RunHealOpts): RunHealResult {
   );
 
   // -------- Circuit update based on outcome --------
-  if (execution.verify_passed) {
+  if (verifyPassed) {
     recordCircuitSuccess(pattern.id, { now, circuitsPath });
   } else {
     const newlyTripped = recordCircuitFailure(pattern.id, threshold, {

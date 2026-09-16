@@ -27,14 +27,15 @@
  *                  abandoned run silently resets HEAD onto the old codebase.
  *
  *   land           --repo O/R --branch NAME --title T --body TEXT
- *                  [--base main] [--lead claude|codex|gemini] [--ready]
+ *                  [--base main] [--lead NAME] [--ready]
  *                  [--known-prs "812,819"] [--repo-dir DIR]
  *                  [--dry-run] [--json]
  *                  Push the already-committed branch (never --force),
  *                  adopt an existing open PR for that head or open a
  *                  fresh one (draft by default, authored by `aryeh-stark`
  *                  via `gh`), and print `{pr, prs}`. `prs` includes all known
- *                  and landed PRs. `--lead` is a compatibility argument, echoed only by dry-run.
+ *                  and landed PRs. `--lead NAME` is inert: accepted for caller compatibility and echoed
+ *                  only by `--dry-run`. It selects nothing.
  *
  * Arg-parsing house style mirrors `write_spec_land.ts` / `red_team_fold.ts`.
  */
@@ -121,7 +122,7 @@ subcommands:
                  --require-base SHA refuses a stale remote branch that
                  does not contain SHA, and asserts HEAD contains it.
   land           --repo OWNER/REPO --branch NAME --title TEXT --body TEXT
-                 [--base BRANCH] [--lead claude|codex|gemini] [--ready]
+                 [--base BRANCH] [--lead NAME] [--ready]
                  [--known-prs "812,819"] [--repo-dir DIR]
                  [--dry-run] [--json]
                  Push (never --force), adopt-or-create the PR, print

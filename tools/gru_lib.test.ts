@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
-import { GruStore, parseEngagement, readyReason, type CompletionEvidence, type Engagement, type Run, type Worker } from "./gru_lib.ts";
+import { GruStore, parseEngagement, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker } from "./gru_lib.ts";
 
 const config = (): Engagement => ({ id: "demo", objective: "Implement independent tasks, then integrate",
   leader: "leader-one", maxWorkers: 2, maxAttempts: 2, maxRecoveries: 2,
@@ -246,6 +246,46 @@ test("cancelling a working replacement leaves it resumable, not verifiable", t =
   // The interrupted worker resumes its own implementation instead.
   run = store.continueWorker("demo", "leader-two", run.revision, "one", replacement);
   assert.equal(run.tasks[0].phase, "working");
+});
+
+test("a landed merge stays settleable when the replacement launch never attaches", t => {
+  const { store } = fixture(t);
+  let run = grantThenLoseWorker(store);
+  const proof = landedProof(run);
+  // maxAttempts is 2 and worker #1 spent one; this reservation spends the last.
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  assert.equal(run.tasks[0].phase, "reserved");
+  // The launch produces no discoverable peer, so `attach` can never run. `recover`
+  // is refused twice over — the attempt budget is spent and there is no observation.
+  assert.throws(() => store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!),
+    /replacement requires observed termination|attempt budget exhausted/);
+  // Without `reserved` in verificationReady this merge could never be settled and
+  // the engagement could never reach `complete`.
+  const done = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof);
+  assert.equal(done.tasks[0].phase, "done");
+});
+
+test("verificationReady admits only the pre-attach and own-integration windows", () => {
+  const base = { spec: config().tasks[0], attempts: 1, recoveries: 0 };
+  const at = (phase: string, extra: Record<string, unknown> = {}) =>
+    verificationReady({ ...base, phase, integrationBase: BASE, ...extra } as never);
+  // Pre-attach: no replacement owns the work, so the landed merge is free to settle.
+  for (const phase of ["pending", "reserved"]) assert.equal(at(phase), true, `${phase} must verify`);
+  // This task's own integration, live or frozen by cancellation.
+  assert.equal(at("integrating"), true, "integrating must verify");
+  assert.equal(at("stopped", { stoppedFrom: "integrating" }), true, "stopped-from-integrating must verify");
+  // A replacement holds the work: it must report ready and earn its own grant.
+  for (const phase of ["intake", "working", "blocked", "review", "stopping", "done"]) {
+    assert.equal(at(phase), false, `${phase} must not verify`);
+  }
+  // Cancelling before integration leaves the worker resumable, not verifiable.
+  for (const from of ["reserved", "intake", "working", "review"]) {
+    assert.equal(at("stopped", { stoppedFrom: from }), false, `stopped-from-${from} must not verify`);
+  }
+  // No grant at all, and an unsettled reconnect, each refuse on their own.
+  assert.equal(verificationReady({ ...base, phase: "pending" } as never), false, "no base must not verify");
+  assert.equal(at("integrating", { reconnect: { id: "r", startedAt: "", phase: "integrating", pending: true } }),
+    false, "unsettled reconnect must not verify");
 });
 
 test("confirmed retirement frees capacity while uncertain or resumed workers count", t => {

@@ -497,10 +497,12 @@ test("runHeal: third consecutive verify-fail trips the circuit AND emits a CRITI
   assert.equal(lastAlert.level, "critical");
 });
 
-test("runHeal: max_per_session counter only increments on successful executions", () => {
-  // Python parity: failed executions do NOT bump the session counter.
-  // Means a broken pattern can keep being attempted (circuit breaker is
-  // what catches that), but successful runs are budgeted.
+test("runHeal: max_per_session counter bumps on every auto execution, pass or fail", () => {
+  // The counter tracks ATTEMPTS, not outcomes. The Python gated it on an
+  // `execution.success` flag, but every action it could reach returned true
+  // unconditionally, so the gate never fired; the flag was deleted rather than
+  // ported as decoration. A failing verify still spends budget — the circuit
+  // breaker, not the session cap, is what stops a broken pattern.
   const c = ctx();
   writePatterns(c, [
     pattern({ action: "release_stale_lock", verify_command: "false", max_per_session: 2 }),
@@ -514,11 +516,6 @@ test("runHeal: max_per_session counter only increments on successful executions"
     autoPatterns: ["test-pattern"],
     threshold: 99, // prevent circuit trip from interfering
   });
-  // Verify failed → counter should still be 0.
-  // (Action 'release_stale_lock' itself "succeeds" in the Python; verify
-  //  decides whether the OUTCOME counts. Reading the Python again:
-  //  session bump only when `execution.success` — not `verify_passed`.
-  //  release_stale_lock action returns success=true regardless, so the
-  //  counter DOES bump. Match Python exactly.)
+  // `verify_command: "false"` → verify_passed is false, and the counter still bumps.
   assert.equal(sessionCount("test-pattern", c.sessionPath), 1);
 });

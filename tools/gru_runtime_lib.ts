@@ -194,7 +194,9 @@ export function packet(run: Run, task: Assignment): string {
     "Keep edits within those declared files/directories; report any needed scope expansion to Gru.",
     ...(task.integrationBase ? [
       `Pending integration base: ${task.integrationBase}. Existing report: ${JSON.stringify(task.report ?? null)}`,
-      "Before new work, ask Gru to inspect the existing PR's merge outcome. Verify an existing merge or resume that PR; do not duplicate it.",
+      "Before new work, ask Gru to inspect the existing PR's merge outcome. Do not duplicate that PR.",
+      "Gru can only settle that merge before you attach, so assume it did not: resume the existing PR,",
+      "then send READY and wait for your own integration grant. Gru refuses verification while you hold the task.",
     ] : []),
     `Dependencies: ${JSON.stringify(task.spec.dependsOn)}`,
     `Exclusive resources: ${JSON.stringify(task.spec.exclusiveResources)}`,
