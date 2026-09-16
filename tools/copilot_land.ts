@@ -27,14 +27,15 @@
  *                  abandoned run silently resets HEAD onto the old codebase.
  *
  *   land           --repo O/R --branch NAME --title T --body TEXT
- *                  [--base main] [--lead claude|codex|gemini] [--ready]
+ *                  [--base main] [--lead NAME] [--ready]
  *                  [--known-prs "812,819"] [--repo-dir DIR]
  *                  [--dry-run] [--json]
  *                  Push the already-committed branch (never --force),
  *                  adopt an existing open PR for that head or open a
  *                  fresh one (draft by default, authored by `aryeh-stark`
  *                  via `gh`), and print `{pr, prs}`. `prs` includes all known
- *                  and landed PRs. `--lead` records model attribution only.
+ *                  and landed PRs. `--lead NAME` is inert: accepted for caller compatibility and echoed
+ *                  only by `--dry-run`. It selects nothing.
  *
  * Arg-parsing house style mirrors `write_spec_land.ts` / `red_team_fold.ts`.
  */
@@ -121,7 +122,7 @@ subcommands:
                  --require-base SHA refuses a stale remote branch that
                  does not contain SHA, and asserts HEAD contains it.
   land           --repo OWNER/REPO --branch NAME --title TEXT --body TEXT
-                 [--base BRANCH] [--lead claude|codex|gemini] [--ready]
+                 [--base BRANCH] [--lead NAME] [--ready]
                  [--known-prs "812,819"] [--repo-dir DIR]
                  [--dry-run] [--json]
                  Push (never --force), adopt-or-create the PR, print
@@ -413,7 +414,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   const branch = str(flags, "branch");
   const title = str(flags, "title");
   const body = str(flags, "body");
-  // Accepted for caller compatibility and echoed in --dry-run; model attribution only.
+  // Accepted for caller compatibility; echoed only in --dry-run.
   const lead = str(flags, "lead") || "claude";
   const base = str(flags, "base") || "main";
   const cwd = str(flags, "repo-dir") || process.cwd();

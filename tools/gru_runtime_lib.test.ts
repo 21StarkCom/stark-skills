@@ -303,9 +303,25 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   assert.equal(proof.head, fixed);
   assert.equal(proof.checks[0].exitCode, 0);
   assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /behavior verified/);
-  // A replacement can verify the prior worker's merge using the retained grant.
+  // A reserved replacement cannot settle the prior worker's merge; only the
+  // window before replacement starts, or its own integration grant, can.
   task.phase = "intake";
-  assert.equal((await verifyCompletion(task, 1, 1, path.join(dir, "replacement-check"), call)).merge, fixed);
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "replacement-intake"), call), /integration reservation required/);
+  task.phase = "working";
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "replacement-working"), call), /integration reservation required/);
+  // Cancelling a working replacement must not reopen the inherited grant.
+  task.phase = "stopped"; task.stoppedFrom = "working";
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "replacement-stopped"), call), /integration reservation required/);
+  // An unsettled reconnect blocks verification even at the integration phase.
+  task.phase = "integrating"; task.stoppedFrom = undefined;
+  task.reconnect = { id: "reconnect", startedAt: new Date().toISOString(), phase: "integrating", pending: true };
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "unsettled-reconnect"), call), /integration reservation required/);
+  task.reconnect = undefined;
+  // Cancelling an in-flight integration keeps the merge settleable.
+  task.phase = "stopped"; task.stoppedFrom = "integrating";
+  assert.equal((await verifyCompletion(task, 1, 1, path.join(dir, "stopped-integrating"), call)).merge, fixed);
+  task.phase = "pending"; task.stoppedFrom = undefined;
+  assert.equal((await verifyCompletion(task, 1, 1, path.join(dir, "before-replacement-check"), call)).merge, fixed);
   task.phase = "integrating";
   assert.equal(fs.existsSync(path.join(dir, "passing-check", "worktree-token")), false);
 

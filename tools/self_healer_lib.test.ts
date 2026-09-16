@@ -1,8 +1,8 @@
 // Tests for `tools/self_healer_lib.ts` — port of `scripts/self_healer.py`
 // (which had ZERO tests for a module that auto-applies fixes to files).
-// Coverage focuses on the gate ladder: guard → session cap → auto-mode
-// gate → circuit breaker → suggest/auto branch → execute → outcome
-// recorded → circuit updated → alerts emitted on critical transitions.
+// Coverage focuses on the gate ladder: operator-only action → guard →
+// session cap → auto-mode gate → circuit breaker → suggest/auto branch →
+// execute → outcome recorded → circuit updated → alerts on critical transitions.
 
 import { strict as assert } from "node:assert";
 import fs from "node:fs";
@@ -297,16 +297,25 @@ test("runHeal: missing stderr-file returns error result with code 1", () => {
   assert.ok(r.result.error);
 });
 
-test("runHeal: custom legacy authentication action never runs its verification command", t => {
+test("runHeal: custom authentication action skips commands, budgets, and circuit accounting", t => {
   const c = ctx();
   t.after(() => fs.rmSync(c.dir, { recursive: true, force: true }));
   const marker = path.join(c.dir, "auth-verification-ran");
-  writePatterns(c, [pattern({ action: "refresh_token", verify_command: `touch '${marker.replace(/'/g, "'\\''")}'` })]);
+  const command = `touch '${marker.replace(/'/g, "'\\''")}'`;
+  writePatterns(c, [pattern({ action: "refresh_token", guard: command, verify_command: command, max_per_session: 1 })]);
   fs.writeFileSync(path.join(c.dir, "stderr.log"), "err");
-  const result = runHeal({ ...baseOpts(c), patternId: "test-pattern", stderrFile: path.join(c.dir, "stderr.log"),
-    mode: "auto", autoPatterns: ["test-pattern"] });
+  for (let i = 0; i < 3; i++) {
+    const result = runHeal({ ...baseOpts(c), patternId: "test-pattern", stderrFile: path.join(c.dir, "stderr.log"),
+      mode: "auto", autoPatterns: ["test-pattern"] });
+    assert.equal(result.result.status, "skipped");
+    assert.equal(result.result.reason, "operator_action_required");
+    assert.equal(result.result.verify_passed, false);
+  }
   assert.equal(fs.existsSync(marker), false);
-  assert.equal(result.result.verify_passed, false);
+  assert.equal(sessionCount("test-pattern", c.sessionPath), 0);
+  assert.equal(fs.existsSync(c.circuitsPath), false);
+  assert.equal(alertMarkers(c).length, 0);
+  assert.deepEqual(logLines(c).map(row => row.status), ["skipped", "skipped", "skipped"]);
 });
 
 test("runHeal: guard command failure → aborted with reason=guard_failed", () => {
@@ -488,10 +497,12 @@ test("runHeal: third consecutive verify-fail trips the circuit AND emits a CRITI
   assert.equal(lastAlert.level, "critical");
 });
 
-test("runHeal: max_per_session counter only increments on successful executions", () => {
-  // Python parity: failed executions do NOT bump the session counter.
-  // Means a broken pattern can keep being attempted (circuit breaker is
-  // what catches that), but successful runs are budgeted.
+test("runHeal: max_per_session counter bumps on every auto execution, pass or fail", () => {
+  // The counter tracks ATTEMPTS, not outcomes. The Python gated it on an
+  // `execution.success` flag, but every action it could reach returned true
+  // unconditionally, so the gate never fired; the flag was deleted rather than
+  // ported as decoration. A failing verify still spends budget — the circuit
+  // breaker, not the session cap, is what stops a broken pattern.
   const c = ctx();
   writePatterns(c, [
     pattern({ action: "release_stale_lock", verify_command: "false", max_per_session: 2 }),
@@ -505,11 +516,6 @@ test("runHeal: max_per_session counter only increments on successful executions"
     autoPatterns: ["test-pattern"],
     threshold: 99, // prevent circuit trip from interfering
   });
-  // Verify failed → counter should still be 0.
-  // (Action 'release_stale_lock' itself "succeeds" in the Python; verify
-  //  decides whether the OUTCOME counts. Reading the Python again:
-  //  session bump only when `execution.success` — not `verify_passed`.
-  //  release_stale_lock action returns success=true regardless, so the
-  //  counter DOES bump. Match Python exactly.)
+  // `verify_command: "false"` → verify_passed is false, and the counter still bumps.
   assert.equal(sessionCount("test-pattern", c.sessionPath), 1);
 });

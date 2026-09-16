@@ -198,7 +198,13 @@ After a settled reconnect, or with no reconnect budget, replacement remains boun
 Uncertain reconnect startups still block replacement.
 Replacement retains the original integration base, report, and merge ownership.
 Before further work, inspect the existing PR's outcome.
-Use `verify` to settle an existing merge with that retained base.
+Use `verify` to settle an existing merge with that retained base until the replacement attaches.
+A reservation whose launch never becomes discoverable stays settleable, so an exhausted
+attempt budget cannot strand a merge that actually landed.
+After attachment, the replacement must report ready and receive integration first.
+Intake or working replacements remain interruptible, and interrupting one does not reopen that grant.
+A cancelled replacement stays resumable through `continue`; only a frozen integration stays verifiable.
+An uncertain reconnect also blocks verification.
 Otherwise resume the existing PR; request integration with the updated base when ready.
 Termination requires matching session, surface, and positive PID evidence with `alive=false`.
 Missing PIDs and stale hooks alone remain unknown.

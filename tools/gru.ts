@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { GruStore, parseEngagement } from "./gru_lib.ts";
+import { GruStore, parseEngagement, verificationReady } from "./gru_lib.ts";
+import type { Assignment } from "./gru_lib.ts";
 import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
@@ -44,12 +45,30 @@ reconcile never equates missing discovery with death. Keep uncertain reservation
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
 It requires a merged PR, posted head-matching review, and Alfred completion.
-Replacement retains pending merge grants; verify can settle an earlier merge.
+Replacement retains pending merge grants. verify can settle an earlier merge
+until the replacement attaches, or after stop froze an in-flight integration,
+and never while a reconnect is unsettled. Once attached, the replacement must
+report ready and receive its own integration grant first; cancelling it mid-work
+leaves it resumable through continue, not verifiable.
 Each check is bounded by the task's checkTimeoutMs (default 30 minutes).
 Verification removes its disposable checkout and retains its logs.
 When every task is verified the engagement completes; session ownership remains.
 No command publishes, changes authentication, or deletes worker/session worktrees.
 `;
+
+/** Explain why `verificationReady` refused, naming the command that actually repairs it.
+ * `integrate` only accepts phase `review`, so it is the wrong instruction everywhere else;
+ * a stopped worker needs `continue`, an in-flight one needs its own READY report first. */
+export function verifyBlocker(task: Assignment): string {
+  if (task.reconnect?.pending) return "reconnect outcome is uncertain; observe it before verification";
+  if (!task.integrationBase) return `task is ${task.phase} with no integration grant; integrate after its READY report`;
+  switch (task.phase) {
+    case "done": return "task is already verified";
+    case "stopping": return "task is stopping; observe termination and record stopped first";
+    case "stopped": return "task was cancelled before integration; continue it, then integrate after its READY report";
+    default: return `task is ${task.phase}; its worker must report ready and receive integration before verification`;
+  }
+}
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   // Only a leading `help` verb or a real `--help`/`-h` flag: a bare "help" scanned
@@ -142,7 +161,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         const assigned = task(flag("token"));
         // complete() will refuse these anyway; refuse before spending a full verification run.
         if (run.mode !== "running" || !run.reconciled) throw new Error("resume and reconcile before verification");
-        if (!assigned.integrationBase || ["done", "stopping"].includes(assigned.phase)) throw new Error(`task is ${assigned.phase}; integrate before verification`);
+        // Name the repair that actually applies. "integrate" only works from `review`,
+        // so offering it for a stopped or in-flight task hands over a command that refuses.
+        if (!verificationReady(assigned)) throw new Error(verifyBlocker(assigned));
         const evidenceRoot = path.join(path.dirname(statePath), "evidence", id);
         fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
         const evidenceDir = fs.mkdtempSync(path.join(evidenceRoot, "verification-"));

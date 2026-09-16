@@ -124,6 +124,22 @@ const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
 const fresh = (o?: Observation) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
+/** A retained merge is settleable only while no replacement owns the work, or while
+ * this task's own integration is live or frozen. `attach` is the ownership line:
+ * before it the replacement has implemented nothing (`pending` after `recover`,
+ * `reserved` after `reserve`), so settling the landed merge costs nothing. After it
+ * the replacement must report ready and receive its own grant — cancelling an intake
+ * or working replacement must not reopen the inherited one, because that worker stays
+ * resumable through `continueWorker`. `reserved` is load-bearing, not cosmetic: a
+ * launch that never produces a discoverable peer leaves the task unattachable, and
+ * with the attempt budget spent `recover` also refuses — without it, a merge that
+ * actually landed could never be settled and the engagement could never complete. */
+export function verificationReady(task: Assignment): task is Assignment & { integrationBase: string } {
+  return Boolean(task.integrationBase && !task.reconnect?.pending &&
+    (task.phase === "integrating" || task.phase === "pending" || task.phase === "reserved" ||
+      (task.phase === "stopped" && task.stoppedFrom === "integrating")));
+}
+
 /** Reject a malformed DAG or unspecified authority before creating any state. */
 export function parseEngagement(value: unknown): Engagement {
   requireValue(isRecord(value), "engagement must be an object");
@@ -430,8 +446,7 @@ export class GruStore {
   complete(id: string, leader: string, revision: number, taskId: string, token: string, evidence: CompletionEvidence): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
-      requireValue(run.mode === "running" && run.reconciled && task.integrationBase &&
-        task.phase !== "done" && task.phase !== "stopping", "integration and independent verification required");
+      requireValue(run.mode === "running" && run.reconciled && verificationReady(task), "integration and independent verification required");
       requireValue(evidence.base === task.integrationBase, "integration base changed; rebase and reverify");
       for (const sha of [evidence.head, evidence.base, evidence.merge]) requireValue(/^[0-9a-f]{40,64}$/.test(sha), "invalid evidence revision");
       requireValue(nonempty(evidence.pr) && nonempty(evidence.review) && nonempty(evidence.verifiedAt), "PR, review, and verification evidence required");

@@ -4,7 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { canonicalWorktree } from "./gru_lib.ts";
+import { canonicalWorktree, verificationReady } from "./gru_lib.ts";
 import type { Assignment, CompletionEvidence, Observation, Provider, Run, Worker } from "./gru_lib.ts";
 
 export interface CommandResult { code: number; stdout: string; stderr: string; timedOut?: boolean }
@@ -194,7 +194,9 @@ export function packet(run: Run, task: Assignment): string {
     "Keep edits within those declared files/directories; report any needed scope expansion to Gru.",
     ...(task.integrationBase ? [
       `Pending integration base: ${task.integrationBase}. Existing report: ${JSON.stringify(task.report ?? null)}`,
-      "Before new work, ask Gru to inspect the existing PR's merge outcome. Verify an existing merge or resume that PR; do not duplicate it.",
+      "Before new work, ask Gru to inspect the existing PR's merge outcome. Do not duplicate that PR.",
+      "Gru can only settle that merge before you attach, so assume it did not: resume the existing PR,",
+      "then send READY and wait for your own integration grant. Gru refuses verification while you hold the task.",
     ] : []),
     `Dependencies: ${JSON.stringify(task.spec.dependsOn)}`,
     `Exclusive resources: ${JSON.stringify(task.spec.exclusiveResources)}`,
@@ -246,7 +248,7 @@ export async function receive(run: Run, messageId: string, call: Command = comma
 /** Read authoritative PR/commit state and rerun declared checks in a fresh verification worktree. */
 export async function verifyCompletion(task: Assignment, prNumber: number, reviewId: number, evidenceDir: string,
   call: Command = command): Promise<CompletionEvidence> {
-  if (["done", "stopping"].includes(task.phase) || !task.integrationBase || !task.token) throw new Error("integration reservation required");
+  if (!verificationReady(task) || !task.token) throw new Error("integration reservation required");
   if (!Number.isSafeInteger(prNumber) || prNumber < 1 || !Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
   const repoDir = task.spec.repo;
   const git = (args: string[]) => checked(call, ["git", ...args], repoDir);
