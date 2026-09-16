@@ -205,11 +205,11 @@ test("command terminates a real check at its declared timeout", async () => {
 test("dispatch packet uses the selected runtime and retains the full objective and limits", () => {
   const r = run();
   const brief = packet(r, r.tasks[0]);
-  assert.ok(brief.startsWith("Run $team-minion-agent"));
+  assert.ok(brief.startsWith("Run $minion"));
   assert.ok(brief.includes(r.tasks[0].spec.objective));
   assert.ok(brief.includes("No new tickets"));
   r.tasks[0].spec.provider = "claude";
-  assert.ok(packet(r, r.tasks[0]).startsWith("Run /team-minion-agent"));
+  assert.ok(packet(r, r.tasks[0]).startsWith("Run /minion"));
   assert.throws(() => workerFromPeer({ ...peer(), threadId: undefined }), /identity/);
 });
 

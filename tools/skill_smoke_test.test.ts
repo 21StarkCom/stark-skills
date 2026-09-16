@@ -22,9 +22,8 @@
 //      the lenient parser accepts but bifrost's Go importer rejects).
 //
 // Discovery covers EVERY `skill/<name>/SKILL.md`, not just `stark-*` — the old
-// prefix filter left the non-`stark-` skills (`gru`, `simple-gate`,
-// `team-minion-agent`) unvalidated, which is how a strict-YAML frontmatter bug
-// reached bifrost.
+// prefix filter left the non-`stark-` skills (`gru`, `simple-gate`, `minion`)
+// unvalidated, which is how a strict-YAML frontmatter bug reached bifrost.
 //
 // Plus, ONCE across the whole skill set:
 //   5. Every distinct `tools/*.ts` CLI mentioned by any skill exits
@@ -95,8 +94,8 @@ function parseFrontmatter(text: string): Frontmatter | null {
 // ---------------------------------------------------------------------------
 // Strict-YAML frontmatter lint. `parseFrontmatter` above is deliberately
 // lenient — it hand-rolls the parse and accepts things a real YAML parser
-// rejects. That gap shipped a live bug: team-minion-agent's `description` held
-// an unquoted colon-space ("a minion runs under: untrusted-content"), which
+// rejects. That gap shipped a live bug: the `minion` skill's `description`
+// held an unquoted colon-space ("a minion runs under: untrusted-content"), which
 // strict YAML reads as a nested mapping. This smoke test passed; bifrost's Go
 // importer rejected it with `mapping values are not allowed in this context`
 // and blocked the marketplace sync. tools/ carries no YAML dependency (node:
@@ -234,10 +233,10 @@ function extractReferenceLinks(text: string): string[] {
 function listSkills(): string[] {
   // Discover every skill dir that carries a SKILL.md — NOT just `stark-*`.
   // The old `startsWith("stark-")` filter silently skipped the non-`stark-`
-  // skills (`gru`, `simple-gate`, `team-minion-agent`), so nothing validated
-  // their frontmatter, refs, or --help contract — that is how the
-  // team-minion-agent colon-space frontmatter bug (see the strict-YAML
-  // check below) reached bifrost. Keying on SKILL.md presence also excludes
+  // skills (`gru`, `simple-gate`, `minion`), so nothing validated their
+  // frontmatter, refs, or --help contract — that is how the `minion`
+  // colon-space frontmatter bug (see the strict-YAML check below) reached
+  // bifrost. Keying on SKILL.md presence also excludes
   // non-skill dirs like `evals/`.
   return fs
     .readdirSync(SKILLS_ROOT)
