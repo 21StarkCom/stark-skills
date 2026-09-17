@@ -7,7 +7,7 @@ import { normalizeRepoUrl } from "./session_state_lib.ts";
 import { assertAbsentWorktree, canonicalWorktree, ORPHAN_CHECKS, verificationReady } from "./gru_lib.ts";
 import type { Assignment, CompletionEvidence, Observation, OrphanEvidence, Provider, Run, Worker } from "./gru_lib.ts";
 
-export interface CommandResult { code: number; stdout: string; stderr: string; timedOut?: boolean }
+export interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut?: boolean }
 export type Command = (argv: string[], cwd?: string, timeoutMs?: number) => Promise<CommandResult>;
 /** Host commands (git, gh, hermod, alfred) get five minutes; a declared check gets DEFAULT_CHECK_TIMEOUT_MS. */
 export const DEFAULT_COMMAND_TIMEOUT_MS = 300_000;
@@ -17,7 +17,9 @@ const hostEnv = (): Record<string, string> =>
 export const command: Command = async (argv, cwd, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) => {
   const result = await realRunner({ seat: "codex", cmd: argv[0], args: argv.slice(1),
     cwd: cwd ?? process.cwd(), env: hostEnv(), stdin: "", timeoutMs });
-  return { code: result.timedOut ? 124 : result.code ?? 1, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut };
+  // A signal exit has no numeric status. In particular, it is not ps's normal
+  // exit 1, which is positive evidence that the requested PID was absent.
+  return { code: result.timedOut ? 124 : result.code, stdout: result.stdout, stderr: result.stderr, timedOut: result.timedOut };
 };
 async function checked(call: Command, argv: string[], cwd?: string): Promise<string> {
   const result = await call(argv, cwd);
@@ -273,7 +275,7 @@ export async function receive(run: Run, messageId: string, call: Command = comma
   if (!/^[0-9a-f-]{36}$/i.test(messageId)) throw new Error("message id must be a UUID");
   // Hermod prints the record and exits 4 (failed) or 5 (uncertain): verdicts, not transport errors.
   const status = await call(["hermod", "msg", "status", messageId, "--json"]);
-  if (![0, 4, 5].includes(status.code)) throw new Error(`hermod failed (${status.code}): ${status.stderr || status.stdout}`);
+  if (status.code === null || ![0, 4, 5].includes(status.code)) throw new Error(`hermod failed (${status.code}): ${status.stderr || status.stdout}`);
   const record = JSON.parse(status.stdout);
   if (status.code !== 0 || record.state === "failed" || record.cancelled || record.expired || record.delivery !== "confirmed") {
     throw new Error("worker message delivery is not confirmed");

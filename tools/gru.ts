@@ -103,7 +103,13 @@ export function verifyBlocker(task: Assignment): string {
 }
 
 /** Canonical form of a path that need not exist yet: realpath the parent, keep the leaf. */
-const canonicalLeaf = (p: string): string => path.join(fs.realpathSync(path.dirname(p)), path.basename(p));
+const canonicalLeaf = (p: string): string => {
+  try {
+    return path.join(fs.realpathSync(path.dirname(p)), path.basename(p));
+  } catch (error) {
+    throw new Error(`worktree parent must exist and be readable: ${path.dirname(p)} (${(error as Error).message})`);
+  }
+};
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   // Only a leading `help` verb or a real `--help`/`-h` flag: a bare "help" scanned
