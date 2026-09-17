@@ -484,6 +484,10 @@ test("only a delivered message from the assigned session reaches the leader", as
     { ...record, from: "other-worker" }, { ...record, sender: { threadId: "other-session" } },
     { ...record, destination: { threadId: "other-leader" } },
   ]) await assert.rejects(receive(run(), messageId, async () => response(changed)));
+  // A mismatched Minion's plain worktree note is named as such, not surfaced as a raw JSON parse error.
+  for (const body of ["My actual checkout is /repo/.claude/worktrees/STARK-1", "null", "42"]) {
+    await assert.rejects(receive(run(), messageId, async () => response({ ...record, body })), /not a JSON report/);
+  }
   // Hermod exits 4/5 for failed/uncertain records while still printing them: a verdict, not a transport error.
   await assert.rejects(receive(run(), messageId, async () => ({ ...response({ ...record, state: "uncertain" }), code: 5 })), /not confirmed/);
   await assert.rejects(receive(run(), messageId, async () => ({ code: 2, stdout: "", stderr: "socket closed" })), /hermod failed \(2\)/);
