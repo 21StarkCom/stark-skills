@@ -172,8 +172,9 @@ when all of these hold, and otherwise still refuses:
   checkout must not undo the fresh worktree the takeover required.
 
 `attach` also refuses the leader's own session as its worker. Launch state, provider,
-leader and fenced-identity refusals all come before any git inspection, so an ineligible
-peer hears its real refusal rather than an adoption verdict.
+leader, fenced-identity and identity-ownership refusals all come before any git inspection,
+so an ineligible peer, including one already bound to another assignment, hears its real
+refusal rather than an adoption verdict.
 
 Adoption widens which paths bind, not which peers may. Attach only the peer identity your
 own `hermod ticket --json` launch returned for this reservation. A live session that
@@ -195,8 +196,9 @@ new token. The store rechecks root and the `<common>/worktrees/<name>` layout fr
 that new token because the worker's launch brief names the declared path; reports under
 the old token are refused, so send the worker a fresh `packet` before requiring intake.
 The Minion contract treats that later packet as superseding its launch brief. A launch
-bound while the engagement is stopping is interrupted with the new token instead,
-never re-briefed; the CLI's stderr hint names which applies.
+bound while the engagement is stopping is interrupted with the new token instead, and
+receives the fresh packet only if the engagement resumes, like every existing Minion; the
+CLI's stderr hint names which applies.
 A refused mismatch names the observed path and the reason and leaves the launch
 reserved. Escalate it; never edit the engagement or database to release it.
 

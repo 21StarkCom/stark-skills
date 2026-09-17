@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { attachRefusal, canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
+import { canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
 import { canonicalRepository, checkLeadershipTransfer, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
@@ -207,7 +207,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         if (!peer) throw new Error("Hermod peer missing; preserve launch reservation");
         const worker = workerFromPeer(peer);
         // Inspect git only for a peer that could bind; the store names any other refusal.
-        const adoption = canonicalWorktree(worker.worktree) === canonicalWorktree(assigned.spec.worktree) || attachRefusal(run, assigned, worker)
+        const adoption = canonicalWorktree(worker.worktree) === canonicalWorktree(assigned.spec.worktree) || store.attachRefusal(run, assigned, worker)
           ? undefined : await inspectAdoption(assigned, worker);
         const attached = store.attach(id, identity, revision, flag("task"), flag("token"), worker, adoption);
         emit(attached);

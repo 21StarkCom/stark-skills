@@ -203,6 +203,7 @@ const completeChecks = (checks: string[], required: readonly string[]) =>
   checks.length === required.length && required.every(c => checks.includes(c));
 const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
+const workerResources = (worker: Worker) => [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`];
 const fresh = (o?: Pick<Observation, "observedAt">) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
 /** A retained merge is settleable only while no replacement owns the work, or while
@@ -269,9 +270,10 @@ export function parseEngagement(value: unknown): Engagement {
   return config;
 }
 
-/** Why `worker` cannot bind to `task` regardless of its worktree, or null. The CLI asks this
- * before inspecting git, so an ineligible peer hears its identity refusal, not an adoption verdict. */
-export function attachRefusal(run: Run, task: Assignment, worker: Worker): string | null {
+/** Why `worker` cannot bind to `task` regardless of its worktree, or null. `GruStore.attachRefusal`
+ * adds identity ownership; the CLI asks that before inspecting git, so an ineligible peer hears
+ * its identity refusal, not an adoption verdict. */
+function attachRefusal(run: Run, task: Assignment, worker: Worker): string | null {
   // A reservation whose launch is not yet bound, including one that surfaced after `stop`.
   const awaiting = (run.mode === "running" && task.phase === "reserved") ||
     (run.mode === "stopping" && task.phase === "stopping" && task.stoppedFrom === "reserved" && !task.worker);
@@ -340,13 +342,20 @@ export class GruStore {
     return new Map(run.tasks.map(task => [task.spec.id, this.reasonFor(run, task, others)]));
   }
   private reasonFor(run: Run, task: Assignment, others: readonly Run[]): string | null {
-    const reason = readyReason(run, task, others);
-    if (reason) return reason;
-    for (const resource of reservationResources(task)) {
+    return readyReason(run, task, others) ?? this.ownedElsewhere(run, task, reservationResources(task));
+  }
+  /** The first resource another assignment owns, as a refusal, or null. */
+  private ownedElsewhere(run: Run, task: Assignment, resources: string[]): string | null {
+    for (const resource of resources) {
       const owner = this.db.prepare("SELECT run,task FROM owners WHERE resource=?").get(resource) as { run: string; task: string } | undefined;
       if (owner && (owner.run !== run.config.id || owner.task !== task.spec.id)) return `resource already owned: ${resource}`;
     }
     return null;
+  }
+  /** Every identity refusal `attach` makes, ownership included, without writing. The CLI asks
+   * this before inspecting git: a peer already bound elsewhere must not hear a worktree verdict. */
+  attachRefusal(run: Run, task: Assignment, worker: Worker): string | null {
+    return attachRefusal(run, task, worker) ?? this.ownedElsewhere(run, task, workerResources(worker));
   }
   create(input: unknown): Run {
     const config = parseEngagement(input);
@@ -382,9 +391,9 @@ export class GruStore {
     return task;
   }
   private own(run: Run, task: Assignment, resources: string[]): void {
+    const refusal = this.ownedElsewhere(run, task, resources);
+    requireValue(refusal === null, refusal!);
     for (const resource of resources) {
-      const owner = this.db.prepare("SELECT run,task FROM owners WHERE resource=?").get(resource) as { run: string; task: string } | undefined;
-      requireValue(!owner || (owner.run === run.config.id && owner.task === task.spec.id), `resource already owned: ${resource}`);
       this.db.prepare("INSERT OR IGNORE INTO owners(resource,run,task) VALUES (?,?,?)").run(resource, run.config.id, task.spec.id);
     }
   }
@@ -410,14 +419,14 @@ export class GruStore {
   attach(id: string, leader: string, revision: number, taskId: string, token: string, worker: Worker, adoption?: WorktreeAdoption): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
-      // Identity refusals first: a fenced worker must hear that, not a worktree-adoption verdict.
-      const refusal = attachRefusal(run, task, worker);
+      // Identity refusals first: a fenced or already-bound worker must hear that, not a worktree-adoption verdict.
+      const refusal = this.attachRefusal(run, task, worker);
       requireValue(refusal === null, refusal!);
       const stoppingLaunch = run.mode === "stopping";
       const observed = canonicalWorktree(worker.worktree);
       const declared = canonicalWorktree(task.spec.worktree);
       if (observed !== declared) this.adopt(run, task, observed, declared, adoption);
-      this.own(run, task, [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`]);
+      this.own(run, task, workerResources(worker));
       task.worker = { ...structuredClone(worker), worktree: observed };
       if (stoppingLaunch) task.stoppedFrom = "intake";
       else task.phase = "intake";

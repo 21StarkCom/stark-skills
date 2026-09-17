@@ -298,6 +298,17 @@ test("attach adopts only fresh, complete evidence for an undeclared, unowned sam
   assert.equal(store.read("demo").tasks[0].phase, "reserved");
 });
 
+test("attach names a peer already bound to another assignment before any adoption verdict", t => {
+  const { store } = fixture(t);
+  let run = start(store, observe(store, store.create(config())), "one");
+  run = store.reserve("demo", "leader-one", run.revision, "two");
+  const two = run.tasks.find(task => task.spec.id === "two")!;
+  // Task one's worker, in its own checkout: browsing peers found it, but it is not two's launch.
+  assert.equal(store.attachRefusal(run, two, worker("one")), "resource already owned: worker:codex:one");
+  assert.throws(() => store.attach("demo", "leader-one", run.revision, "two", two.token!, worker("one")), /^Error: resource already owned: worker:codex:one$/);
+  assert.equal(store.attachRefusal(run, two, worker("two")), null);
+});
+
 test("namesTicket matches a whole segment and treats the ticket literally", () => {
   assert.equal(namesTicket("STARK-100", "worktree-STARK-100"), true);
   assert.equal(namesTicket("STARK-100", "STARK-1000", "xSTARK-100"), false);
@@ -324,7 +335,7 @@ test("an adopted worktree replaces the declared one in the spec and is owned aga
   const brief = packet(run, run.tasks[0]);
   assert.match(brief, new RegExp(`Work only in ${observed}\\.`));
   assert.ok(brief.includes(`token: ${run.tasks[0].token}`));
-  assert.match(brief, /later packet from this leader for this assignment supersedes this one/);
+  assert.match(brief, /later packet for this assignment, from this leader or one that took over the engagement, supersedes this one, including its token, worktree, and leader\./);
   const audit = run.events.find(e => e.kind === "worktree-adopted")!;
   assert.deepEqual(JSON.parse(audit.detail), { ...evidence, token: run.tasks[0].token });
   // The adopted path is now reserved: a later engagement cannot claim it.
