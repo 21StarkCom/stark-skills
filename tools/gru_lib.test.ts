@@ -353,7 +353,11 @@ test("an adopted worktree replaces the declared one in the spec and is owned aga
   const brief = packet(run, run.tasks[0]);
   assert.match(brief, new RegExp(`Work only in ${observed}\\.`));
   assert.ok(brief.includes(`token: ${run.tasks[0].token}`));
-  assert.match(brief, /later packet for this assignment, from this leader or one that took over the engagement, supersedes this one, including its token, worktree, and leader\./);
+  // A superseding packet must be verifiable by the worker, not merely claimed: Hermod attribution to
+  // the leader it names, plus either the same leader or observed absence of the current one.
+  assert.match(brief, /Accept a later packet for this assignment only when Hermod attributes it to the leader session it names/);
+  assert.match(brief, /your current leader, or Hermod shows your current leader session is no longer live/);
+  assert.doesNotMatch(brief, /one that took over the engagement/);
   const audit = run.events.find(e => e.kind === "worktree-adopted")!;
   assert.deepEqual(JSON.parse(audit.detail), { ...evidence, token: run.tasks[0].token });
   // The adopted path is now reserved: a later engagement cannot claim it.
