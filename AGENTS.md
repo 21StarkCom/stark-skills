@@ -109,7 +109,10 @@ Canonical `skill/` and shared assets are the Claude-authored source. Host-specif
 Gru's explicit `takeover --file` repairs orphaned worker ownership only with a
 direct operator instruction and complete fresh Hermod absence checks. It fences
 old tokens, preserves budgets, PR evidence and worktrees, and never calls an
-unknown worker dead. See [the takeover contract](skill/gru/references/operations.md#operator-takeover-when-runtime-records-are-gone).
+unknown worker dead. Discovery covers every workspace plus an independent OS PID
+probe; a fresh path must remain absent through the transaction. Pending takeovers
+retain file ownership, and resumed stopped assignments can be taken over after
+reconciliation. See [the takeover contract](skill/gru/references/operations.md#operator-takeover-when-runtime-records-are-gone).
 
 - **Docs live with the code** under `docs/`, folder per type — `adr/` (`NNNN-<topic>.md`, immutable: supersede, don't edit), `specs/` (`YYYY-MM-DD-<topic>-spec.md`), `retros/` (`YYYY-MM-DD-<topic>-retro.md`). **That is what `/stark-init-docs` scaffolds into a target repo, guarded by `tools/doc_convention.test.ts` — it is not a layout this repo keeps.** stark-skills carries no `docs/` tree; each skill is documented by its own `SKILL.md` and its `--help`.
 - **There is never a `docs/plans/`.** Since `/stark-author` (2026-08-01) the spec carries the plan — task DAG, done-whens, closing verification command.

@@ -7,6 +7,10 @@ import { DatabaseSync } from "node:sqlite";
 export function canonicalWorktree(value: string): string {
   return fs.existsSync(value) ? fs.realpathSync(value) : path.resolve(value);
 }
+/** A dangling symlink is an occupied directory entry too. Fail closed on read errors. */
+export function assertAbsentWorktree(value: string): void {
+  if (fs.lstatSync(value, { throwIfNoEntry: false })) throw new Error("takeover requires a new, absent worktree; preserve existing checkouts");
+}
 
 export type Provider = "claude" | "codex";
 export type Phase = "pending" | "reserved" | "intake" | "working" | "blocked" |
@@ -161,7 +165,10 @@ export function parseTakeover(value: unknown): TakeoverRequest {
   return structuredClone(value) as unknown as TakeoverRequest;
 }
 const active = (t: Assignment) => !["pending", "done", "stopped"].includes(t.phase);
-const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped";
+const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped" ||
+  // Takeover retains the orphan's scope until its replacement reserves or the
+  // retained merge settles. Normal recover() keeps its worker and is unchanged.
+  (t.phase === "pending" && !t.worker && Boolean(t.takeovers?.length));
 // Completed workers release slots with fresh idle/dead or confirmed-retirement
 // evidence. Unconfirmed or still-busy workers count toward the concurrency limit.
 const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
@@ -249,6 +256,7 @@ export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[
     if (run.tasks.find(t => t.spec.id === id)?.phase !== "done") return `prerequisite ${id} is unverified`;
   }
   for (const other of run.tasks.filter(ownsFiles)) {
+    if (other === task) continue;
     if (repositoryKey(task.spec) === repositoryKey(other.spec) && task.spec.files.some(a => other.spec.files.some(b => overlap(a, b)))) {
       return `file ownership conflicts with ${other.spec.id}`;
     }
@@ -483,13 +491,15 @@ export class GruStore {
       requireValue(request.run === id && request.task === taskId && request.token === token && request.revision === revision,
         "takeover request does not match the current assignment revision");
       requireValue(run.mode === "running" && run.reconciled, "resume and reconcile before takeover");
-      requireValue(task.worker && active(task) && !["reserved", "stopping"].includes(task.phase), "takeover requires an attached assignment");
+      requireValue(task.worker && (active(task) || task.phase === "stopped") && !["reserved", "stopping"].includes(task.phase), "takeover requires an attached assignment");
       requireValue(!task.reconnect?.pending, "unsettled reconnect prevents takeover");
       requireValue(task.attempts < run.config.maxAttempts, "attempt budget exhausted");
       requireValue(task.observation?.liveness === "unknown", "takeover is for an unknown worker; use normal lifecycle for live or dead workers");
       requireValue(fresh(task.observation) && fresh({ ...task.observation, observedAt: evidence.observedAt }), "takeover evidence is stale; reconcile again");
       requireValue(JSON.stringify(evidence.worker) === JSON.stringify(task.worker), "takeover evidence worker mismatch");
       requireValue(evidence.checks.length === ORPHAN_CHECKS.length && ORPHAN_CHECKS.every(c => evidence.checks.includes(c)), "incomplete orphan evidence");
+      // Discovery awaits external commands; recheck occupancy inside the transaction.
+      assertAbsentWorktree(request.worktree);
       const worktree = canonicalWorktree(request.worktree);
       requireValue(evidence.replacementWorktree === worktree, "takeover evidence worktree mismatch");
       requireValue(worktree !== canonicalWorktree(task.spec.worktree) && worktree !== canonicalWorktree(task.spec.repo), "takeover requires a fresh isolated worktree");

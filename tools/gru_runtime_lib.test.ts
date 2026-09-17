@@ -33,6 +33,7 @@ test("orphan takeover requires complete cross-provider absence, not merely missi
   const calls: string[][] = [];
   const callFor = (data: ReturnType<typeof snapshot>): Command => async argv => {
     calls.push(argv);
+    if (argv[0] === "ps") return { code: 1, stdout: "", stderr: "" };
     return response(argv[1] === "msg" ? data.peers : argv[1] === "sessions" ? data.sessions
       : argv[1] === "tabs" ? data.tabs : data.processes);
   };
@@ -41,8 +42,9 @@ test("orphan takeover requires complete cross-provider absence, not merely missi
   assert.equal(proof.replacementWorktree, replacement);
   assert.ok(calls.some(c => c[1] === "msg" && !c.includes("--agent")));
   assert.ok(calls.some(c => c[1] === "sessions" && c.includes("--all")));
-  assert.ok(calls.some(c => c[1] === "tabs"));
+  assert.ok(calls.some(c => c[1] === "tabs" && c.includes("--all")), "surface discovery must cover every workspace");
   assert.ok(calls.some(c => c[1] === "ps"));
+  assert.ok(calls.some(c => c[0] === "ps" && c.includes(String(task.worker!.pid))));
   const cases: [string, (data: ReturnType<typeof snapshot>) => void][] = [
     ["incomplete peers", d => { d.peers.incomplete = true; }],
     ["stale peers", d => { d.peers.observedAt = new Date(Date.now() - 120_000).toISOString(); }],
@@ -62,6 +64,11 @@ test("orphan takeover requires complete cross-provider absence, not merely missi
     await assert.rejects(observeOrphan(task, replacement, callFor(data)), name);
   }
   await assert.rejects(observeOrphan(task, replacement, async () => ({ code: 1, stdout: "", stderr: "offline" })), /failed/);
+  for (const unavailable of [ { code: 1, stdout: "", stderr: "permission denied" },
+    { code: 124, stdout: "", stderr: "", timedOut: true }, { code: 0, stdout: "", stderr: "" } ]) {
+    await assert.rejects(observeOrphan(task, replacement, argv => argv[0] === "ps"
+      ? Promise.resolve(unavailable) : callFor(snapshot())(argv)), /OS absence probe/);
+  }
   fs.mkdirSync(replacement);
   await assert.rejects(observeOrphan(task, replacement, callFor(snapshot())), /absent worktree/);
   fs.rmdirSync(replacement);
@@ -69,6 +76,42 @@ test("orphan takeover requires complete cross-provider absence, not merely missi
   await assert.rejects(observeOrphan(uncertain, replacement, callFor(snapshot())), /settled attached/);
   const workerless = structuredClone(task); workerless.worker = undefined;
   await assert.rejects(observeOrphan(workerless, replacement, callFor(snapshot())), /settled attached/);
+});
+
+test("takeover rejects a live OS PID omitted by Hermod's terminal process list", async t => {
+  const task = assignment(); task.worker!.pid = process.pid;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-orphan-pid-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const call: Command = async argv => argv[0] === "ps" ? command(argv) : response(
+    argv[1] === "msg" ? { peers: [], observedAt: new Date().toISOString(), incomplete: false }
+      : argv[1] === "sessions" ? { sessions: [], totalMatches: 0 } : []);
+  await assert.rejects(observeOrphan(task, path.join(dir, "fresh"), call), /PID/);
+});
+
+test("takeover rejects a replacement checkout created during discovery", async t => {
+  const task = assignment(); task.worker!.pid = 42;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-orphan-tree-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const replacement = path.join(dir, "fresh");
+  const call: Command = async argv => {
+    if (argv[1] === "tabs") fs.mkdirSync(replacement);
+    return argv[0] === "ps" ? { code: 1, stdout: "", stderr: "" } : response(
+      argv[1] === "msg" ? { peers: [], observedAt: new Date().toISOString(), incomplete: false }
+        : argv[1] === "sessions" ? { sessions: [], totalMatches: 0 } : []);
+  };
+  await assert.rejects(observeOrphan(task, replacement, call), /absent worktree/);
+});
+
+test("takeover refuses a dangling symlink at the replacement path", async t => {
+  const task = assignment(); task.worker!.pid = 42;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-orphan-link-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const replacement = path.join(dir, "fresh");
+  fs.symlinkSync(path.join(dir, "missing"), replacement);
+  const call: Command = async argv => argv[0] === "ps" ? { code: 1, stdout: "", stderr: "" } : response(
+    argv[1] === "msg" ? { peers: [], observedAt: new Date().toISOString(), incomplete: false }
+      : argv[1] === "sessions" ? { sessions: [], totalMatches: 0 } : []);
+  await assert.rejects(observeOrphan(task, replacement, call), /absent worktree/);
 });
 
 test("native worker discovery does not depend on an unrelated provider outage", async () => {

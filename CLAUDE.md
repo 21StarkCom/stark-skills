@@ -5,7 +5,10 @@
 Gru's explicit `takeover --file` repairs orphaned worker ownership only with a
 direct operator instruction and complete fresh Hermod absence checks. It fences
 old tokens, preserves budgets, PR evidence and worktrees, and never calls an
-unknown worker dead. See [the takeover contract](skill/gru/references/operations.md#operator-takeover-when-runtime-records-are-gone).
+unknown worker dead. Discovery covers every workspace plus an independent OS PID
+probe; a fresh path must remain absent through the transaction. Pending takeovers
+retain file ownership, and resumed stopped assignments can be taken over after
+reconciliation. See [the takeover contract](skill/gru/references/operations.md#operator-takeover-when-runtime-records-are-gone).
 
 The stark skills + tools fleet: a **two-stage development pipeline** (`/stark-author` human-gated spec+plan → `/stark-build` check-gated implementation — no LLM-reviews-LLM loops), a **single-agent PR code reviewer** (`/stark-review`, evidence-contract prompts), multi-agent IaC review, and the ops/session tier. Claude, Codex, and Gemini are all enabled (Gemini → `gemini-3.1-pro-preview`, default auth **oauth** — the logged-in Google account's Code Assist seat; `vertex` and `api-key` modes remain via `models.gemini.auth` / `STARK_GEMINI_AUTH`, see `tools/gemini_auth_lib.ts`). The Vertex **project/location are resolved at runtime** by `tools/vertex_config_lib.ts` (env > config > `GOOGLE_CLOUD_PROJECT` > local `gcloud`) — **never hardcoded/committed in source**; in oauth mode the resolved project doubles as the Code Assist licensing project. Note: `-latest` aliases like `gemini-pro-latest` only resolve via the Generative-Language API-key fallback, **not** Vertex. Hierarchical config (global → org → repo). Self-improving prompts via review history analysis.
 

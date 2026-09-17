@@ -4,7 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { canonicalWorktree, ORPHAN_CHECKS, verificationReady } from "./gru_lib.ts";
+import { assertAbsentWorktree, canonicalWorktree, ORPHAN_CHECKS, verificationReady } from "./gru_lib.ts";
 import type { Assignment, CompletionEvidence, Observation, OrphanEvidence, Provider, Run, Worker } from "./gru_lib.ts";
 
 export interface CommandResult { code: number; stdout: string; stderr: string; timedOut?: boolean }
@@ -136,11 +136,14 @@ export async function observeOrphan(task: Assignment, replacementWorktree: strin
   if (!task.worker || task.reconnect?.pending || task.phase === "reserved") throw new Error("takeover requires a settled attached worker identity");
   const worker = task.worker;
   if (!Number.isSafeInteger(worker.pid) || worker.pid! <= 1) throw new Error("takeover requires a recorded worker PID");
-  if (fs.existsSync(replacementWorktree)) throw new Error("takeover requires a new, absent worktree; preserve existing checkouts");
+  assertAbsentWorktree(replacementWorktree);
   const observedAt = new Date().toISOString();
-  const [peers, rawSessions, rawTabs, rawProcesses] = await Promise.all([
+  const [peers, rawSessions, rawTabs, rawProcesses, pidProbe] = await Promise.all([
     discover(call), checked(call, ["hermod", "sessions", "--all", "--json"]),
-    checked(call, ["hermod", "tabs", "--json"]), checked(call, ["hermod", "ps", "--json"]),
+    checked(call, ["hermod", "tabs", "--all", "--json"]), checked(call, ["hermod", "ps", "--json"]),
+    // Hermod's ps enumerates terminal-attributed processes. An orphan can have
+    // left that set, so only a successful OS absence probe satisfies the PID check.
+    call(["ps", "-p", String(worker.pid), "-o", "pid="]),
   ]);
   if (peers.incomplete) throw new Error("Hermod discovery incomplete; takeover withheld");
   const peerAge = Date.now() - Date.parse(peers.observedAt);
@@ -162,6 +165,10 @@ export async function observeOrphan(task: Assignment, replacementWorktree: strin
     s.pid === worker.pid || matchesPath(s.cwd)) && s.alive !== false)) throw new Error("matching live or uncertain saved session prevents takeover");
   if (tabs.some(t => t.id === worker.surface)) throw new Error("recorded surface still exists; takeover withheld");
   if (processes.some(p => p.pid === worker.pid || p.cmuxSurfaceId === worker.surface)) throw new Error("recorded process or surface process still exists; takeover withheld");
+  if (pidProbe.code !== 1 || pidProbe.stdout.trim() || pidProbe.stderr.trim() || pidProbe.timedOut) {
+    throw new Error("recorded PID still exists or OS absence probe is unavailable; takeover withheld");
+  }
+  assertAbsentWorktree(replacementWorktree);
   return { observedAt, worker: structuredClone(worker), replacementWorktree: canonicalWorktree(replacementWorktree), checks: [...ORPHAN_CHECKS] };
 }
 /** Find the recorded worker's current Hermod peer and refuse if its identity moved. */

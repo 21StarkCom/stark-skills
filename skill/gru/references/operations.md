@@ -244,18 +244,27 @@ run's prose limits only in a single-task engagement, and must reflect the operat
 explicit instructions. Numeric concurrency, launch and recovery budgets cannot
 change here. Preserve unrelated limits, including live-operation restrictions.
 
-Resume leadership and reconcile first. The CLI re-reads complete, unscoped Hermod
-peer discovery, all saved sessions, all terminal surfaces and the process list.
+Resume leadership and reconcile first, including for a previously stopped assignment
+whose runtime records subsequently disappeared. An engagement still stopping cannot
+be taken over. The CLI re-reads complete, unscoped Hermod peer discovery, all saved
+sessions, terminal surfaces across every workspace (`hermod tabs --all --json`),
+and the terminal process list. It also probes the recorded PID through OS `ps`:
+Hermod's process list can omit an orphan that is no longer attached to a terminal.
+Only an empty, error-free `ps -p PID -o pid=` result with exit 1 establishes PID
+absence; a live PID or an unavailable probe prevents takeover.
 A matching live or uncertain peer/session, an existing old surface/PID, incomplete
 or failed discovery, an existing replacement worktree, an unattached launch, or an
 unsettled reconnect prevents takeover. A stale discovery result cannot authorize it.
+The replacement path must have no directory entry, including a dangling symlink;
+occupancy is rechecked after discovery and inside the ownership transaction.
 These absence checks do not prove death; the durable history keeps the original
 `unknown` observation. Recheck any prior PR's actual outcome before dispatch.
 
 The transaction fences the old token immediately, retains all former identity and
 worktree reservations, preserves spent attempts/recoveries and pending integration
 ownership, and records the request, observation, prior spec, limits and PR report.
-It moves the assignment to `pending`; a subsequent `reserve` spends the next launch
+It moves the assignment to `pending`, retaining its declared file scope against
+competing tasks and engagements; a subsequent `reserve` spends the next launch
 attempt and supplies a fresh token. The packet includes the prior report so an
 existing PR is continued, not duplicated. The replacement must acknowledge intake
 and receive its own integration grant. Never resume a fenced old session.

@@ -34,12 +34,15 @@ test("gru CLI: takeover consumes a pinned operator request and real observation 
   const { dir, state, file } = engagement(t);
   const config = JSON.parse(fs.readFileSync(file, "utf8")); config.maxAttempts = 2;
   const store = new GruStore(state); t.after(() => store.close());
+  // Observe an exited local process instead of assuming an arbitrary PID is absent.
+  const vanished = spawnSync(process.execPath, ["-p", "process.pid"], { encoding: "utf8" });
+  assert.equal(vanished.status, 0);
   let current = store.create(config);
   current = store.reconcile("cli", "leader-one", current.revision, {});
   current = store.reserve("cli", "leader-one", current.revision, "t");
   current = store.attach("cli", "leader-one", current.revision, "t", current.tasks[0].token!, {
     id: "codex:old", session: "old", surface: "gone", workspace: "workspace", provider: "codex",
-    worktree: current.tasks[0].spec.worktree, pid: 4242,
+    worktree: current.tasks[0].spec.worktree, pid: Number(vanished.stdout.trim()),
   });
   current = store.reconcile("cli", "leader-one", current.revision, { t: {
     observedAt: new Date().toISOString(), liveness: "unknown", activity: "unknown", evidence: [],
