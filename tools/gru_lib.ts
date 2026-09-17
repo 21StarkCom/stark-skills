@@ -242,9 +242,12 @@ export function parseTakeover(value: unknown): TakeoverRequest {
   return structuredClone(value) as unknown as TakeoverRequest;
 }
 const active = (t: Assignment) => !["pending", "done", "stopped", "swept"].includes(t.phase);
-const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped" ||
-  // Takeover retains the orphan's scope until its replacement reserves or the
-  // retained merge settles. Normal recover() keeps its worker and is unchanged.
+// Declared exclusive resources stay held by active, stopped, and taken-over pending tasks.
+// Takeover retains the orphan's resources until its replacement reserves or the retained
+// merge settles. Normal recover() keeps its worker and is unchanged. Declared `files` are
+// NOT held: parallel workers edit separate worktrees, and overlap reconciles at the rebase
+// before merge, serialized by the merge lock.
+const holdsResources = (t: Assignment) => active(t) || t.phase === "stopped" ||
   (t.phase === "pending" && !t.worker && Boolean(t.takeovers?.length));
 // Completed workers release slots with fresh idle/dead or confirmed-retirement
 // evidence. Unconfirmed or still-busy workers count toward the concurrency limit.
@@ -252,7 +255,6 @@ const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
   !(fresh(t.observation) && (t.observation?.liveness === "dead" ||
     (t.phase === "done" && (t.observation?.retired ||
       (t.observation?.liveness === "live" && t.observation.activity === "idle"))))));
-const overlap = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
 export const repositoryKey = (t: TaskSpec) => t.repositoryKey ?? t.repo;
 /** Evidence is complete only when it names exactly the required checks. */
 const completeChecks = (checks: string[], required: readonly string[]) =>
@@ -405,8 +407,8 @@ function attachRefusal(run: Run, task: Assignment, worker: Worker): string | nul
   return null;
 }
 
-/** Dependency, capacity, and file-ownership checks; GruStore also checks reserved resources. */
-export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[] = []): string | null {
+/** Dependency, capacity, and exclusive-resource checks; GruStore also checks reserved resources. */
+export function readyReason(run: Run, task: Assignment): string | null {
   if (run.mode !== "running") return `engagement is ${run.mode}`;
   if (!run.reconciled) return "reconcile existing workers first";
   if (task.phase !== "pending") return `task is ${task.phase}`;
@@ -415,18 +417,9 @@ export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[
   for (const id of task.spec.dependsOn) {
     if (run.tasks.find(t => t.spec.id === id)?.phase !== "done") return `prerequisite ${id} is unverified`;
   }
-  for (const other of run.tasks.filter(ownsFiles)) {
+  for (const other of run.tasks.filter(holdsResources)) {
     if (other.spec.id === task.spec.id) continue;
-    if (repositoryKey(task.spec) === repositoryKey(other.spec) && task.spec.files.some(a => other.spec.files.some(b => overlap(a, b)))) {
-      return `file ownership conflicts with ${other.spec.id}`;
-    }
     if (task.spec.exclusiveResources.some(r => other.spec.exclusiveResources.includes(r))) return `resource owned by ${other.spec.id}`;
-  }
-  // Directory overlap matters across engagements too, not just within this DAG.
-  for (const otherRun of otherRuns) for (const other of otherRun.tasks.filter(ownsFiles)) {
-    if (repositoryKey(task.spec) === repositoryKey(other.spec) && task.spec.files.some(a => other.spec.files.some(b => overlap(a, b)))) {
-      return `file ownership conflicts with ${other.spec.ticket}`;
-    }
   }
   return null;
 }
@@ -468,20 +461,17 @@ export class GruStore {
   sweepVerdicts(run: Run, evidence: SweepEvidence): SweepVerdict[] {
     return sweepVerdicts(run, evidence, taskId => this.owned(run.config.id, taskId));
   }
-  /** Every other engagement in this store, for cross-run ownership checks. */
+  /** Every other engagement in this store, for adoption's declared-worktree check. */
   private others(id: string): Run[] {
     return (this.db.prepare("SELECT body FROM runs WHERE id<>?").all(id) as { body: string }[]).map(row => JSON.parse(row.body) as Run);
   }
+  /** Readiness plus reserved-resource ownership (ticket, worktree, exclusive) across engagements. */
   readyReason(run: Run, task: Assignment): string | null {
-    return this.reasonFor(run, task, this.others(run.config.id));
+    return readyReason(run, task) ?? this.ownedElsewhere(run, task, reservationResources(task));
   }
-  /** Every task's reason at once; the cross-run snapshot is read and parsed once, not per task. */
+  /** Every task's reason at once, for `status`. */
   readyReasons(run: Run): Map<string, string | null> {
-    const others = this.others(run.config.id);
-    return new Map(run.tasks.map(task => [task.spec.id, this.reasonFor(run, task, others)]));
-  }
-  private reasonFor(run: Run, task: Assignment, others: readonly Run[]): string | null {
-    return readyReason(run, task, others) ?? this.ownedElsewhere(run, task, reservationResources(task));
+    return new Map(run.tasks.map(task => [task.spec.id, this.readyReason(run, task)]));
   }
   /** The first resource another assignment owns, as a refusal, or null. */
   private ownedElsewhere(run: Run, task: Assignment, resources: string[]): string | null {

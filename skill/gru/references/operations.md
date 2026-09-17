@@ -55,7 +55,9 @@ Files are relative paths or directories, without glob patterns.
 Use normalized paths without trailing slashes or dot components.
 The CLI derives repository identity from origin, across checkout aliases.
 Release files can be modeled as integration resources.
-Overlapping implementation files block parallel dispatch.
+Declared files scope each worker's brief; overlapping files never block dispatch.
+Each worker edits its own worktree, and tasks touching the same files reconcile at the
+rebase before merge (a 3-way merge), one merge at a time under the repository's merge lock.
 
 ## Durable commands
 
@@ -374,8 +376,8 @@ These absence checks do not prove death; the durable history keeps the original
 The transaction fences the old token immediately, retains all former identity and
 worktree reservations, preserves spent attempts/recoveries and pending integration
 ownership, and records the request, observation, prior spec, limits and PR report.
-It moves the assignment to `pending`, retaining its declared file scope against
-competing tasks and engagements; a subsequent `reserve` spends the next launch
+It moves the assignment to `pending`, retaining its exclusive resources against
+competing tasks; a subsequent `reserve` spends the next launch
 attempt and supplies a fresh token. The packet includes the prior report so an
 existing PR is continued, not duplicated. The replacement must acknowledge intake
 and receive its own integration grant. Never resume a fenced old session.
