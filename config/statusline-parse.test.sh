@@ -57,7 +57,7 @@ check full         '{"session_id":"benchsid","cwd":"/x","workspace":{"current_di
 check minimal      '{"session_id":"s","workspace":{"current_dir":"/repo"},"model":{"display_name":"Sonnet","id":"claude-sonnet-5"}}'
 check no-ratelimit '{"cwd":"/only-cwd","model":{"display_name":"Haiku","id":"h"},"context_window":{"used_percentage":12,"current_usage":{"input_tokens":5,"output_tokens":6,"cache_creation_input_tokens":7,"cache_read_input_tokens":8}}}'
 check reordered    '{"rate_limits":{"seven_day":{"used_percentage":33,"resets_at":111},"five_hour":{"used_percentage":51,"resets_at":222}},"context_window":{"current_usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":3,"cache_read_input_tokens":4},"used_percentage":88,"context_window_size":200000},"model":{"id":"m","display_name":"M"}}'
-check extras       '{"model":{"display_name":"Opus","id":"o"},"thinking":{"enabled":true},"agent":{"name":"Explore"},"output_style":{"name":"Blunt"},"vim":{"mode":"NORMAL"},"session_name":"my sess","exceeds_200k_tokens":true,"context_window":{"used_percentage":5}}'
+check extras       '{"model":{"display_name":"Opus","id":"o"},"thinking":{"enabled":true},"agent":{"name":"Explore"},"output_style":{"name":"Concrete"},"vim":{"mode":"NORMAL"},"session_name":"my sess","exceeds_200k_tokens":true,"context_window":{"used_percentage":5}}'
 check thinking-off  '{"model":{"display_name":"O","id":"o"},"thinking":{"enabled":false}}'
 check thinking-none '{"model":{"display_name":"O","id":"o"},"thinking":{}}'
 check spaces        '{"workspace":{"current_dir":"/Users/aryeh/My Code/stark skills"},"model":{"display_name":"Opus 4.8 (1M context)","id":"o"},"session_name":"feat: thing"}'

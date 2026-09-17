@@ -8,9 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Removed
-- The `Blunt` output style (`config/output-styles/blunt.md`) and its `outputStyle` default in `config/settings.json` are retired (STARK-5017). Sessions run on Claude Code's default style; `concrete.md` stays. User-level copies are hand-managed and were removed the same day.
-
-### Removed
+- The `Blunt` output style (`config/output-styles/blunt.md`) and its `outputStyle` default in `config/settings.json` are retired (STARK-5017). Sessions run on Claude Code's default style; `concrete.md` stays. `~/.claude/settings.json` is hand-managed and lost its `outputStyle` the same day. The `~/.claude/output-styles/blunt.md` symlink is NOT hand-managed: `idun clean` provisions and heals it from `ASSET_SYMLINKS` in `idun/src/clean/clean_lib.ts`, so that entry must be dropped in lockstep. Until it is, `idun clean` re-creates the link while a checkout at `~/Code/21Stark/stark-skills` still holds `blunt.md`, and once that checkout drops it, reports the dangling link as an error it refuses to delete.
 - The `simple-gate` skill (Claude and Codex variants) is retired (STARK-5016). It duplicated the human sign-off gate that `/stark-author` already runs, and every install paid for it in session context. `/stark-author` no longer offers it at Phase 5; its Claude variant now names `AskUserQuestion` for the three sign-off questions (real choices plus a free-text Other), as the Codex variant already named the host's structured input. Hard removal with no alias or shim: an installed plugin keeps serving `/simple-gate` until `/plugin update`, after which it no longer resolves. Publishing needs bifrost's `catalog/stark-plan/bundle.yaml` membership dropped in lockstep (`docs/scripts/publish.sh --remove-skill simple-gate --bundle stark-plan`, a MINOR bump of that bundle) — `stark sync` treats a member with no source as a hard error, so `marketplace-sync` fails until both repos agree.
 
 ### Added
