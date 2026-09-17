@@ -58,11 +58,21 @@ Release files can be modeled as integration resources.
 Declared files scope each worker's brief; overlapping files never block dispatch.
 Each worker edits its own worktree, and tasks touching the same files reconcile at the
 rebase before merge (a 3-way merge), one merge at a time under the repository's merge lock.
-That holds only if you grant `integrate` at the base the previous merge produced —
-its verified `merge` commit, not a tip you observed before it: the store validates
-the SHA's shape alone (40 to 64 hex characters), and `verify` only requires that base
-in the merged head's ancestry, so a stale grant lets a diff built without the other
-task's changes squash cleanly whenever git sees no textual conflict.
+That holds only if you grant `integrate` at the base branch tip you fetch and read
+immediately before the grant — never a tip observed earlier, and never a local ref you
+have not just fetched, which reads exactly like a current one. You cannot hold the merge
+lock first: `integrate` takes `merge:<repo>` in the same transaction that records the
+base, and refuses a second call once the phase is `integrating`. Its refusal is the
+fence — `resource already owned: merge:<repo> (<run>/<task>)` names the task that is
+mid-merge, so wait for that task to complete, fetch again, and read the tip again.
+Read the tip rather than naming the previous merge commit: the previous merge need not
+be the tip (a base branch also takes direct publisher pushes), and `merge:<repo>` locks
+are global, so that merge can belong to an engagement whose commits you never recorded.
+The store validates the SHA's shape alone (40 to 64 hex characters), and `verify` only
+requires that base in the merged head's ancestry, so a stale grant lets a diff built
+without the other task's changes squash cleanly whenever git sees no textual conflict.
+The first grant in a repository has no prior merge to wait for; the tip you fetch is
+simply the current one.
 
 ## Durable commands
 
@@ -264,7 +274,8 @@ For Gru integration, use a merge path that preserves the reviewed head,
 such as `gh pr merge --squash --match-head-commit <reviewed-head>` after
 the repository's checks pass. Do not relax the verifier's exact-head rule.
 
-Reserve integration using the freshly observed base commit.
+Reserve integration using the base branch tip you fetch and read immediately before
+`integrate`, so it includes any merge that landed while this task was in review.
 Rebase, regenerate, reconcile shared counts, rebuild, and retest.
 Use the repository's squash-merge path and inspect the result.
 Never rely on a merge command's exit code alone.

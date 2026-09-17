@@ -470,7 +470,9 @@ export class GruStore {
   private ownedElsewhere(run: Run, task: Assignment, resources: string[]): string | null {
     for (const resource of resources) {
       const owner = this.db.prepare("SELECT run,task FROM owners WHERE resource=?").get(resource) as { run: string; task: string } | undefined;
-      if (owner && (owner.run !== run.config.id || owner.task !== task.spec.id)) return `resource already owned: ${resource}`;
+      // Name the holder: with overlap no longer gating dispatch, merge-lock contention is routine,
+      // and 'wait for a live peer' versus 'a dead engagement still holds it' read identically without it.
+      if (owner && (owner.run !== run.config.id || owner.task !== task.spec.id)) return `resource already owned: ${resource} (${owner.run}/${owner.task})`;
     }
     return null;
   }
