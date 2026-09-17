@@ -58,11 +58,16 @@ Release files can be modeled as integration resources.
 Declared files scope each worker's brief; overlapping files never block dispatch.
 Each worker edits its own worktree, and tasks touching the same files reconcile at the
 rebase before merge (a 3-way merge), one merge at a time under the repository's merge lock.
-That holds only if you grant `integrate` at the base the previous merge produced —
-its verified `merge` commit, not a tip you observed before it: the store validates
-the SHA's shape alone (40 to 64 hex characters), and `verify` only requires that base
-in the merged head's ancestry, so a stale grant lets a diff built without the other
-task's changes squash cleanly whenever git sees no textual conflict.
+That holds only if you grant `integrate` at the base branch's freshly observed tip,
+re-read while you hold the merge lock — never a tip observed before dispatch, or before another task's merge landed. Re-read it rather than naming the
+previous merge commit: a base branch also takes commits from outside the engagement
+(a publisher push, a changelog commit added while merging), and `merge:<repo>` locks
+are global, so the previous merge can belong to an engagement whose commits you never
+recorded. The store validates the SHA's shape alone (40 to 64 hex characters), and
+`verify` only requires that base in the merged head's ancestry, so a stale grant lets
+a diff built without the other task's changes squash cleanly whenever git sees no
+textual conflict. The first grant in a repository has no prior merge to wait for; its
+freshly observed tip is simply the current one.
 
 ## Durable commands
 
@@ -264,7 +269,8 @@ For Gru integration, use a merge path that preserves the reviewed head,
 such as `gh pr merge --squash --match-head-commit <reviewed-head>` after
 the repository's checks pass. Do not relax the verifier's exact-head rule.
 
-Reserve integration using the freshly observed base commit.
+Reserve integration using the base branch tip observed after you hold the merge lock,
+so it includes any merge that landed while this task was in review.
 Rebase, regenerate, reconcile shared counts, rebuild, and retest.
 Use the repository's squash-merge path and inspect the result.
 Never rely on a merge command's exit code alone.

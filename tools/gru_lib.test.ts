@@ -313,8 +313,10 @@ test("attach names a peer already bound to another assignment before any adoptio
   run = store.reserve("demo", "leader-one", run.revision, "two");
   const two = run.tasks.find(task => task.spec.id === "two")!;
   // Task one's worker, in its own checkout: browsing peers found it, but it is not two's launch.
-  assert.equal(store.attachRefusal(run, two, worker("one")), "resource already owned: worker:codex:one");
-  assert.throws(() => store.attach("demo", "leader-one", run.revision, "two", two.token!, worker("one")), /^Error: resource already owned: worker:codex:one$/);
+  // The holder is named: with overlap no longer gating dispatch, contention is routine, and
+  // "wait for a live peer" versus "a dead engagement still holds this" read alike without it.
+  assert.equal(store.attachRefusal(run, two, worker("one")), "resource already owned: worker:codex:one (demo/one)");
+  assert.throws(() => store.attach("demo", "leader-one", run.revision, "two", two.token!, worker("one")), /^Error: resource already owned: worker:codex:one \(demo\/one\)$/);
   assert.equal(store.attachRefusal(run, two, worker("two")), null);
 });
 
@@ -838,7 +840,7 @@ test("stopping freezes dispatch, requires terminal evidence, and retains resumab
   let other = observe(store, store.create(otherConfig));
   // status and reserve share one readiness verdict, across engagements too.
   // Its ticket and worktree ownership, not its declared files, is what keeps the competitor out.
-  assert.match(store.readyReason(other, other.tasks[0])!, /resource already owned: ticket:STARK-100/);
+  assert.match(store.readyReason(other, other.tasks[0])!, /resource already owned: ticket:STARK-100 \(demo\/one\)/);
   assert.equal(readyReason(other, other.tasks[0]), null);
   assert.throws(() => store.reserve("competing-run", "leader-one", other.revision, "one"), /ownership|owned/);
 });

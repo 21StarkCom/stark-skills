@@ -101,21 +101,21 @@ export function verifyBlocker(task: Assignment): string {
     // "integrate after its READY report" names a prerequisite already behind it — exactly
     // the misdirection the `review` case below exists to remove.
     return task.phase === "review"
-      ? "task reported ready and holds no integration grant; integrate it at its observed base, then verify"
+      ? "task reported ready and holds no integration grant; integrate it at the base branch tip observed under the merge lock, then verify"
       : `task is ${task.phase} with no integration grant; integrate after its READY report`;
   }
   switch (task.phase) {
     case "done": return "task is already verified";
     // Reaching `review` IS the READY report (gru_lib.ts report()), so telling this task to
     // report ready names a step it already took. `integrate` is the one command that applies.
-    case "review": return "task reported ready but holds a stale integration grant; integrate it at its current base, then verify";
+    case "review": return "task reported ready but holds a stale integration grant; integrate it at the base branch tip observed under the merge lock, then verify";
     // Reachable only WITH a grant (the guard above took the ungranted case), so "cancelled
     // before integration" would contradict its own precondition. `continue` is the ONLY
     // repair: it needs an observed live idle worker, which is exactly the recoverable case.
     // Do NOT name `reserve` here — `readyReason` refuses every phase except `pending`, so
     // suggesting it hands the operator a command that throws, which is the defect this
     // function exists to remove.
-    case "stopped": return "task was cancelled holding an unsettled integration grant; continue it once its worker is observed live and idle, then integrate at its current base";
+    case "stopped": return "task was cancelled holding an unsettled integration grant; continue it once its worker is observed live and idle, then integrate at the base branch tip observed under the merge lock";
     default: return `task is ${task.phase}; its worker must report ready and receive integration before verification`;
   }
 }
