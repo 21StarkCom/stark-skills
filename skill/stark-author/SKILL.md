@@ -250,7 +250,10 @@ sidecar, walked through). Before any question, say plainly:
   Don't soften them and don't drown them. This honest short list is the point.
 
 **Step B — ask only the operator-oracle questions.** These are things only they
-know; there is no answer you could have pre-filled:
+know; there is no answer you could have pre-filled. Ask them through
+`AskUserQuestion` — real choices, honestly labelled, plus a free-text "Other" — so
+the operator picks rather than composes; fall back to one plain question per turn
+only when the tool is unavailable:
 
 1. **Did I understand you?** You already played the dead-simple three-layer intent
    read-back at the end of Phase 3 and they confirmed it — carry that confirmation
