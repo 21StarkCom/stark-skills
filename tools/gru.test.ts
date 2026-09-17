@@ -14,6 +14,83 @@ import { GruStore } from "./gru_lib.ts";
 
 const CLI = path.join(import.meta.dirname, "gru.ts");
 
+test("rebrief-check is a worker command and succeeds without creating or opening Gru state", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-rebrief-cli-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const bin = path.join(dir, "bin"); fs.mkdirSync(bin);
+  const message = "12345678-1234-1234-1234-123456789012";
+  const body = "Assignment: demo/task; token: new-token\nLeader session: leader. Provider: codex.";
+  const record = { id: message, kind: "note", state: "submitted", createdAt: new Date().toISOString(),
+    sender: { sessionId: "leader" }, destination: { threadId: "worker" }, body };
+  fs.writeFileSync(path.join(bin, "hermod"), `#!/usr/bin/env node\nconsole.log(${JSON.stringify(JSON.stringify(record))});\n`, { mode: 0o755 });
+  // A file where the state's parent directory would be makes any DB initialization fail.
+  fs.writeFileSync(path.join(dir, ".stark"), "no database access");
+  const env = { HOME: dir, PATH: `${bin}${path.delimiter}${process.env.PATH}`, CODEX_THREAD_ID: "worker" };
+  const args = ["rebrief-check", "--message", message, "--run", "demo", "--task", "task", "--current-leader", "leader"];
+  const result = await run(args, undefined, env);
+  assert.equal(result.code, 0, result.error);
+  assert.equal(JSON.parse(result.out).body, body);
+  assert.equal(fs.readFileSync(path.join(dir, ".stark"), "utf8"), "no database access");
+  const reread = await run([...args, "--current-message", message], undefined, env);
+  assert.equal(reread.code, 0, reread.error);
+  const wrong = await run([...args, "--state", path.join(dir, "state.sqlite")], undefined, env);
+  assert.equal(wrong.code, 2);
+  assert.match(wrong.error, /does not apply to rebrief-check/);
+  const absent = await run(args, undefined, { HOME: dir });
+  assert.equal(absent.code, 2);
+  assert.match(absent.error, /worker runtime session identity unavailable/);
+});
+
+test("both skill runtimes route re-brief decisions to the command and avoid reply expiry", () => {
+  const root = path.dirname(import.meta.dirname);
+  for (const prefix of ["", "runtime-overrides/codex/"]) {
+    for (const skill of ["minion", "gru"]) {
+      const text = fs.readFileSync(path.join(root, prefix, "skill", skill, "SKILL.md"), "utf8");
+      assert.match(text, /rebrief-check/);
+      assert.match(text, /--kind progress/);
+      assert.doesNotMatch(text, /ignore `expired`|must show all of:/);
+      if (skill === "gru") {
+        assert.match(text, /--kind note/);
+        const resume = text.slice(text.indexOf("Resume from the saved run"));
+        assert.match(resume, /Escalate rather than resend/);
+      }
+    }
+  }
+  const codex = fs.readFileSync(path.join(root, "runtime-overrides/codex/skill/gru/SKILL.md"), "utf8");
+  assert.match(codex, /CODEX_THREAD_ID/);
+  assert.match(codex, /fail outright/);
+  assert.doesNotMatch(codex, /Claude sender only from its cmux surface/);
+});
+
+test("gru receive CLI imports a fresh progress-kind intake ack after the rebrief deadline", async t => {
+  const { dir, state, file } = engagement(t);
+  const config = JSON.parse(fs.readFileSync(file, "utf8"));
+  const store = new GruStore(state); t.after(() => store.close());
+  let current = store.create(config);
+  current = store.reconcile("cli", "leader-one", current.revision, {});
+  current = store.reserve("cli", "leader-one", current.revision, "t");
+  current = store.attach("cli", "leader-one", current.revision, "t", current.tasks[0].token!, {
+    id: "codex:worker", session: "worker", surface: "surface", workspace: "workspace", provider: "codex",
+    worktree: current.tasks[0].spec.worktree,
+  });
+  const rebriefCreated = Date.now() - 31 * 60_000;
+  const message = "abcdef12-1234-1234-1234-123456789012";
+  const ack = { id: message, kind: "progress", state: "submitted", delivery: "confirmed",
+    from: "codex:worker", sender: { threadId: "worker" }, destination: { sessionId: "leader-one" },
+    createdAt: new Date().toISOString(), deadline: new Date(Date.now() + 30 * 60_000).toISOString(),
+    body: JSON.stringify({ run: "cli", task: "t", token: current.tasks[0].token, kind: "ack", message: current.tasks[0].spec.doneWhen }) };
+  assert.ok(Date.parse(ack.createdAt) > rebriefCreated + 30 * 60_000);
+  const bin = path.join(dir, "bin"); fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "hermod"), `#!/usr/bin/env node\nconsole.log(${JSON.stringify(JSON.stringify(ack))});\n`, { mode: 0o755 });
+  const result = await run(["receive", "--run", "cli", "--revision", String(current.revision), "--message", message, "--state", state],
+    "leader-one", { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  assert.equal(result.code, 0, result.error);
+  const received = store.read("cli");
+  assert.equal(received.tasks[0].phase, "working");
+  assert.equal(received.tasks[0].report?.kind, "ack");
+  assert.deepEqual(received.received, [message]);
+});
+
 /** Run the CLI as its own process.
  *
  * Calling `main()` in-process and swapping `process.stdout.write` to capture its JSON

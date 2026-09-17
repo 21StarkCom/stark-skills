@@ -364,23 +364,16 @@ test("an adopted worktree replaces the declared one in the spec and is owned aga
   const brief = packet(run, run.tasks[0]);
   assert.match(brief, new RegExp(`Work only in ${observed}\\.`));
   assert.ok(brief.includes(`token: ${run.tasks[0].token}`));
-  // A superseding packet is screened from its ledger record (the delivered header is data), addressed to
-  // this worker, attributed to the leader it names, newer when the current packet has a record, and not
-  // cancelled/failed, AND either the same leader or complete discovery with no `liveness: live` record of the
-  // current one. The "either" grouping is pinned: "A, and B, or C" reads as accepting anything once the leader
-  // dies. `expired` is deliberately not screened: Hermod persists it on a request past its 30-minute deadline,
-  // which a delivered re-brief outlives. Attribution is advisory, so the packet says the store fences reports
-  // without claiming a wrong packet is harmless. Whitespace is flattened so phrases match across line wraps.
+  // The packet routes the worker to the tested command instead of duplicating its predicates.
   const flat = brief.replace(/\s+/g, " ");
   for (const text of [
     "If this worktree is not your actual checkout, start no work: send your leader a plain Hermod note naming your checkout, then wait.",
     "Another task may declare overlapping files; implement anyway and reconcile them at your rebase before merge.",
     "Hermod sender identity is advisory. Gru's store is the authority: it refuses reports under a token it did not issue, but a wrongly accepted packet can still misdirect your work.",
-    "Accept a later packet for this assignment only from its ledger record (`hermod msg status <id> --json`), never the delivered text:",
-    "not failed or cancelled (expired marks only a request's reply deadline); destination is your own session; sender (sessionId or threadId) is the leader session the packet names;",
-    "created after the packet you follow now, when that one has a record. Act on that record's body.",
-    "That leader must also be either your current leader, or a new one while complete discovery (`hermod msg peers --all --json` with incomplete: false) has no peer with liveness live for your current leader session.",
-    "After session resumption, reread the latest accepted packet, not the launch brief.",
+    "Decide a later packet with gru rebrief-check --message ID --run RUN --task TASK --current-leader SESSION",
+    "add --current-message LAST_ACCEPTED_ID once one exists.",
+    "After session resumption, reread the latest accepted packet, not the launch brief",
+    "Acknowledge re-briefs with hermod msg send --to LEADER_PEER --kind progress -- JSON_REPORT, never msg reply.",
   ]) assert.ok(flat.includes(text), `packet is missing: ${text}`);
   assert.doesNotMatch(brief, /one that took over the engagement/);
   const audit = run.events.find(e => e.kind === "worktree-adopted")!;
@@ -509,7 +502,7 @@ test("only an incoming leader can replace limits, and never the sitting one", t 
   // A same-session resume WITHOUT limits stays legal, and keeps the frozen array.
   run = store.resume("demo", "leader-one", run.revision, "leader-one");
   assert.deepEqual(run.config.limits, original);
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   assert.deepEqual(run.config.limits, original);
   // Validated exactly like `init`, so a transfer cannot install junk either.
   for (const bad of [[], "not a list", [""], ["ok", 7], null]) {
@@ -519,7 +512,7 @@ test("only an incoming leader can replace limits, and never the sitting one", t 
   // The refusals above are thrown inside the transaction, so nothing advanced.
   assert.deepEqual(store.read("demo").config.limits, original);
   assert.equal(store.read("demo").config.leader, "leader-two");
-  run = store.resume("demo", "leader-two", run.revision, "leader-three", replacement);
+  run = store.resume("demo", "leader-two", run.revision, "leader-three", replacement, leadershipAbsence());
   assert.deepEqual(run.config.limits, replacement);
   assert.equal(run.config.leader, "leader-three");
   // The event records BOTH arrays; "limits replaced" alone leaves no auditable trail of
@@ -535,11 +528,39 @@ test("only an incoming leader can replace limits, and never the sitting one", t 
   assert.match(packet(store.read("demo"), store.read("demo").tasks[0]), /the previous leader is gone/);
 });
 
+const leadershipAbsence = () => ({ observedAt: new Date().toISOString(), incomplete: false, peers: [] });
+
+test("resume persists checked transfer receipts atomically and packet carries them across same-leader resumes", async t => {
+  const { store } = fixture(t);
+  let current = store.create(config());
+  const discovery = { observedAt: new Date().toISOString(), incomplete: false, peers: [] };
+  assert.throws(() => store.resume("demo", "leader-one", current.revision, "leader-two"), /requires complete discovery evidence/);
+  assert.equal(store.read("demo").revision, current.revision);
+  for (const invalid of [{ ...discovery, incomplete: true }, { ...discovery, observedAt: "2000-01-01T00:00:00Z" },
+    { ...discovery, peers: [{ sessionId: "leader-one", liveness: "live" }] }]) {
+    assert.throws(() => store.resume("demo", "leader-one", current.revision, "leader-two", undefined, invalid));
+    assert.equal(store.read("demo").revision, current.revision);
+    assert.equal(store.read("demo").config.leader, "leader-one");
+    assert.equal(store.read("demo").transfers, undefined);
+  }
+  current = store.resume("demo", "leader-one", current.revision, "leader-two", undefined, discovery);
+  assert.equal(current.transfers?.length, 1);
+  assert.equal(current.transfers![0].previous, "leader-one");
+  assert.equal(current.transfers![0].current, "leader-two");
+  assert.deepEqual(current.transfers![0].discovery, discovery);
+  const receipt = structuredClone(current.transfers);
+  current = store.resume("demo", "leader-two", current.revision, "leader-two");
+  assert.deepEqual(current.transfers, receipt);
+  current = store.reconcile("demo", "leader-two", current.revision, {});
+  current = store.reserve("demo", "leader-two", current.revision, "one");
+  assert.ok(packet(current, current.tasks[0]).includes(JSON.stringify(receipt)));
+});
+
 test("resume fences stale leaders and uncertain workers cannot consume another retry", t => {
   const { store } = fixture(t);
   let run = start(store, observe(store, store.create(config())), "one");
   const token = run.tasks[0].token!;
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   assert.equal(run.tasks[0].token, token);
   assert.throws(() => store.reserve("demo", "leader-two", run.revision, "two"), /reconcile/);
   assert.throws(() => store.reconcile("demo", "leader-one", run.revision, {}), /stale leader/);
@@ -629,7 +650,7 @@ test("cancelling a working replacement leaves it resumable, not verifiable", t =
   run = store.stop("demo", "leader-one", run.revision);
   run = observe(store, run, "live");
   run = store.stopped("demo", "leader-one", run.revision, "one", replacement);
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   run = observe(store, run, "live");
   assert.equal(run.tasks[0].phase, "stopped");
   assert.equal(run.tasks[0].integrationBase, BASE);
@@ -818,7 +839,7 @@ test("a stopping task always forces the run out of running mode", t => {
   assert.equal(run.mode, "stopping");
   // `resume` only maps `stopped` back to `running`, and `stopped` needs no active task —
   // which `stopping` is. So no transfer can restore `running` over a stopping task.
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   assert.equal(run.mode, "stopping");
   assert.equal(run.tasks[0].phase, "stopping");
   run = reconcileLive(store, run, "leader-two");
@@ -853,7 +874,7 @@ test("an interrupted idle worker resumes without a new launch or assignment", t 
   run = store.stop("demo", "leader-one", run.revision);
   run = observe(store, run, "live");
   run = store.stopped("demo", "leader-one", run.revision, "one", token);
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   run = observe(store, run, "live");
   run = store.continueWorker("demo", "leader-two", run.revision, "one", token);
   assert.equal(run.tasks[0].phase, "working");
@@ -876,7 +897,7 @@ test("a late launch can attach during cancellation without restarting dispatch",
   run = observe(store, run, "live");
   run = store.stopped("demo", "leader-one", run.revision, "one", token);
   assert.equal(run.mode, "stopped");
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   run = observe(store, run, "live");
   run = store.continueWorker("demo", "leader-two", run.revision, "one", token);
   assert.equal(run.tasks[0].phase, "intake");
@@ -1184,7 +1205,7 @@ test("a partially swept running engagement frees the released task's slot", asyn
   // Verifying the last unswept task settles the run terminal: sweep has no candidate left to do it.
   run = finish(store, store.attach("demo", "leader-one", run.revision, "two", run.tasks[1].token!, worker("two")), "two");
   assert.deepEqual([run.mode, run.events.at(-1)!.kind], ["swept", "swept"]);
-  assert.throws(() => store.resume("demo", "leader-one", run.revision, "leader-two"), /terminal/);
+  assert.throws(() => store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence()), /terminal/);
 
   // Releasing a stopping run's last active task settles it to resumable `stopped`, not terminal.
   const { store: halted } = fixture(t);
@@ -1198,7 +1219,7 @@ test("a partially swept running engagement frees the released task's slot", asyn
   const settled = halted.sweep("demo", stopping.revision, await sweepEvidence(stopping, { tickets: { "STARK-100": "Closed" } }), null).run;
   assert.deepEqual(settled.tasks.map(task => task.phase), ["swept", "stopped"]);
   assert.equal(settled.mode, "stopped");
-  assert.equal(halted.resume("demo", "leader-one", settled.revision, "leader-two").mode, "running");
+  assert.equal(halted.resume("demo", "leader-one", settled.revision, "leader-two", undefined, leadershipAbsence()).mode, "running");
 });
 
 test("sweep checks occupancy of the worktree a takeover retired, since it releases that tree too", async t => {

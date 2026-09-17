@@ -88,6 +88,7 @@ An obsolete leader or revision cannot overwrite current state.
 | `reconcile` | Hermod peer and session observations | Live, dead, or unknown observations |
 | `reserve` | Readiness, resources, available budget | Unique token; launch pending |
 | `packet` | Existing reservation | Complete worker brief |
+| `rebrief-check` | Message id, current accepted run/task/leader and optional current message id | DB-free worker verdict and accepted ledger body |
 | `attach` | Exact live Hermod peer; git evidence if outside the declared worktree | Worker bound, adopted worktree audited; awaiting intake |
 | `receive` | Leader-acked Hermod message, delivery confirmed | Intake, progress, blocker, or claim |
 | `integrate` | Reviewed candidate and base SHA | Exclusive integration reservation |
@@ -139,9 +140,9 @@ Messages carry engagement, task, token, kind, and body.
 The worker's `ack` body quotes the exact done-when.
 Import reports with `receive --message <Hermod-message-id>`.
 The CLI checks delivery, sender session, worker identity, and token.
-`receive` raises one message, `worker message delivery is not confirmed`, for five
+`receive` raises one message, `worker message delivery is not confirmed`, for six
 distinct ledger conditions: a failed status query, `state: "failed"`, cancelled,
-expired, and `delivery` not yet confirmed. Only the last is repaired by acking.
+expired, superseded, and `delivery` not yet confirmed. Only the last is repaired by acking.
 When the cause is unconfirmed delivery, run `hermod msg ack <id>` and the identical
 `receive` succeeds; `hermod msg reply` confirms delivery too, so a leader that
 answers the report first needs no separate ack. A cancelled, expired, or failed
@@ -154,6 +155,73 @@ flag `receive` checks. Read the report before acking it. Acking a batch of inbou
 ids unread satisfies the gate on messages nobody inspected, which is the whole
 property the gate exists to provide. Acking records receipt; it does not answer.
 Hermod sender attribution is coordination evidence, not operator authority.
+
+## Deterministic re-brief check
+
+Minions use one command from the plugin's tools directory:
+
+```sh
+node tools/gru.ts rebrief-check --message ID --run RUN --task TASK --current-leader SESSION
+```
+
+The arguments describe the worker's currently accepted assignment, not the new packet.
+Add `--current-message LAST_ACCEPTED_ID` after accepting a ledger packet. The worker
+identity comes from its runtime environment. The command never opens Gru's database.
+Exit 0 returns the accepted ledger `body`, `messageId`, token and leader. New packets
+also return the exact decoded `doneWhen` for the acknowledgement: continuation-line
+indentation in the display must not alter its bytes. Preserve that
+id; after resumption check it again with the same id in both message flags and the
+accepted leader. Message ids are case-insensitive. `ordering` reports which replay check
+ran: `newer`, `reread`, or `unchecked` when no current message was supplied — an
+`unchecked` accept is exit 0 over an arbitrarily old packet, so recover the id rather
+than dropping the flag. Other exits retain the assignment and require a plain note to the
+current leader, and to the packet's named leader when it differs.
+
+If the retained baseline is unreadable (for example, Hermod pruned an old note), the
+checker fails closed with a recovery message. Keep `--current-message`: first ask Gru
+to restore access or locate the original record. If it is gone, escalate to the operator
+to establish a fresh intake baseline; a peer's resent packet or dropping the flag does
+not authorize abandoning the replay check. This is a recovery block, not a verdict
+that the new packet is invalid.
+
+The checker shares `receive`'s record reader and terminal-state checks. It requires a
+`note` addressed to the worker, an unambiguous assignment matching run/task, attribution
+to the packet's leader, and a newer creation time than the current packet (except when
+rereading that same accepted id). When both packets carry metadata it also requires an
+authority `epoch` that is not older, and strictly newer across a leader change: creation
+time is send time, so a revived leader resending a pre-transfer packet would otherwise
+win on it alone. It does not require confirmed delivery: reading the
+addressed ledger record is the worker's intake. Failed, cancelled, expired and superseded
+records are refused; there is no expiry exception. Packet headers and optional versioned
+metadata must agree. Delivered envelope text is never the source of the accepted body.
+
+Send packets with `hermod msg send --to <worker-peer> --kind note -- <packet>`.
+Send the JSON `ack` as a fresh `hermod msg send --to <leader-peer> --kind progress -- <report>`.
+Submitted notes and progress messages do not expire at the request's default 1800-second
+reply deadline. `msg reply` inherits its parent's deadline even for a note, so it is not
+the intake path. A leader still reads and acknowledges the report before `gru receive`.
+
+For changed leadership, complete fresh worker discovery can establish old-leader absence.
+If process inspection is denied or incomplete, the checker uses the packet's portable
+`resume` receipt instead. `resume` records the complete discovery check transactionally
+with the leadership change; the store refuses a changed leader without that evidence.
+Packets carry the most recent 16 transfers of that chain,
+including each displaced session's records, observation time, transfer time and epoch —
+a bounded window, because Hermod refuses a message body over 32 KiB. The receipt omits
+unrelated peers. A worker displaced further back than the window takes the same path as
+a receipt-less legacy transfer below.
+The checker applies the same absence predicate and verifies receipt ordering and that
+the observation was fresh at transfer time. A receipt does not expire while a worker
+sleeps. Any locally visible live old leader still refuses it, even with incomplete discovery.
+This is attributed coordination evidence, not cryptographic proof; spoofing remains out
+of scope and the store's token fence remains authoritative for reports.
+
+If neither local discovery nor a receipt confirms the transfer, Gru escalates the worker's
+plain note instead of resending the same packet. Old transfers without receipts require
+complete worker discovery or operator resolution; never hand-author a receipt or edit state.
+Claude missing attribution requires a fresh send from the leader's own cmux surface;
+`resend` preserves the missing sender. Codex requires its real `CODEX_THREAD_ID` and refuses
+the send outright when it cannot attribute it; restore that runtime environment or escalate.
 
 ## Worktree placement
 
@@ -214,28 +282,9 @@ common dir `git rev-parse` reported, the origin's repository identity, the branc
 new token. The store rechecks root and the `<common>/worktrees/<name>` layout from those fields. Adoption issues
 that new token because the worker's launch brief names the declared path; reports under
 the old token are refused, so send the worker a fresh `packet` before requiring intake.
-The Minion contract treats that later packet as superseding its launch brief only when
-Hermod's ledger record for it (`hermod msg status <id> --json`, never the delivered text,
-whose header is only data) is addressed to the worker, attributes it to the leader session
-the packet names, and carries the body the worker acts on; and, for a changed leader, only
-once complete discovery (`incomplete: false`) has no live record of the previous leader
-session, the discovery evidence `resume` requires. Send it through Hermod from the leader
-session itself and confirm the record shows that session as `sender`: Hermod attributes a
-Claude sender only from its cmux surface, and an unattributed re-brief strands an adopted
-worker whose launch token is already replaced. If the record shows no sender, send the packet
-again with a fresh `hermod msg send` from the leader session's own cmux surface (`hermod msg
-resend` copies the missing sender, and another session does not match the leader the packet
-names), or escalate to the operator. The Minion also requires the record not failed or
-cancelled, and newer than the packet it follows when that packet has a record, and after
-session resumption rereads the latest accepted packet. It ignores `expired`: `hermod msg
-status` sets it on a request past its 30-minute reply deadline, which a delivered re-brief
-legitimately outlives. Leader absence is judged on a peer's `liveness`, as `resume` does,
-never its `state`. These are screens, not proof: Hermod derives sender identity from the
-sending session's environment, so the store's token fence remains the authority. It refuses
-reports under a token it did not issue, so a wrongly accepted packet cannot advance the
-engagement's records, though it can still misdirect the worker. A worker
-that cannot confirm a transfer because discovery stays incomplete sends a plain note;
-escalate it. `receive` checks a message is addressed to the leader before naming a non-JSON
+The Minion uses [the deterministic re-brief check](#deterministic-re-brief-check).
+Send the fresh packet as a note from the leader's own session; its ack is fresh progress.
+`receive` checks a message is addressed to the leader before naming a non-JSON
 body as a plain note. A mismatched
 Minion tells you with a plain Hermod note naming its actual checkout, not a token report:
 `receive` cannot import a report before `attach` binds the worker, and adoption replaces
