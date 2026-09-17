@@ -90,6 +90,16 @@ test("takeover rejects a live OS PID omitted by Hermod's terminal process list",
   await assert.rejects(observeOrphan(task, path.join(dir, "fresh"), call), /PID/);
 });
 
+test("takeover refuses a signal-killed absence probe through the real command adapter", async t => {
+  const killed = await command([process.execPath, "-e", "process.kill(process.pid, 'SIGTERM')"]);
+  const task = assignment(); task.worker!.pid = process.pid;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-orphan-signal-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const call: Command = async argv => argv[0] === "ps" ? killed : absentHermod(argv);
+  await assert.rejects(observeOrphan(task, path.join(dir, "fresh"), call), /OS absence probe/);
+  assert.equal(killed.code, null, "a signal exit must not become ps's normal absent-PID status");
+});
+
 test("takeover rejects a replacement checkout created during discovery", async t => {
   const task = assignment(); task.worker!.pid = 42;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-orphan-tree-"));

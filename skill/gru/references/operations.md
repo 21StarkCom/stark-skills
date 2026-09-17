@@ -251,7 +251,9 @@ sessions, terminal surfaces across every workspace (`hermod tabs --all --json`),
 and the terminal process list. It also probes the recorded PID through OS `ps`:
 Hermod's process list can omit an orphan that is no longer attached to a terminal.
 Only an empty, error-free `ps -p PID -o pid=` result with exit 1 establishes PID
-absence; a live PID or an unavailable probe prevents takeover. A worker record
+absence; a live PID or an unavailable probe prevents takeover. A signal-killed
+probe retains its null exit status and cannot masquerade as the normal exit 1.
+A worker record
 with no PID (attached from a peer that reported none and never observed live since)
 cannot be taken over at all: the probe has nothing to check, and the CLI refuses
 before discovery. Path matching counts as matching: a live or uncertain peer or
@@ -260,6 +262,17 @@ so inspect the orphaned checkout from somewhere else first.
 A matching live or uncertain peer/session, an existing old surface/PID, incomplete
 or failed discovery, an existing replacement worktree, an unattached launch, or an
 unsettled reconnect prevents takeover. A stale discovery result cannot authorize it.
+This also deliberately refuses a matching saved-session record with no PID and no
+affirmative `alive=false`: missing PID metadata is not proof that the session is
+inactive. The absence workflow applies when the conflicting runtime records are
+gone, not when their liveness remains uncertain.
+Reconcile and the earliest takeover observations must both be within one minute
+when the transaction commits. Slow discovery can therefore refuse; do not make old
+observations appear fresh by stamping them after the commands finish.
+Create the replacement path's parent directory first. The CLI resolves that parent
+physically before calling the store; direct store callers must supply the same
+normalized worktree paths. An inaccessible parent produces an explicit worktree
+parent diagnostic before discovery or mutation.
 The replacement path must have no directory entry, including a dangling symlink;
 occupancy is rechecked after discovery and inside the ownership transaction.
 These absence checks do not prove death; the durable history keeps the original

@@ -179,7 +179,7 @@ const overlap = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.
 const repositoryKey = (t: TaskSpec) => t.repositoryKey ?? t.repo;
 const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
-const fresh = (o?: Observation) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
+const fresh = (o?: Pick<Observation, "observedAt">) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
 /** A retained merge is settleable only while no replacement owns the work, or while
  * this task's own integration is live or frozen. `attach` is the ownership line:
@@ -495,7 +495,7 @@ export class GruStore {
       requireValue(!task.reconnect?.pending, "unsettled reconnect prevents takeover");
       requireValue(task.attempts < run.config.maxAttempts, "attempt budget exhausted");
       requireValue(task.observation?.liveness === "unknown", "takeover is for an unknown worker; use normal lifecycle for live or dead workers");
-      requireValue(fresh(task.observation) && fresh({ ...task.observation, observedAt: evidence.observedAt }), "takeover evidence is stale; reconcile again");
+      requireValue(fresh(task.observation) && fresh(evidence), "takeover evidence is stale; reconcile again");
       requireValue(JSON.stringify(evidence.worker) === JSON.stringify(task.worker), "takeover evidence worker mismatch");
       requireValue(evidence.checks.length === ORPHAN_CHECKS.length && ORPHAN_CHECKS.every(c => evidence.checks.includes(c)), "incomplete orphan evidence");
       // Discovery awaits external commands; recheck occupancy inside the transaction.

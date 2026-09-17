@@ -59,6 +59,12 @@ console.log(JSON.stringify(verb === "msg" ? {peers: [], observedAt: new Date().t
   fs.writeFileSync(authorization, JSON.stringify(request));
   const args = ["takeover", "--run", "cli", "--revision", String(current.revision), "--task", "t",
     "--token", current.tasks[0].token!, "--state", state, "--file", authorization];
+  fs.writeFileSync(authorization, JSON.stringify({ ...request, worktree: path.join(dir, "missing-parent", "fresh") }));
+  const missingParent = await run(args, "leader-one");
+  assert.equal(missingParent.code, 2);
+  assert.match(missingParent.error, /worktree parent must exist and be readable/);
+  assert.equal(store.read("cli").revision, current.revision);
+  fs.writeFileSync(authorization, JSON.stringify(request));
   const result = await run(args, "leader-one", { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
   assert.equal(result.code, 0, result.error);
   const adopted = JSON.parse(result.out);
