@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { awaitingAttach, canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
+import { canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
 import { canonicalRepository, checkLeadershipTransfer, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
@@ -204,14 +204,17 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         const peers = await discoverWorker({ provider: assigned.spec.provider, id: flag("peer") });
         if (peers.incomplete) throw new Error("Hermod discovery incomplete; preserve launch reservation");
         const peer = peers.peers.find(p => p.id === flag("peer"));
-        if (!peer) throw new Error(`Hermod peer ${peers.incomplete ? "discovery incomplete" : "missing"}; preserve launch reservation`);
+        if (!peer) throw new Error("Hermod peer missing; preserve launch reservation");
         const worker = workerFromPeer(peer);
-        // Inspect git only for a launch that can bind; the store names any other refusal.
-        const adoption = canonicalWorktree(worker.worktree) === canonicalWorktree(assigned.spec.worktree) || !awaitingAttach(run, assigned)
+        // Inspect git only for a peer that could bind; the store names any other refusal.
+        const adoption = canonicalWorktree(worker.worktree) === canonicalWorktree(assigned.spec.worktree) || store.attachRefusal(run, assigned, worker)
           ? undefined : await inspectAdoption(assigned, worker);
-        emit(store.attach(id, identity, revision, flag("task"), flag("token"), worker, adoption));
-        // The worker's brief named the declared path; it needs the regenerated packet before intake.
-        if (adoption) process.stderr.write(`gru: adopted observed worktree ${adoption.observed} (declared ${adoption.declared}); the token changed; send the worker a fresh packet\n`);
+        const attached = store.attach(id, identity, revision, flag("task"), flag("token"), worker, adoption);
+        emit(attached);
+        // The launch brief names the declared path. A running worker needs the regenerated packet;
+        // a launch bound during stop must be interrupted, not briefed to start work.
+        if (adoption) process.stderr.write(`gru: adopted observed worktree ${adoption.observed} (declared ${adoption.declared}); the token changed; ${
+          attached.mode === "stopping" ? "interrupt the worker with the new token" : "send the worker a fresh packet"}\n`);
         break;
       }
       case "receive": {

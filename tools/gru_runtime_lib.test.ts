@@ -146,7 +146,8 @@ test("worktree adoption requires a linked worktree root of the same repository t
     toplevel: claude, gitDir: path.join(repo, ".git", "worktrees", "STARK-100"), commonDir: path.join(repo, ".git"),
     repositoryKey: "o/r", branch: "worktree-STARK-100", checks: ADOPTION_CHECKS });
   // Either name identifies the ticket; a detached HEAD leaves only the directory.
-  assert.equal((await at(linked(repo, "scratch", "-b", "fix/STARK-100-adopt"))).branch, "fix/STARK-100-adopt");
+  const scratch = linked(repo, "scratch", "-b", "fix/STARK-100-adopt");
+  assert.equal((await at(scratch)).branch, "fix/STARK-100-adopt");
   assert.equal((await at(linked(repo, "detached/STARK-100", "--detach"))).branch, undefined);
 
   const other = repoWithOrigin("other", "git@github.com:o/other.git");
@@ -167,6 +168,31 @@ test("worktree adoption requires a linked worktree root of the same repository t
     assert.match(error.message, reason, worktree);
     return true;
   });
+  // Git's own env outranks cwd discovery. An inherited GIT_DIR made a plain folder report the
+  // linked worktree's facts and a real worktree report another's, so host commands drop it.
+  const saved = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(repo, ".git", "worktrees", "STARK-100");
+  try {
+    await assert.rejects(at(plain), /is not a git worktree/);
+    assert.equal((await at(scratch)).toplevel, scratch);
+  } finally {
+    if (saved === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = saved;
+  }
+  // Nor is rev-parse trusted alone: a git that resolved a plain folder to that private dir is
+  // refused by the on-disk pointers.
+  const misresolved: Command = async (argv, cwd, timeoutMs) => argv[1] === "rev-parse"
+    ? { code: 0, stdout: [plain, path.join(repo, ".git", "worktrees", "STARK-100"), path.join(repo, ".git")].join("\n"), stderr: "" }
+    : command(argv, cwd, timeoutMs);
+  await assert.rejects(inspectAdoption(task, { ...task.worker!, worktree: plain }, misresolved), /not a linked worktree/);
+  // A copied `.git` file points at a real worktree whose back-pointer names a different checkout.
+  const copy = path.join(dir, "copy", "STARK-100"); fs.mkdirSync(copy, { recursive: true });
+  fs.copyFileSync(path.join(claude, ".git"), path.join(copy, ".git"));
+  await assert.rejects(at(copy), /not a linked worktree/);
+  // Relative pointers (worktree.useRelativePaths) are the same linkage.
+  const relative = path.join(repo, "relative", "STARK-100");
+  git(repo, "-c", "worktree.useRelativePaths=true", "worktree", "add", "-q", "-b", "relative-STARK-100", relative);
+  assert.match(fs.readFileSync(path.join(relative, ".git"), "utf8"), /gitdir: \.\./);
+  assert.equal((await at(relative)).observed, relative);
   // A timed-out probe is a failed observation, never a verdict that the checkout is not a worktree.
   const timedOut: Command = async () => ({ code: 124, stdout: "", stderr: "timed out", timedOut: true });
   await assert.rejects(inspectAdoption(task, { ...task.worker!, worktree: claude }, timedOut), (error: Error) => {

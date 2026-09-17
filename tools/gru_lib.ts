@@ -110,7 +110,8 @@ export const ADOPTION_CHECKS = ["observed path is a worktree root", "linked work
   "same repository identity", "directory or branch names the ticket"];
 /** The ticket as a whole name segment, so STARK-50 never matches STARK-501 or a longer word. */
 export function namesTicket(ticket: string, ...names: (string | undefined)[]): boolean {
-  const pattern = new RegExp(`(^|[^A-Za-z0-9])${ticket}($|[^A-Za-z0-9])`);
+  const literal = ticket.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(^|[^A-Za-z0-9])${literal}($|[^A-Za-z0-9])`);
   return names.some(name => name !== undefined && pattern.test(name));
 }
 export interface TakeoverRecord {
@@ -202,6 +203,7 @@ const completeChecks = (checks: string[], required: readonly string[]) =>
   checks.length === required.length && required.every(c => checks.includes(c));
 const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
+const workerResources = (worker: Worker) => [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`];
 const fresh = (o?: Pick<Observation, "observedAt">) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
 /** A retained merge is settleable only while no replacement owns the work, or while
@@ -268,10 +270,20 @@ export function parseEngagement(value: unknown): Engagement {
   return config;
 }
 
-/** A reservation whose launch is not yet bound to a worker, including one that surfaced after `stop`. */
-export function awaitingAttach(run: Run, task: Assignment): boolean {
-  return (run.mode === "running" && task.phase === "reserved") ||
+/** Why `worker` cannot bind to `task` regardless of its worktree, or null. `GruStore.attachRefusal`
+ * adds identity ownership; the CLI asks that before inspecting git, so an ineligible peer hears
+ * its identity refusal, not an adoption verdict. */
+function attachRefusal(run: Run, task: Assignment, worker: Worker): string | null {
+  // A reservation whose launch is not yet bound, including one that surfaced after `stop`.
+  const awaiting = (run.mode === "running" && task.phase === "reserved") ||
     (run.mode === "stopping" && task.phase === "stopping" && task.stoppedFrom === "reserved" && !task.worker);
+  if (!awaiting) return "no pending launch to attach";
+  for (const key of ["id", "session", "surface", "workspace", "worktree"] as const) if (!nonempty(worker[key])) return `worker ${key} is required`;
+  if (worker.provider !== task.spec.provider) return "provider substitution refused";
+  if (worker.session === run.config.leader) return "the leader cannot attach as its own worker";
+  if (task.takeovers?.some(t => t.evidence.worker.id === worker.id ||
+    t.evidence.worker.session === worker.session || t.evidence.worker.surface === worker.surface)) return "fenced worker cannot reattach after takeover";
+  return null;
 }
 
 /** Dependency, capacity, and file-ownership checks; GruStore also checks reserved resources. */
@@ -330,13 +342,20 @@ export class GruStore {
     return new Map(run.tasks.map(task => [task.spec.id, this.reasonFor(run, task, others)]));
   }
   private reasonFor(run: Run, task: Assignment, others: readonly Run[]): string | null {
-    const reason = readyReason(run, task, others);
-    if (reason) return reason;
-    for (const resource of reservationResources(task)) {
+    return readyReason(run, task, others) ?? this.ownedElsewhere(run, task, reservationResources(task));
+  }
+  /** The first resource another assignment owns, as a refusal, or null. */
+  private ownedElsewhere(run: Run, task: Assignment, resources: string[]): string | null {
+    for (const resource of resources) {
       const owner = this.db.prepare("SELECT run,task FROM owners WHERE resource=?").get(resource) as { run: string; task: string } | undefined;
       if (owner && (owner.run !== run.config.id || owner.task !== task.spec.id)) return `resource already owned: ${resource}`;
     }
     return null;
+  }
+  /** Every identity refusal `attach` makes, ownership included, without writing. The CLI asks
+   * this before inspecting git: a peer already bound elsewhere must not hear a worktree verdict. */
+  attachRefusal(run: Run, task: Assignment, worker: Worker): string | null {
+    return attachRefusal(run, task, worker) ?? this.ownedElsewhere(run, task, workerResources(worker));
   }
   create(input: unknown): Run {
     const config = parseEngagement(input);
@@ -372,9 +391,9 @@ export class GruStore {
     return task;
   }
   private own(run: Run, task: Assignment, resources: string[]): void {
+    const refusal = this.ownedElsewhere(run, task, resources);
+    requireValue(refusal === null, refusal!);
     for (const resource of resources) {
-      const owner = this.db.prepare("SELECT run,task FROM owners WHERE resource=?").get(resource) as { run: string; task: string } | undefined;
-      requireValue(!owner || (owner.run === run.config.id && owner.task === task.spec.id), `resource already owned: ${resource}`);
       this.db.prepare("INSERT OR IGNORE INTO owners(resource,run,task) VALUES (?,?,?)").run(resource, run.config.id, task.spec.id);
     }
   }
@@ -400,18 +419,14 @@ export class GruStore {
   attach(id: string, leader: string, revision: number, taskId: string, token: string, worker: Worker, adoption?: WorktreeAdoption): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
-      requireValue(awaitingAttach(run, task), "no pending launch to attach");
+      // Identity refusals first: a fenced or already-bound worker must hear that, not a worktree-adoption verdict.
+      const refusal = this.attachRefusal(run, task, worker);
+      requireValue(refusal === null, refusal!);
       const stoppingLaunch = run.mode === "stopping";
-      for (const key of ["id", "session", "surface", "workspace", "worktree"] as const) requireValue(nonempty(worker[key]), `worker ${key} is required`);
-      requireValue(worker.provider === task.spec.provider, "provider substitution refused");
-      requireValue(worker.session !== run.config.leader, "the leader cannot attach as its own worker");
-      // Identity refusals first: a fenced worker must hear that, not a worktree-adoption verdict.
-      requireValue(!task.takeovers?.some(t => t.evidence.worker.id === worker.id ||
-        t.evidence.worker.session === worker.session || t.evidence.worker.surface === worker.surface), "fenced worker cannot reattach after takeover");
       const observed = canonicalWorktree(worker.worktree);
       const declared = canonicalWorktree(task.spec.worktree);
       if (observed !== declared) this.adopt(run, task, observed, declared, adoption);
-      this.own(run, task, [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`]);
+      this.own(run, task, workerResources(worker));
       task.worker = { ...structuredClone(worker), worktree: observed };
       if (stoppingLaunch) task.stoppedFrom = "intake";
       else task.phase = "intake";
@@ -426,7 +441,9 @@ export class GruStore {
     requireValue(fresh(adoption), "worktree adoption evidence is stale; attach again");
     requireValue(adoption.observed === observed && adoption.declared === declared, "worktree adoption evidence mismatch");
     requireValue(adoption.toplevel === observed, `worker worktree mismatch: ${observed} is not a worktree root`);
-    requireValue(nonempty(adoption.gitDir) && nonempty(adoption.commonDir) && adoption.gitDir !== adoption.commonDir,
+    // Git keeps each linked worktree's private dir at <common>/worktrees/<name>.
+    requireValue(nonempty(adoption.gitDir) && nonempty(adoption.commonDir) &&
+      path.dirname(adoption.gitDir) === path.join(adoption.commonDir, "worktrees"),
       `worker worktree mismatch: ${observed} is not a linked worktree`);
     requireValue(adoption.repositoryKey === repositoryKey(task.spec), `worker worktree mismatch: ${observed} belongs to ${adoption.repositoryKey}`);
     requireValue(observed !== canonicalWorktree(task.spec.repo), "worker needs an isolated worktree");
@@ -437,7 +454,8 @@ export class GruStore {
       `worker worktree mismatch: ${observed} belongs to a fenced worker; takeover requires a fresh worktree`);
     requireValue(namesTicket(task.spec.ticket, path.basename(observed), adoption.branch), `worker worktree mismatch: ${observed} does not name ${task.spec.ticket}`);
     const declaredBy = [run, ...this.others(run.config.id)].flatMap(r => r.tasks)
-      .find(t => t !== task && canonicalWorktree(t.spec.worktree) === observed);
+      // Stored worktrees are canonical already; compare them as `tree:` ownership keys do, off the filesystem.
+      .find(t => t !== task && path.resolve(t.spec.worktree) === observed);
     requireValue(!declaredBy, `worker worktree mismatch: ${observed} is declared by ${declaredBy?.spec.ticket}`);
     this.own(run, task, [`tree:${observed}`]);
     this.respec(run, task, { ...task.spec, worktree: observed });
