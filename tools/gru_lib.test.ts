@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { observations, observeOrphan, observeWorkers, packet, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
-import { GruStore, parseEngagement, parseTakeover, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, GruStore, parseEngagement, parseTakeover, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
 
 // Compose the production observation builders with the store: a handwritten "dead"
 // observation would miss the orphaned-record failure that prompted STARK-5021.
@@ -256,6 +256,60 @@ test("attachment recognizes a symlink alias of the reserved worktree", t => {
   run = store.reserve(c.id, c.leader, run.revision, "one");
   run = store.attach(c.id, c.leader, run.revision, "one", run.tasks[0].token!, { ...worker("one"), worktree: alias });
   assert.equal(run.tasks[0].worker!.worktree, c.tasks[0].worktree);
+});
+
+test("attach adopts only fresh, complete evidence for an undeclared, unowned same-repository worktree", t => {
+  const { store } = fixture(t);
+  const observed = "/repo/.claude/worktrees/STARK-100";
+  const c = config(); c.tasks.forEach(task => { task.repositoryKey = "o/r"; });
+  let run = observe(store, store.create(c));
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  const token = run.tasks[0].token!;
+  const moved = { ...worker("one"), worktree: observed };
+  const proof = (): WorktreeAdoption => ({ observedAt: new Date().toISOString(), declared: "/worktrees/one", observed,
+    repositoryKey: "o/r", branch: "worktree-STARK-100", checks: [...ADOPTION_CHECKS] });
+  const refusals: [Worker, WorktreeAdoption | undefined, RegExp][] = [
+    [moved, undefined, /worker worktree mismatch$/],
+    [moved, { ...proof(), checks: ADOPTION_CHECKS.slice(1) }, /incomplete/],
+    [moved, { ...proof(), observedAt: new Date(Date.now() - 120_000).toISOString() }, /stale/],
+    [moved, { ...proof(), observed: "/repo/.claude/worktrees/other" }, /evidence mismatch/],
+    [moved, { ...proof(), declared: "/worktrees/two" }, /evidence mismatch/],
+    [moved, { ...proof(), repositoryKey: "o/other" }, /belongs to o\/other/],
+    [{ ...moved, worktree: "/repo/.claude/worktrees/STARK-1000" }, { ...proof(), observed: "/repo/.claude/worktrees/STARK-1000", branch: "STARK-1000" }, /does not name STARK-100/],
+    [{ ...moved, worktree: "/repo" }, { ...proof(), observed: "/repo" }, /isolated worktree/],
+    [{ ...moved, worktree: "/worktrees/two" }, { ...proof(), observed: "/worktrees/two", branch: "STARK-100" }, /declared by STARK-101/],
+  ];
+  for (const [candidate, evidence, reason] of refusals) {
+    assert.throws(() => store.attach("demo", "leader-one", run.revision, "one", token, candidate, evidence), reason);
+  }
+  // Another engagement declaring the path blocks adoption even before it reserves anything.
+  const other = config(); other.id = "other"; other.tasks = [{ ...other.tasks[1], worktree: observed }];
+  store.create(other);
+  assert.throws(() => store.attach("demo", "leader-one", run.revision, "one", token, moved, proof()), /declared by STARK-101/);
+  assert.equal(store.read("demo").revision, run.revision);
+  assert.equal(store.read("demo").tasks[0].phase, "reserved");
+});
+
+test("an adopted worktree replaces the declared one in the spec and is owned against later engagements", t => {
+  const { store } = fixture(t);
+  const observed = "/repo/.claude/worktrees/STARK-100";
+  const c = config(); c.tasks.forEach(task => { task.repositoryKey = "o/r"; });
+  let run = observe(store, store.create(c));
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  const evidence: WorktreeAdoption = { observedAt: new Date().toISOString(), declared: "/worktrees/one", observed,
+    repositoryKey: "o/r", branch: "worktree-STARK-100", checks: [...ADOPTION_CHECKS] };
+  run = store.attach("demo", "leader-one", run.revision, "one", run.tasks[0].token!, { ...worker("one"), worktree: observed }, evidence);
+  assert.equal(run.tasks[0].phase, "intake");
+  assert.equal(run.tasks[0].worker!.worktree, observed);
+  assert.equal(run.tasks[0].spec.worktree, observed);
+  assert.equal(run.config.tasks[0].worktree, observed);
+  assert.match(packet(run, run.tasks[0]), new RegExp(`Work only in ${observed}\\.`));
+  const audit = run.events.find(e => e.kind === "worktree-adopted")!;
+  assert.deepEqual(JSON.parse(audit.detail), evidence);
+  // The adopted path is now reserved: a later engagement cannot claim it.
+  const later = config(); later.id = "later"; later.tasks = [{ ...later.tasks[1], worktree: observed }];
+  const next = observe(store, store.create(later));
+  assert.throws(() => store.reserve("later", "leader-one", next.revision, "two"), new RegExp(`resource already owned: tree:${observed}`));
 });
 
 test("DAG and authority validation reject missing limits, cycles, duplicated ownership, and provider fallback", () => {

@@ -100,6 +100,85 @@ function engagement(t: TestContext) {
   return { dir, state, file };
 }
 
+const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=gru", "-c", "user.email=gru@example.invalid",
+  "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+/** A GitHub-origin repository with one commit, so `git worktree add` has a HEAD to cut from. */
+function originRepo(dir: string, origin: string): string {
+  fs.mkdirSync(dir, { recursive: true });
+  git(dir, "init", "-q"); git(dir, "remote", "add", "origin", origin); git(dir, "commit", "-q", "--allow-empty", "-m", "init");
+  return fs.realpathSync(dir);
+}
+/** A fake `hermod` on PATH whose only Claude peer is live in `cwd`. */
+function hermodPeerAt(dir: string, cwd: string): Record<string, string> {
+  const bin = path.join(dir, "bin"); fs.mkdirSync(bin, { recursive: true });
+  const peer = { id: "claude:minion", agent: "claude", sessionId: "7b0c1c9e-0000-4000-8000-000000000001", surfaceId: "surface-minion",
+    workspaceId: "workspace", cwd, liveness: "live", activity: "busy", evidence: ["live-process"], messaging: { available: true } };
+  fs.writeFileSync(path.join(bin, "hermod"), `#!/usr/bin/env node
+console.log(JSON.stringify({ peers: [${JSON.stringify(peer)}], observedAt: new Date().toISOString(), incomplete: false }));
+`, { mode: 0o755 });
+  return { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+}
+/** The 2026-09-17 incident: the leader declared `.worktrees/<ticket>`; Hermod placed Claude in `.claude/worktrees/<ticket>`. */
+async function strandedLaunch(t: TestContext, peerRepoOrigin: string) {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "gru-adopt-")));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const state = path.join(dir, "state.sqlite");
+  const repo = originRepo(path.join(dir, "repo"), "git@github.com:o/r.git");
+  fs.mkdirSync(path.join(repo, ".worktrees"));
+  const declared = path.join(repo, ".worktrees", "STARK-5030");
+  // Same ticket name either way: only the repository differs between the two cases.
+  const peerRepo = peerRepoOrigin === "git@github.com:o/r.git" ? repo : originRepo(path.join(dir, "elsewhere"), peerRepoOrigin);
+  const observed = path.join(peerRepo, ".claude", "worktrees", "STARK-5030");
+  git(peerRepo, "worktree", "add", "-q", "-b", "worktree-STARK-5030", observed);
+  const file = path.join(dir, "engagement.json");
+  fs.writeFileSync(file, JSON.stringify({
+    id: "cli", objective: "o", leader: "leader-one", maxWorkers: 1, maxAttempts: 1, maxRecoveries: 0,
+    limits: ["OPERATOR LIMIT: no publishing"],
+    tasks: [{ id: "t", ticket: "STARK-5030", objective: "o", repo, worktree: declared, provider: "claude",
+      dependsOn: [], files: ["a.ts"], exclusiveResources: [], mergeResources: ["m"], doneWhen: "d", checks: [["true"]] }],
+  }));
+  const init = await run(["init", "--file", file, "--state", state], "leader-one");
+  assert.equal(init.code, 0, init.error);
+  const store = new GruStore(state); t.after(() => store.close());
+  let current = store.reconcile("cli", "leader-one", 0, {});
+  current = store.reserve("cli", "leader-one", current.revision, "t");
+  const attach = ["attach", "--run", "cli", "--revision", String(current.revision), "--task", "t",
+    "--token", current.tasks[0].token!, "--peer", "claude:minion", "--state", state];
+  return { store, current, attach, env: hermodPeerAt(dir, observed), declared, observed };
+}
+
+test("gru CLI: attach adopts Hermod's actual worktree for the same repository and ticket", async t => {
+  const { store, current, attach, env, declared, observed } = await strandedLaunch(t, "git@github.com:o/r.git");
+  const result = await run(attach, "leader-one", env);
+  assert.equal(result.code, 0, result.error);
+  const adopted = JSON.parse(result.out);
+  assert.equal(adopted.tasks[0].phase, "intake");
+  assert.equal(adopted.tasks[0].worker.worktree, observed);
+  // The spec follows the worker, so `packet` and later observations name the real checkout.
+  assert.equal(adopted.tasks[0].spec.worktree, observed);
+  assert.equal(adopted.config.tasks[0].worktree, observed);
+  const event = adopted.events.find((e: { kind: string }) => e.kind === "worktree-adopted");
+  const audit = JSON.parse(event.detail);
+  assert.equal(audit.declared, declared);
+  assert.equal(audit.observed, observed);
+  assert.equal(audit.repositoryKey, "o/r");
+  assert.equal(audit.branch, "worktree-STARK-5030");
+  assert.match(result.error, /adopted/);
+  assert.equal(store.read("cli").revision, current.revision + 1);
+});
+
+test("gru CLI: attach still refuses a peer whose worktree belongs to another repository", async t => {
+  const { store, current, attach, env } = await strandedLaunch(t, "git@github.com:o/other.git");
+  const result = await run(attach, "leader-one", env);
+  assert.equal(result.code, 2);
+  assert.match(result.error, /worker worktree mismatch/);
+  assert.match(result.error, /o\/other/);
+  const after = store.read("cli");
+  assert.equal(after.revision, current.revision);
+  assert.equal(after.tasks[0].phase, "reserved");
+  assert.equal(after.tasks[0].worker, undefined);
+});
+
 test("gru CLI: --limits-file is refused on every verb except resume", async t => {
   const { dir, state, file } = engagement(t);
   assert.equal((await run(["init", "--file", file, "--state", state], "leader-one")).code, 0);

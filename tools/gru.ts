@@ -4,9 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
+import { canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
-import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observeOrphan, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -42,6 +42,9 @@ State defaults to ~/.stark/gru/state.sqlite, shared across runtimes.
 
 reserve records intent, not successful startup. Launch through Hermod only.
 attach requires a live Hermod peer; receive requires a confirmed worker message.
+A peer outside the declared worktree attaches only from a linked worktree root of the
+same repository whose directory or branch names the ticket, with no other task
+declaring or owning it; attach then adopts that path, audited. Anything else refuses.
 reconcile never equates missing discovery with death. Keep uncertain reservations.
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
@@ -195,11 +198,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       case "reconcile": emit(store.reconcile(id, identity, revision, await observeWorkers(run))); break;
       case "reserve": emit(store.reserve(id, identity, revision, flag("task"))); break;
       case "attach": {
-        const peers = await discoverWorker({ provider: task().spec.provider, id: flag("peer") });
+        const assigned = task(flag("token"));
+        const peers = await discoverWorker({ provider: assigned.spec.provider, id: flag("peer") });
         if (peers.incomplete) throw new Error("Hermod discovery incomplete; preserve launch reservation");
         const peer = peers.peers.find(p => p.id === flag("peer"));
         if (!peer) throw new Error(`Hermod peer ${peers.incomplete ? "discovery incomplete" : "missing"}; preserve launch reservation`);
-        emit(store.attach(id, identity, revision, flag("task"), flag("token"), workerFromPeer(peer))); break;
+        const worker = workerFromPeer(peer);
+        const adoption = canonicalWorktree(worker.worktree) === canonicalWorktree(assigned.spec.worktree)
+          ? undefined : await inspectAdoption(assigned, worker);
+        emit(store.attach(id, identity, revision, flag("task"), flag("token"), worker, adoption));
+        // The worker's brief named the declared path; it needs the regenerated packet before intake.
+        if (adoption) process.stderr.write(`gru: adopted observed worktree ${adoption.observed} (declared ${adoption.declared}); send the worker a fresh packet\n`);
+        break;
       }
       case "receive": {
         const report = await receive(run, flag("message"));

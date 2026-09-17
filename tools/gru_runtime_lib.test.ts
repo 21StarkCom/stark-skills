@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { canonicalRepository, checkLeadershipTransfer, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, interruptWorker, observations, observeOrphan, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
-import type { Assignment, Engagement, Run } from "./gru_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, inspectAdoption, interruptWorker, observations, observeOrphan, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { ADOPTION_CHECKS, type Assignment, type Engagement, type Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
   surfaceId: "surface", workspaceId: "workspace", cwd: "/worktree", liveness: "live",
@@ -119,6 +119,53 @@ test("takeover refuses a dangling symlink at the replacement path", async t => {
   const replacement = path.join(dir, "fresh");
   fs.symlinkSync(path.join(dir, "missing"), replacement);
   await assert.rejects(observeOrphan(task, replacement, absentHermod), /absent worktree/);
+});
+
+test("worktree adoption requires a linked worktree root of the same repository that names the ticket", async t => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "gru-adopt-")));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=gru", "-c", "user.email=gru@example.invalid",
+    "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+  const repoWithOrigin = (name: string, origin: string) => {
+    const repo = path.join(dir, name); fs.mkdirSync(repo);
+    git(repo, "init", "-q"); git(repo, "remote", "add", "origin", origin); git(repo, "commit", "-q", "--allow-empty", "-m", "init");
+    return repo;
+  };
+  const repo = repoWithOrigin("repo", "git@github.com:o/r.git");
+  const linked = (base: string, relative: string, ...branch: string[]) => {
+    const tree = path.join(base, relative); git(base, "worktree", "add", "-q", ...branch, tree); return tree;
+  };
+  const task = assignment();
+  task.spec = { ...task.spec, repo, repositoryKey: "o/r", worktree: path.join(repo, ".worktrees", "STARK-100") };
+  const at = (worktree: string) => inspectAdoption(task, { ...task.worker!, worktree });
+
+  // The incident layout: Hermod's Claude placement against a declared `.worktrees/` path.
+  const claude = linked(repo, ".claude/worktrees/STARK-100", "-b", "worktree-STARK-100");
+  const proof = await at(claude);
+  assert.deepEqual({ ...proof, observedAt: undefined }, { observedAt: undefined, declared: task.spec.worktree, observed: claude,
+    repositoryKey: "o/r", branch: "worktree-STARK-100", checks: ADOPTION_CHECKS });
+  // Either name identifies the ticket; a detached HEAD leaves only the directory.
+  assert.equal((await at(linked(repo, "scratch", "-b", "fix/STARK-100-adopt"))).branch, "fix/STARK-100-adopt");
+  assert.equal((await at(linked(repo, "detached/STARK-100", "--detach"))).branch, undefined);
+
+  const other = repoWithOrigin("other", "git@github.com:o/other.git");
+  const primary = repoWithOrigin("STARK-100", "git@github.com:o/r.git");
+  const plain = path.join(dir, "plain", "STARK-100"); fs.mkdirSync(plain, { recursive: true });
+  const refusals: [string, RegExp][] = [
+    [linked(other, ".claude/worktrees/STARK-100", "-b", "worktree-STARK-100"), /belongs to o\/other, not o\/r/],
+    [linked(repo, "unrelated", "-b", "unrelated"), /names STARK-100 in neither/],
+    [linked(repo, "STARK-1000", "-b", "STARK-1000"), /names STARK-100 in neither/],
+    [path.join(claude, "sub"), /not a worktree root/],
+    [primary, /primary checkout/],
+    [plain, /not a git worktree/],
+    [path.join(dir, "missing", "STARK-100"), /does not exist/],
+  ];
+  fs.mkdirSync(path.join(claude, "sub"));
+  for (const [worktree, reason] of refusals) await assert.rejects(at(worktree), (error: Error) => {
+    assert.match(error.message, /^worker worktree mismatch: /, worktree);
+    assert.match(error.message, reason, worktree);
+    return true;
+  });
 });
 
 test("native worker discovery does not depend on an unrelated provider outage", async () => {

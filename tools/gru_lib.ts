@@ -93,6 +93,22 @@ export interface OrphanEvidence {
 export const ORPHAN_CHECKS = ["complete peer discovery", "complete saved-session discovery",
   "no matching live peer or saved session", "recorded surface absent", "recorded PID absent",
   "replacement worktree unoccupied"];
+/** Git facts behind binding a worker Hermod placed outside the declared worktree. */
+export interface WorktreeAdoption {
+  observedAt: string;
+  declared: string;
+  observed: string;
+  repositoryKey: string;
+  branch?: string;
+  checks: string[];
+}
+export const ADOPTION_CHECKS = ["observed path is a worktree root", "linked worktree, not a primary checkout",
+  "same repository identity", "directory or branch names the ticket"];
+/** The ticket as a whole name segment, so STARK-50 never matches STARK-501 or a longer word. */
+export function namesTicket(ticket: string, ...names: (string | undefined)[]): boolean {
+  const pattern = new RegExp(`(^|[^A-Za-z0-9])${ticket}($|[^A-Za-z0-9])`);
+  return names.some(name => name !== undefined && pattern.test(name));
+}
 export interface TakeoverRecord {
   request: TakeoverRequest;
   evidence: OrphanEvidence;
@@ -364,7 +380,11 @@ export class GruStore {
       this.event(run, "reserved", task.token, taskId);
     });
   }
-  attach(id: string, leader: string, revision: number, taskId: string, token: string, worker: Worker): Run {
+  /** A worker outside the declared worktree binds only with `adoption` evidence: its checkout
+   * must be a linked worktree of the same repository that names the ticket and that no other
+   * task declares or owns. Refusing every mismatch stranded the reservation — the launched
+   * worker was live, unbound, and so neither attachable, interruptible, nor recoverable. */
+  attach(id: string, leader: string, revision: number, taskId: string, token: string, worker: Worker, adoption?: WorktreeAdoption): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
       const stoppingLaunch = run.mode === "stopping" && task.phase === "stopping" &&
@@ -372,15 +392,35 @@ export class GruStore {
       requireValue((run.mode === "running" && task.phase === "reserved") || stoppingLaunch, "no pending launch to attach");
       for (const key of ["id", "session", "surface", "workspace", "worktree"] as const) requireValue(nonempty(worker[key]), `worker ${key} is required`);
       requireValue(worker.provider === task.spec.provider, "provider substitution refused");
-      requireValue(canonicalWorktree(worker.worktree) === canonicalWorktree(task.spec.worktree), "worker worktree mismatch");
+      const observed = canonicalWorktree(worker.worktree);
+      const declared = canonicalWorktree(task.spec.worktree);
+      if (observed !== declared) this.adopt(run, task, observed, declared, adoption);
       requireValue(!task.takeovers?.some(t => t.evidence.worker.id === worker.id ||
         t.evidence.worker.session === worker.session || t.evidence.worker.surface === worker.surface), "fenced worker cannot reattach after takeover");
       this.own(run, task, [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`]);
-      task.worker = { ...structuredClone(worker), worktree: canonicalWorktree(worker.worktree) };
+      task.worker = { ...structuredClone(worker), worktree: observed };
       if (stoppingLaunch) task.stoppedFrom = "intake";
       else task.phase = "intake";
       this.event(run, "attached", worker.id, taskId);
     });
+  }
+  /** Runs inside `attach`'s transaction, so a later refusal rolls the adoption back too.
+   * The declared tree stays owned by this task: nothing observed that path unoccupied. */
+  private adopt(run: Run, task: Assignment, observed: string, declared: string, adoption?: WorktreeAdoption): void {
+    requireValue(adoption, "worker worktree mismatch");
+    requireValue(adoption.checks.length === ADOPTION_CHECKS.length && ADOPTION_CHECKS.every(c => adoption.checks.includes(c)), "incomplete worktree adoption evidence");
+    requireValue(fresh(adoption), "worktree adoption evidence is stale; attach again");
+    requireValue(adoption.observed === observed && adoption.declared === declared, "worktree adoption evidence mismatch");
+    requireValue(adoption.repositoryKey === repositoryKey(task.spec), `worker worktree mismatch: ${observed} belongs to ${adoption.repositoryKey}`);
+    requireValue(observed !== canonicalWorktree(task.spec.repo), "worker needs an isolated worktree");
+    requireValue(namesTicket(task.spec.ticket, path.basename(observed), adoption.branch), `worker worktree mismatch: ${observed} does not name ${task.spec.ticket}`);
+    const declaredBy = [run, ...this.others(run.config.id)].flatMap(r => r.tasks)
+      .find(t => t !== task && canonicalWorktree(t.spec.worktree) === observed);
+    requireValue(!declaredBy, `worker worktree mismatch: ${observed} is declared by ${declaredBy?.spec.ticket}`);
+    this.own(run, task, [`tree:${observed}`]);
+    task.spec = { ...task.spec, worktree: observed };
+    run.config.tasks = run.config.tasks.map(t => t.id === task.spec.id ? structuredClone(task.spec) : t);
+    this.event(run, "worktree-adopted", JSON.stringify(adoption), task.spec.id);
   }
   report(id: string, leader: string, revision: number, taskId: string, token: string,
     session: string, kind: "ack" | "progress" | "blocked" | "ready" | "complete", message: string, messageId?: string): Run {
