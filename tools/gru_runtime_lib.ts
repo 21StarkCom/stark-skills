@@ -4,8 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { assertAbsentWorktree, canonicalWorktree, ORPHAN_CHECKS, verificationReady } from "./gru_lib.ts";
-import type { Assignment, CompletionEvidence, Observation, OrphanEvidence, Provider, Run, Worker } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, assertAbsentWorktree, canonicalWorktree, namesTicket, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, verificationReady } from "./gru_lib.ts";
+import type { Assignment, CompletionEvidence, Observation, OrphanEvidence, Provider, Run, Worker, WorktreeAdoption } from "./gru_lib.ts";
 
 export interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut?: boolean }
 export type Command = (argv: string[], cwd?: string, timeoutMs?: number) => Promise<CommandResult>;
@@ -131,6 +131,35 @@ export async function observeWorkers(run: Run, call: Command = command): Promise
   const sessions = JSON.parse(saved);
   if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
   return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions.sessions)));
+}
+/** Git evidence that an observed worker's checkout can replace the declared worktree.
+ * Hermod v0.17.4 places Claude at `<repo>/.claude/worktrees/<ticket>` and Codex at
+ * `<main checkout>/.worktrees/<ticket>`; a leader declaring another layout stranded its reservation. */
+export async function inspectAdoption(task: Assignment, worker: Worker, call: Command = command): Promise<WorktreeAdoption> {
+  const observedAt = new Date().toISOString();
+  const observed = canonicalWorktree(worker.worktree);
+  const declared = canonicalWorktree(task.spec.worktree);
+  const refuse = (why: string): never => { throw new Error(`worker worktree mismatch: ${observed} ${why} (declared ${declared})`); };
+  if (!fs.existsSync(observed)) refuse("does not exist");
+  const layout = await call(["git", "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"], observed);
+  // 128 is git's "not a repository / not a work tree" verdict. A timeout or signal is a failed
+  // observation, not evidence about the path, so surface it instead of mislabelling the checkout.
+  if (layout.code === 128) refuse("is not a git worktree");
+  if (layout.code !== 0) throw new Error(`git rev-parse failed (${layout.code}): ${layout.stderr || layout.stdout}`);
+  const [toplevel, gitDir, commonDir] = layout.stdout.trim().split("\n").map(canonicalWorktree);
+  if (!commonDir) refuse("is not a git worktree");
+  if (toplevel !== observed) refuse(`is not a worktree root (${toplevel})`);
+  // A linked worktree keeps a private git dir under the shared common one.
+  if (gitDir === commonDir) refuse("is a primary checkout, not an isolated linked worktree");
+  const repositoryKey = await canonicalRepository(observed, call);
+  const expected = taskRepositoryKey(task.spec);
+  if (repositoryKey !== expected) refuse(`belongs to ${repositoryKey}, not ${expected}`);
+  const head = await call(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], observed);
+  // Exit 1 is a detached HEAD, which leaves only the directory name to identify the ticket.
+  if (head.code !== 0 && head.code !== 1) throw new Error(`git symbolic-ref failed (${head.code}): ${head.stderr || head.stdout}`);
+  const branch = head.code === 0 ? head.stdout.trim() : undefined;
+  if (!namesTicket(task.spec.ticket, path.basename(observed), branch)) refuse(`names ${task.spec.ticket} in neither its directory nor its branch`);
+  return { observedAt, declared, observed, toplevel, gitDir, commonDir, repositoryKey, ...(branch ? { branch } : {}), checks: [...ADOPTION_CHECKS] };
 }
 /** Strong absence checks for an explicit operator takeover, not a death observation.
  * Use the complete provider namespace: a reused surface/path can belong to another runtime. */

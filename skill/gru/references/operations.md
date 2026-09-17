@@ -50,6 +50,7 @@ Provider selection is mandatory for every task.
 Use existing tickets; the tool does not create any.
 Dependencies reference tasks in the same engagement.
 Reject cycles and duplicate ticket or worktree ownership.
+Declare `worktree` where Hermod will place the task's provider; see [worktree placement](#worktree-placement).
 Files are relative paths or directories, without glob patterns.
 Use normalized paths without trailing slashes or dot components.
 The CLI derives repository identity from origin, across checkout aliases.
@@ -70,7 +71,7 @@ An obsolete leader or revision cannot overwrite current state.
 | `reconcile` | Hermod peer and session observations | Live, dead, or unknown observations |
 | `reserve` | Readiness, resources, available budget | Unique token; launch pending |
 | `packet` | Existing reservation | Complete worker brief |
-| `attach` | Exact live Hermod peer | Worker bound; awaiting intake |
+| `attach` | Exact live Hermod peer; git evidence if outside the declared worktree | Worker bound, adopted worktree audited; awaiting intake |
 | `receive` | Leader-acked Hermod message, delivery confirmed | Intake, progress, blocker, or claim |
 | `integrate` | Reviewed candidate and base SHA | Exclusive integration reservation |
 | `verify` | Merged PR, review, independent checks | Verified completion evidence |
@@ -135,6 +136,51 @@ flag `receive` checks. Read the report before acking it. Acking a batch of inbou
 ids unread satisfies the gate on messages nobody inspected, which is the whole
 property the gate exists to provide. Acking records receipt; it does not answer.
 Hermod sender attribution is coordination evidence, not operator authority.
+
+## Worktree placement
+
+`hermod ticket <ticket> --agent <provider> --cwd <repo>` creates the worker's worktree;
+Gru does not choose it. Declare the path Hermod will actually use:
+
+| Provider | Worktree | Branch |
+|---|---|---|
+| `claude` | `<repo>/.claude/worktrees/<ticket>` (Claude Code's `--worktree=<ticket>`) | `worktree-<ticket>` |
+| `codex` | `<main checkout>/.worktrees/<ticket>` | `<ticket>` |
+
+The Claude row was observed on 2026-09-17 with Hermod v0.17.4, launching from the
+primary checkout. The Codex row is Hermod v0.17.4's Codex launcher, which also reports
+`worktree` in `hermod ticket --json`. `hermod ticket --capabilities --json` says only
+`"worktree": "dedicated"`, and a Claude launch's `--json` omits the path, so neither
+can be derived at runtime today. Recheck this table when Hermod changes.
+`init` canonicalizes a not-yet-existing worktree through its parent directory and
+refuses when that parent is missing. A repository that has never hosted a Claude
+worktree has no `.claude/worktrees`, so create the parent before `init`; both
+launchers accept an existing, empty parent.
+
+A leader that declared the other layout used to strand its reservation: `attach`
+refused the mismatch, and the launched worker stayed live but unbound, so nothing
+could attach, interrupt, or recover it. `attach` now adopts the observed worktree
+when all of these hold, and otherwise still refuses:
+
+- the peer's cwd is the root of a linked git worktree, not a primary checkout or subdirectory;
+- its origin yields the task's repository identity, so a peer in another repository never binds;
+- its directory name or branch names the ticket as a whole segment (`STARK-50` never matches `STARK-501`);
+- no task in this or any other engagement declares that path, and no other assignment owns it;
+- no takeover of this task fenced that path: a relaunch Claude re-attaches to the orphan's
+  checkout must not undo the fresh worktree the takeover required.
+
+`attach` also refuses the leader's own session as its worker, and checks fenced
+worker identities before any worktree adoption.
+
+Adoption rewrites the task's `worktree` in its assignment and the engagement config,
+reserves the observed path, keeps the declared path reserved to the same task, and
+records a `worktree-adopted` event carrying the evidence: the worktree root, git dir and
+common dir `git rev-parse` reported, the origin's repository identity, the branch, and the
+new token. The store rechecks root and linked-worktree from those fields. Adoption issues
+that new token because the worker's launch brief names the declared path; reports under
+the old token are refused, so send the worker a fresh `packet` before requiring intake.
+A refused mismatch names the observed path and the reason and leaves the launch
+reserved. Escalate it; never edit the engagement or database to release it.
 
 ## Verification and integration
 
