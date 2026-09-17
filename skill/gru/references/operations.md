@@ -55,7 +55,9 @@ Files are relative paths or directories, without glob patterns.
 Use normalized paths without trailing slashes or dot components.
 The CLI derives repository identity from origin, across checkout aliases.
 Release files can be modeled as integration resources.
-Overlapping implementation files block parallel dispatch.
+Declared files scope each worker's brief; overlapping files never block dispatch.
+Each worker edits its own worktree, and tasks touching the same files reconcile at the
+rebase before merge (a 3-way merge), one merge at a time under the repository's merge lock.
 
 ## Durable commands
 
@@ -374,8 +376,8 @@ These absence checks do not prove death; the durable history keeps the original
 The transaction fences the old token immediately, retains all former identity and
 worktree reservations, preserves spent attempts/recoveries and pending integration
 ownership, and records the request, observation, prior spec, limits and PR report.
-It moves the assignment to `pending`, retaining its declared file scope against
-competing tasks and engagements; a subsequent `reserve` spends the next launch
+It moves the assignment to `pending`, retaining its exclusive resources against
+competing tasks; a subsequent `reserve` spends the next launch
 attempt and supplies a fresh token. The packet includes the prior report so an
 existing PR is continued, not duplicated. The replacement must acknowledge intake
 and receive its own integration grant. Never resume a fenced old session.
@@ -383,7 +385,7 @@ and receive its own integration grant. Never resume a fenced old session.
 ### Proof-based sweep of dead reservations
 
 A launch that never attaches, followed by `stop`, holds its ticket, worktree, and
-files with no command left to release them, even after the ticket is finished
+exclusive resources with no command left to release them, even after the ticket is finished
 outside the store. `sweep [--run ID] [--apply]` releases a held task only when both hold:
 
 1. Alfred reports its ticket `done` or `Closed`. An open ticket is never released,
@@ -429,7 +431,7 @@ transaction, fenced on the engagement and exact revision the evidence was read a
 and on one-minute freshness. No leader identity is needed, because the leader may be gone.
 Each release records a `swept` event stating it was a proof-based sweep, not a leader
 action, with the invoking session, leader of record, proof, and released resources.
-A swept task owns no resources, files, or capacity, cannot be verified, and leaves
+A swept task owns no resources or capacity, cannot be verified, and leaves
 dependents blocked. A run with every task verified or swept becomes terminal `swept`,
 whether a sweep or a later `verify` settles its last task, which `resume` and `stop`
 refuse; a stopping run with no active task becomes `stopped`.
