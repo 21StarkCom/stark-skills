@@ -85,6 +85,7 @@ An obsolete leader or revision cannot overwrite current state.
 | `interrupt` | Exact live worker identity | Hermod interrupt and observation |
 | `stopped` | Idle interrupted or terminal worker | Stopped assignment; ownership retained |
 | `retire` | Verified completed worker observed idle | Surface closed; worktree preserved |
+| `sweep` | Alfred ticket `done`/`Closed`; no live Hermod peer bound | Dry run, or with `--apply` ownership released and `swept` recorded |
 
 `reserved` never means started.
 `intake` never means acknowledged.
@@ -167,7 +168,8 @@ when all of these hold, and otherwise still refuses:
   `gitdir` names it back), so an inherited `GIT_DIR` cannot make a plain folder qualify;
 - its origin yields the task's repository identity, so a peer in another repository never binds;
 - its directory name or branch names the ticket as a whole segment (`STARK-50` never matches `STARK-501`);
-- no task in this or any other engagement declares that path, and no other assignment owns it;
+- no task in this or any other engagement declares that path, and no other assignment owns it
+  (a swept task released its path, so its leftover declaration does not count, as `reserve` already allows);
 - no takeover of this task fenced that path: a relaunch Claude re-attaches to the orphan's
   checkout must not undo the fresh worktree the takeover required.
 
@@ -353,6 +355,56 @@ attempt and supplies a fresh token. The packet includes the prior report so an
 existing PR is continued, not duplicated. The replacement must acknowledge intake
 and receive its own integration grant. Never resume a fenced old session.
 
+### Proof-based sweep of dead reservations
+
+A launch that never attaches, followed by `stop`, holds its ticket, worktree, and
+files with no command left to release them, even after the ticket is finished
+outside the store. `sweep [--run ID] [--apply]` releases a held task only when both hold:
+
+1. Alfred reports its ticket `done` or `Closed`. An open ticket is never released,
+   even when no worker ever attached. Alfred refuses work verbs outside a git checkout
+   and binds ClickUp or Jira from the checkout's org, so a task's own repository can
+   read its ClickUp `STARK-n` handle as missing. Sweep tries the swept tasks'
+   repositories, every other repository the store records (so `--run` on a Jira-bound
+   engagement still has one), then the caller's directory, until one yields validated
+   evidence for that ticket, and reads the rest there. If none does, every context's
+   error is reported.
+2. No live Hermod peer is bound to it. A bound worker must be observed terminal under
+   `reconcile`'s rules; `unknown` stays held. Either way, discovery must find no live
+   or uncertain peer inside any worktree the task owns: an unattached launch may be
+   there. A release deletes every `tree:` row, so every one is checked: the reserved
+   worktree, one an earlier `takeover` retired, and a declared one `attach` kept when
+   it adopted Hermod's actual worktree.
+   Occupancy reads every provider and ACP peer, so both that unscoped view and the
+   task's own namespace must report complete. A same-provider peer whose working
+   directory Hermod cannot resolve counts as an occupant. A saved session in
+   `hermod sessions --all` whose pid probes alive (`alive: true`) counts as an occupant
+   too, even when the peer view does not list it, as takeover's absence checks already
+   read both sources; a gone or unprobed session does not.
+
+A task holding an integration grant also stays held, because `verify` settles that
+merge after the worker closes its ticket. `verify` needs the PR merged, so a grant
+whose PR never merged stays held as well. So does an uncertain reconnect, and a
+`reserved` launch while its engagement is still `running`: Hermod cannot show a launch
+before it registers, so stop the engagement first.
+Elapsed time is never evidence. Verified `done` tasks keep their ownership by design.
+
+Without `--apply` it prints each held task as `release` or `held` with its reason,
+opening the store read-only: no directory, permission, journal-mode, or schema change.
+Neither mode creates a store that does not exist; it reports no engagements.
+`--apply` gathers all Alfred and Hermod evidence before writing; any failure exits
+non-zero with nothing released. Each engagement is then written in one store
+transaction, fenced on the exact revision the evidence was read at and on
+one-minute freshness. No leader identity is needed, because the leader may be gone.
+Each release records a `swept` event stating it was a proof-based sweep, not a leader
+action, with the invoking session, leader of record, proof, and released resources.
+A swept task owns no resources, files, or capacity, cannot be verified, and leaves
+dependents blocked. A run with every task verified or swept becomes terminal `swept`,
+whether a sweep or a later `verify` settles its last task, which `resume` and `stop`
+refuse; a stopping run with no active task becomes `stopped`.
+Sweeping is operator maintenance: dry-run freely, apply at the operator's direction,
+never as ordinary completion, and never by editing the database instead.
+
 ### Normal bounded recovery
 
 First reconnect the recorded worker through Hermod's supported resume path.
@@ -412,7 +464,8 @@ Canceled assignments must not restart from old messages.
 `stop` freezes dispatch before contacting workers.
 If a reserved launch appears late, attach its exact peer while stopping.
 This binds its identity for interruption without restarting dispatch.
-An unidentified launch remains reserved until its outcome is known.
+An unidentified launch remains reserved until its outcome is known, or until a
+[proof-based sweep](#proof-based-sweep-of-dead-reservations) releases it.
 `interrupt` sends Hermod's escape control to the verified worker.
 Observe idle or terminal status before calling `stopped`.
 `hermod msg cancel` only changes message ledger state.

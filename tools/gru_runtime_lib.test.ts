@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { canonicalRepository, checkLeadershipTransfer, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, inspectAdoption, interruptWorker, observations, observeOrphan, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, inspectAdoption, interruptWorker, observations, observeOrphan, observeSweep, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
 import { ADOPTION_CHECKS, type Assignment, type Engagement, type Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
@@ -375,6 +375,70 @@ test("local PID absence cannot override incomplete Hermod identity evidence", as
   assert.equal(result.task.liveness, "unknown");
   // The peer query is scoped to the task's provider so one stray process elsewhere cannot taint it.
   assert.ok(calls.some(argv => argv[1] === "msg" && argv.includes("--agent") && argv.includes("codex")));
+});
+
+test("sweep evidence stays silent without held tasks and reads each ticket and namespace once", async () => {
+  const calls: string[][] = [];
+  const call: Command = async argv => {
+    calls.push(argv);
+    return argv[0] === "alfred" ? response({ item: { ref: { custom_id: argv[3] }, state: "Closed" }, comments: [], comments_read: true })
+      : argv[1] === "sessions" ? response({ sessions: [], totalMatches: 0 })
+      : response({ peers: [], observedAt: new Date().toISOString(), incomplete: false });
+  };
+  const verified = run(); verified.tasks[0].phase = "done";
+  const unstarted = run(); unstarted.tasks[0].phase = "pending"; unstarted.tasks[0].attempts = 0;
+  assert.equal((await observeSweep([verified, unstarted], call)).size, 0);
+  assert.deepEqual(calls, [], "nothing held means no Alfred or Hermod traffic");
+  const second = run(); second.config.id = "second";
+  const evidence = await observeSweep([run(), second], call);
+  assert.deepEqual([...evidence.keys()], ["run", "second"]);
+  assert.deepEqual(calls.filter(c => c[0] === "alfred"), [["alfred", "task", "show", "STARK-100", "--json"]]);
+  // The scoped namespace decides completeness; the unscoped one finds any occupant.
+  assert.deepEqual(calls.filter(c => c[1] === "msg"), [["hermod", "msg", "peers", "--all", "--agent", "codex", "--json"],
+    ["hermod", "msg", "peers", "--all", "--json"]]);
+  assert.equal(evidence.get("second")!.revision, second.revision);
+  assert.equal(calls.filter(c => c[1] === "sessions").length, 1);
+  assert.equal(evidence.get("run")!.tickets["STARK-100"], "Closed");
+  assert.deepEqual(evidence.get("run")!.peers, []);
+  assert.deepEqual(evidence.get("run")!.tasks.task, { complete: true,
+    observation: { observedAt: evidence.get("run")!.tasks.task.observation.observedAt, liveness: "unknown", activity: "unknown", evidence: [] } });
+});
+
+test("sweep reads STARK tickets from a recorded repository Alfred binds to them, never the wrong provider", async () => {
+  // Alfred refuses work verbs outside a checkout (a machine-wide sweep runs from $HOME) and binds
+  // its provider from the checkout's org: a Jira-bound repository reads a STARK handle as missing.
+  const reads: [string, string | undefined, number][] = [];
+  const world = (clickup: readonly (string | undefined)[]): Command => async (argv, cwd) => {
+    if (argv[0] === "alfred") {
+      const ok = clickup.includes(cwd);
+      reads.push([argv[3], cwd, ok ? 0 : 1]);
+      return ok ? response({ item: { ref: { custom_id: argv[3] }, state: "Closed" }, comments: [], comments_read: true })
+        : { code: 1, stdout: "", stderr: cwd === undefined ? "alfred: not a git repo — work verbs refuse" : `alfred: ${argv[3]} not found` };
+    }
+    return argv[1] === "sessions" ? response({ sessions: [], totalMatches: 0 })
+      : response({ peers: [], observedAt: new Date().toISOString(), incomplete: false });
+  };
+  const jira = run(); jira.config.id = "jira";
+  jira.tasks[0].spec = { ...jira.tasks[0].spec, ticket: "STARK-200", repo: "/evinced-repo" };
+  const evidence = await observeSweep([jira, run()], world(["/repo"]));
+  assert.deepEqual(evidence.get("jira")!.tickets, { "STARK-200": "Closed", "STARK-100": "Closed" });
+  // The Jira-bound checkout fails once; the context that yielded validated evidence reads the rest.
+  assert.deepEqual(reads, [["STARK-200", "/evinced-repo", 1], ["STARK-200", "/repo", 0], ["STARK-100", "/repo", 0]]);
+  // A Jira-only sweep (`--run`) borrows another recorded repository before the caller's directory.
+  reads.length = 0;
+  assert.equal((await observeSweep([jira], world(["/repo", undefined]), ["/evinced-repo", "/repo"])).get("jira")!.tickets["STARK-200"], "Closed");
+  assert.deepEqual(reads, [["STARK-200", "/evinced-repo", 1], ["STARK-200", "/repo", 0]]);
+  // The caller's directory is the last context, not a fallback that hides a failure.
+  assert.equal((await observeSweep([jira], world([undefined]))).get("jira")!.tickets["STARK-200"], "Closed");
+  // No context reads: every context's real error is reported and nothing is gathered.
+  await assert.rejects(observeSweep([jira, run()], world([])),
+    /no Alfred context read STARK-200: \/evinced-repo: alfred failed \(1\): alfred: STARK-200 not found; \/repo: .*not found; current directory: .*not a git repo/);
+  // A context that reads the first ticket but fails a later one is a real error, not a cue to move on.
+  let laterReads = 0;
+  const partial: Command = async (argv, cwd) => argv[0] === "alfred" && argv[3] === "STARK-100"
+    ? (laterReads++, { code: 1, stdout: "", stderr: "ClickUp unreachable" }) : world(["/evinced-repo", "/repo"])(argv, cwd);
+  await assert.rejects(observeSweep([jira, run()], partial), /alfred failed \(1\): ClickUp unreachable/);
+  assert.equal(laterReads, 1);
 });
 
 test("command terminates a real check at its declared timeout", async () => {
