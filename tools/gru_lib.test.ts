@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
-import { observations, observeOrphan, observeWorkers, packet, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { observations, observeOrphan, observeSweep, observeWorkers, packet, type Command, type HermodPeer, type SavedSession } from "./gru_runtime_lib.ts";
 import { ADOPTION_CHECKS, GruStore, namesTicket, parseEngagement, parseTakeover, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
 
 // Compose the production observation builders with the store: a handwritten "dead"
@@ -316,6 +316,24 @@ test("namesTicket matches a whole segment and treats the ticket literally", () =
   assert.equal(namesTicket("X+", "X+"), true);
 });
 
+test("a swept task's leftover worktree declaration does not refuse adoption of the released path", async t => {
+  const { store } = fixture(t);
+  const observed = "/repo/.claude/worktrees/STARK-100";
+  // An earlier engagement declared the path, launched, stopped, and was swept once its ticket closed.
+  const earlier = config(); earlier.id = "earlier"; earlier.tasks = [{ ...earlier.tasks[0], worktree: observed, repositoryKey: "o/r" }];
+  let old = observe(store, store.create(earlier));
+  old = store.reserve("earlier", "leader-one", old.revision, "one");
+  old = store.stop("earlier", "leader-one", old.revision);
+  old = store.sweep("earlier", old.revision, await sweepEvidence(old, { tickets: { "STARK-100": "Closed" } }), null).run;
+  assert.equal(old.tasks[0].phase, "swept");
+  const c = config(); c.tasks = c.tasks.slice(0, 1); c.tasks[0].repositoryKey = "o/r";
+  let run = observe(store, store.create(c));
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  run = store.attach("demo", "leader-one", run.revision, "one", run.tasks[0].token!,
+    { ...worker("one"), worktree: observed }, adoptionProof(observed, "/worktrees/one", "o/r"));
+  assert.equal(run.tasks[0].spec.worktree, observed);
+});
+
 test("an adopted worktree replaces the declared one in the spec and is owned against later engagements", t => {
   const { store } = fixture(t);
   const observed = "/repo/.claude/worktrees/STARK-100";
@@ -395,6 +413,19 @@ test("SQLite database and WAL sidecars stay private under a permissive umask", t
   } finally {
     process.umask(saved);
   }
+});
+
+test("a read-only store reads without creating, re-permissioning, or writing", t => {
+  const { store, file } = fixture(t);
+  const run = store.create(config());
+  fs.chmodSync(file, 0o640);
+  const reader = new GruStore(file, { readOnly: true }); t.after(() => reader.close());
+  assert.deepEqual(reader.list().map(r => r.config.id), [run.config.id]);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+  assert.throws(() => reader.create({ ...config(), id: "second" }), /readonly/);
+  const missing = path.join(path.dirname(file), "missing", "state.sqlite");
+  assert.throws(() => new GruStore(missing, { readOnly: true }), /unable to open/);
+  assert.equal(fs.existsSync(path.dirname(missing)), false);
 });
 
 test("a launch reservation survives reopening and cannot be duplicated", t => {
@@ -869,4 +900,264 @@ test("recovery retains the former session identity for its resumable assignment"
   run = store.reserve("demo", "leader-one", run.revision, "two");
   assert.throws(() => store.attach("demo", "leader-one", run.revision, "two", run.tasks[1].token!,
     { ...worker("two"), surface: worker("one").surface }), /already owned/);
+});
+
+/** Alfred and Hermod as `sweep` reads them. Unlisted tickets read `Open`; peers honor `--agent`. */
+function sweepWorld(world: { tickets?: Record<string, string>; peers?: HermodPeer[]; sessions?: SavedSession[];
+  incomplete?: boolean; unscopedIncomplete?: boolean } = {}): Command {
+  return async argv => {
+    const reply = (value: unknown) => ({ code: 0, stderr: "", stdout: JSON.stringify(value) });
+    if (argv[0] === "alfred") return reply({ item: { ref: { custom_id: argv[3] }, state: world.tickets?.[argv[3]] ?? "Open" }, comments: [], comments_read: true });
+    if (argv[1] === "sessions") return reply({ sessions: world.sessions ?? [], totalMatches: (world.sessions ?? []).length });
+    const agent = argv.includes("--agent") ? argv[argv.indexOf("--agent") + 1] : undefined;
+    return reply({ peers: (world.peers ?? []).filter(p => !agent || p.agent === agent),
+      observedAt: new Date().toISOString(), incomplete: Boolean(world.incomplete || (!agent && world.unscopedIncomplete)) });
+  };
+}
+/** A run as the store persists it: JSON drops the `undefined` fields transitions assign. */
+const stored = (run: Run): Run => JSON.parse(JSON.stringify(run));
+const terminated = (id: string): SavedSession => ({ sessionId: `session-${id}`, agent: "codex", surfaceId: `surface-${id}`, pid: 42, alive: false });
+async function sweepEvidence(run: Run, world: Parameters<typeof sweepWorld>[0]) {
+  const evidence = (await observeSweep([run], sweepWorld(world))).get(run.config.id);
+  assert.ok(evidence, "a run holding reservations must produce sweep evidence");
+  return evidence;
+}
+
+test("sweep releases a stopped run's never-attached launches only once each ticket is closed, without its leader", async t => {
+  // The 2026-09-17 incident: attach refused a worker in the wrong worktree, nothing ever
+  // attached, stop left both launches `stopping`, and a corrected run could not reserve.
+  const { store } = fixture(t);
+  const c = config(); c.tasks = c.tasks.slice(0, 2);
+  let run = observe(store, store.create(c));
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  run = store.reserve("demo", "leader-one", run.revision, "two");
+  run = store.stop("demo", "leader-one", run.revision);
+  const retry = config(); retry.id = "retry"; retry.tasks = retry.tasks.slice(0, 1);
+  const corrected = observe(store, store.create(retry));
+  assert.throws(() => store.reserve("retry", "leader-one", corrected.revision, "one"), /ownership|owned/);
+
+  const evidence = await sweepEvidence(run, { tickets: { "STARK-100": "Closed", "STARK-101": "in progress" } });
+  const verdicts = store.sweepVerdicts(run, evidence);
+  assert.deepEqual(verdicts.map(v => [v.task, v.action]), [["one", "release"], ["two", "held"]]);
+  assert.match(verdicts[0].reason, /no worker attached/);
+  assert.match(verdicts[1].reason, /STARK-101 is in progress; an open ticket is never released/);
+  assert.deepEqual(store.read("demo"), stored(run), "evaluating a sweep mutates nothing");
+
+  // No leader identity takes part; the exact revision still fences the write.
+  const { run: swept } = store.sweep("demo", run.revision, evidence, "operator-session");
+  assert.deepEqual(swept.tasks.map(task => task.phase), ["swept", "stopping"]);
+  assert.equal(swept.mode, "stopping");
+  assert.equal(swept.config.leader, "leader-one");
+  const record = JSON.parse(swept.events.find(e => e.kind === "swept" && e.task === "one")!.detail);
+  assert.equal(record.authority, "proof-based sweep, not a leader action");
+  assert.equal(record.invokedBy, "operator-session");
+  assert.equal(record.leaderOfRecord, "leader-one");
+  assert.equal(record.verdict.ticketState, "Closed");
+  assert.equal(record.stoppedFrom, "reserved");
+  assert.equal(record.evidence.complete, true);
+  assert.deepEqual(record.released, ["ticket:STARK-100", "tree:/worktrees/one"]);
+  assert.deepEqual(swept.tasks[0].swept, record);
+  assert.deepEqual(store.owned("demo", "one"), []);
+  assert.deepEqual(store.owned("demo", "two"), ["ticket:STARK-101", "tree:/worktrees/two"]);
+  // The same ticket, worktree, and files are reservable again.
+  assert.equal(store.reserve("retry", "leader-one", corrected.revision, "one").tasks[0].phase, "reserved");
+
+  const closed = await sweepEvidence(swept, { tickets: { "STARK-101": "done" } });
+  const ended = store.sweep("demo", swept.revision, closed, null).run;
+  assert.equal(ended.mode, "swept");
+  assert.match(ended.events.at(-1)!.detail, /engagement terminal/);
+  assert.throws(() => store.resume("demo", "leader-one", ended.revision, "leader-two"), /terminal/);
+  assert.throws(() => store.stop("demo", "leader-one", ended.revision), /terminal/);
+  assert.equal((await observeSweep([ended], sweepWorld())).size, 0, "a swept engagement holds nothing to evaluate");
+});
+
+test("sweep releases an attached worker only when it is observed terminal and its ticket is closed", async t => {
+  const { store } = fixture(t);
+  const c = config(); c.tasks = c.tasks.slice(0, 1);
+  let run = start(store, observe(store, store.create(c)), "one");
+  run = report(store, run, "one", "ack");
+  const closed = { "STARK-100": "Closed" };
+  const cases: [string, Parameters<typeof sweepWorld>[0], RegExp][] = [
+    ["live peer", { tickets: closed, peers: [livePeer("one")] }, /worker codex:one observed live/],
+    ["missing peer without termination evidence", { tickets: closed }, /worker codex:one observed unknown/],
+    ["terminated inside an incomplete view", { tickets: closed, sessions: [terminated("one")], incomplete: true }, /observed unknown/],
+    ["terminated with the ticket open", { tickets: { "STARK-100": "in review" }, sessions: [terminated("one")] }, /never released/],
+  ];
+  for (const [name, world, reason] of cases) {
+    const evidence = await sweepEvidence(run, world);
+    const [verdict] = store.sweepVerdicts(run, evidence);
+    assert.equal(verdict.action, "held", name);
+    assert.match(verdict.reason, reason, name);
+    assert.equal(store.sweep("demo", run.revision, evidence, null).run.revision, run.revision, `${name} must not write`);
+  }
+  const evidence = await sweepEvidence(run, { tickets: closed, sessions: [terminated("one")] });
+  const { run: swept, verdicts } = store.sweep("demo", run.revision, evidence, null);
+  assert.equal(verdicts[0].action, "release");
+  assert.match(verdicts[0].reason, /worker codex:one observed terminal \(Hermod session session-one: pid 42 alive=false\)/);
+  assert.equal(swept.mode, "swept");
+  assert.equal(swept.tasks[0].swept!.invokedBy, null);
+  assert.deepEqual(swept.tasks[0].swept!.worker, run.tasks[0].worker);
+  assert.deepEqual(swept.tasks[0].swept!.released, ["session:codex:session-one", "surface:surface-one",
+    "ticket:STARK-100", "tree:/worktrees/one", "worker:codex:one"]);
+  const next = config(); next.id = "next"; next.tasks = next.tasks.slice(0, 1);
+  const other = observe(store, store.create(next));
+  assert.equal(store.reserve("next", "leader-one", other.revision, "one").tasks[0].phase, "reserved");
+});
+
+test("sweep holds integration grants, uncertain reconnects, and launches Hermod cannot rule out", async t => {
+  const { store } = fixture(t);
+  const closed = { "STARK-100": "Closed", "STARK-101": "Closed" };
+  let run = observe(store, store.create(config()));
+  run = start(store, run, "one"); run = start(store, run, "two");
+  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, BASE);
+  run = observe(store, run, "dead");
+  run = store.beginReconnect("demo", "leader-one", run.revision, "two", run.tasks[1].token!);
+  // A worker closes its ticket at merge, before Gru verifies; the grant is how `verify` settles it.
+  const inFlight = store.sweepVerdicts(run, await sweepEvidence(run, { tickets: closed, sessions: [terminated("one"), terminated("two")] }));
+  assert.deepEqual(inFlight.map(v => v.action), ["held", "held"], "never-reserved `dependent` holds nothing and is not listed");
+  assert.match(inFlight[0].reason, new RegExp(`integration grant at ${BASE}; settle it with verify`));
+  assert.match(inFlight[1].reason, /reconnect outcome is uncertain/);
+
+  const { store: other } = fixture(t);
+  const c = config(); c.tasks = c.tasks.slice(0, 2);
+  let launches = observe(other, other.create(c));
+  launches = other.reserve("demo", "leader-one", launches.revision, "one");
+  launches = other.reserve("demo", "leader-one", launches.revision, "two");
+  // `reserve` records intent, not startup: a running engagement's leader may still be launching.
+  const starting = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed }));
+  assert.deepEqual(starting.map(v => v.reason),
+    Array(2).fill("launch reserved in a running engagement may still be starting; stop the engagement before sweeping"));
+  launches = other.stop("demo", "leader-one", launches.revision);
+  const blind = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed, incomplete: true }));
+  assert.deepEqual(blind.map(v => v.reason), Array(2).fill("Hermod discovery incomplete; absence proves nothing"));
+  // Occupancy is read from the unscoped view, so an absence claim needs that view complete too.
+  const partial = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed, unscopedIncomplete: true }));
+  assert.deepEqual(partial.map(v => v.reason), Array(2).fill("Hermod discovery incomplete; absence proves nothing"));
+  // A live session inside the reserved worktree may be the launch that never attached.
+  const occupant = { ...livePeer("elsewhere"), cwd: "/worktrees/one/tools" };
+  const neighbour = { ...livePeer("neighbour"), cwd: "/worktrees/two-corrected" };
+  const departed = { ...livePeer("departed"), liveness: "stale", cwd: "/worktrees/two" };
+  const located = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed, peers: [occupant, neighbour, departed] }));
+  assert.equal(located[0].action, "held");
+  assert.equal(located[0].reason, "Hermod peer codex:elsewhere occupies a worktree this task owns (/worktrees/one)");
+  assert.equal(located[1].action, "release", "a sibling path or a stale record is not an occupant");
+  // `--agent codex` omits other providers and ACP peers; the unscoped view must still see them.
+  const foreign = { ...livePeer("foreign"), id: "claude:foreign", agent: "claude", cwd: "/worktrees/two" };
+  const crossed = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed, peers: [foreign] }));
+  assert.deepEqual(crossed.map(v => v.action), ["release", "held"]);
+  assert.equal(crossed[1].reason, "Hermod peer claude:foreign occupies a worktree this task owns (/worktrees/two)");
+  // A peer whose cwd Hermod could not resolve may be the launch, unless it is another provider.
+  const { cwd: _codexCwd, ...unplaced } = livePeer("unplaced");
+  const { cwd: _claudeCwd, ...elsewhereClaude } = foreign;
+  const unresolved = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed, peers: [unplaced, elsewhereClaude] }));
+  assert.deepEqual(unresolved.map(v => v.reason), ["Hermod peer codex:unplaced occupies a worktree this task owns (/worktrees/one)",
+    "Hermod peer codex:unplaced occupies a worktree this task owns (/worktrees/two)"]);
+  // A saved session whose pid probes alive is running in its cwd even when the peer view omits it;
+  // a gone or unprobed session is not, and a session the peer view already lists is not doubled.
+  const running: SavedSession = { sessionId: "unlisted", agent: "claude", surfaceId: "s", cwd: "/worktrees/one", pid: 7, alive: true };
+  const sessions = [running, { ...running, sessionId: "gone", cwd: "/worktrees/two", alive: false },
+    { ...running, sessionId: "unprobed", cwd: "/worktrees/two", alive: undefined }, { ...running, sessionId: "session-listed" }];
+  const listedPeer = { ...livePeer("listed"), cwd: "/elsewhere" };
+  const sessioned = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed, sessions, peers: [listedPeer] }));
+  assert.deepEqual(sessioned.map(v => v.action), ["held", "release"]);
+  assert.equal(sessioned[0].reason, "Hermod peer session:unlisted occupies a worktree this task owns (/worktrees/one)");
+});
+
+test("sweep fails closed: unreachable Alfred or Hermod, stale evidence, and a moved revision release nothing", async t => {
+  const { store } = fixture(t);
+  const c = config(); c.tasks = c.tasks.slice(0, 1);
+  let run = observe(store, store.create(c));
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  run = store.stop("demo", "leader-one", run.revision);
+  const world = sweepWorld({ tickets: { "STARK-100": "Closed" } });
+  const down = (tool: string): Command => async argv => argv[0] === tool
+    ? { code: 1, stdout: "", stderr: `${tool} unreachable` } : world(argv);
+  await assert.rejects(observeSweep([run], down("alfred")), /alfred failed \(1\): alfred unreachable/);
+  await assert.rejects(observeSweep([run], down("hermod")), /hermod failed \(1\): hermod unreachable/);
+  await assert.rejects(observeSweep([run], async argv => argv[0] === "alfred"
+    ? world(["alfred", "task", "show", "STARK-999", "--json"]) : world(argv)), /Alfred ticket evidence incomplete/);
+  const staleHermod: Command = async argv => argv[1] === "msg"
+    ? { code: 0, stderr: "", stdout: JSON.stringify({ peers: [], observedAt: new Date(Date.now() - 120_000).toISOString(), incomplete: false }) } : world(argv);
+  await assert.rejects(observeSweep([run], staleHermod), /Hermod discovery stale/);
+  assert.deepEqual(store.read("demo"), stored(run));
+
+  const evidence = await sweepEvidence(run, { tickets: { "STARK-100": "Closed" } });
+  assert.throws(() => store.sweep("demo", run.revision, { ...evidence, observedAt: new Date(Date.now() - 120_000).toISOString() }, null),
+    /sweep evidence is stale/);
+  assert.throws(() => store.sweep("demo", run.revision, { ...evidence, tasks: {} }, null), /sweep evidence is missing one/);
+  // The write fence alone proves the run's revision, not the revision the evidence was read at.
+  assert.throws(() => store.sweep("demo", run.revision, { ...evidence, revision: run.revision - 1 }, null), /gathered at another revision/);
+  const moved = observe(store, run, "unknown");
+  assert.throws(() => store.sweep("demo", run.revision, evidence, null), /stale revision/);
+  assert.deepEqual(store.read("demo"), stored(moved));
+  assert.deepEqual(store.owned("demo", "one"), ["ticket:STARK-100", "tree:/worktrees/one"]);
+});
+
+test("a partially swept running engagement frees the released task's slot and files", async t => {
+  const { store } = fixture(t);
+  const c = config(); c.maxWorkers = 1; c.tasks = c.tasks.slice(0, 2);
+  c.tasks[1].files = [...c.tasks[0].files];
+  let run = start(store, observe(store, store.create(c)), "one");
+  run = store.sweep("demo", run.revision, await sweepEvidence(run, { tickets: { "STARK-100": "Closed" }, sessions: [terminated("one")] }), null).run;
+  assert.equal(run.mode, "running");
+  // Once the termination observation ages out, a swept worker must still not hold capacity.
+  run = observe(store, run, "unknown");
+  assert.equal(store.readyReason(run, run.tasks[0]), "task is swept");
+  assert.equal(store.readyReason(run, run.tasks[1]), null);
+  run = store.reserve("demo", "leader-one", run.revision, "two");
+  assert.equal(run.tasks[1].phase, "reserved");
+  // Verifying the last unswept task settles the run terminal: sweep has no candidate left to do it.
+  run = finish(store, store.attach("demo", "leader-one", run.revision, "two", run.tasks[1].token!, worker("two")), "two");
+  assert.deepEqual([run.mode, run.events.at(-1)!.kind], ["swept", "swept"]);
+  assert.throws(() => store.resume("demo", "leader-one", run.revision, "leader-two"), /terminal/);
+
+  // Releasing a stopping run's last active task settles it to resumable `stopped`, not terminal.
+  const { store: halted } = fixture(t);
+  const h = config(); h.tasks = h.tasks.slice(0, 2);
+  let stopping = start(halted, observe(halted, halted.create(h)), "two");
+  stopping = halted.reserve("demo", "leader-one", stopping.revision, "one");
+  stopping = halted.stop("demo", "leader-one", stopping.revision);
+  stopping = observe(halted, stopping, "dead");
+  stopping = halted.stopped("demo", "leader-one", stopping.revision, "two", stopping.tasks[1].token!);
+  assert.equal(stopping.mode, "stopping");
+  const settled = halted.sweep("demo", stopping.revision, await sweepEvidence(stopping, { tickets: { "STARK-100": "Closed" } }), null).run;
+  assert.deepEqual(settled.tasks.map(task => task.phase), ["swept", "stopped"]);
+  assert.equal(settled.mode, "stopped");
+  assert.equal(halted.resume("demo", "leader-one", settled.revision, "leader-two").mode, "running");
+});
+
+test("sweep checks occupancy of the worktree a takeover retired, since it releases that tree too", async t => {
+  const { store, r } = await orphanedRun(t);
+  const request = takeoverRequest(r);
+  const run = store.takeover("demo", "leader-one", r.revision, "one", request.token, request,
+    await observeOrphan(r.tasks[0], request.worktree, absentHermod));
+  const closed = { "STARK-100": "Closed" };
+  const [resumed] = store.sweepVerdicts(run, await sweepEvidence(run, { tickets: closed, peers: [livePeer("one")] }));
+  assert.equal(resumed.action, "held");
+  assert.equal(resumed.reason, "Hermod peer codex:one occupies a worktree this task owns (/worktrees/fresh-takeover, /worktrees/one)");
+  const { run: swept } = store.sweep("demo", run.revision, await sweepEvidence(run, { tickets: closed }), null);
+  assert.deepEqual(swept.tasks[0].swept!.released.filter(resource => resource.startsWith("tree:")),
+    ["tree:/worktrees/fresh-takeover", "tree:/worktrees/one"]);
+});
+
+test("sweep checks occupancy of every worktree the task owns, including a declared tree adoption kept", async t => {
+  // `attach` adopting Hermod's actual worktree keeps the declared tree owned too ("nothing
+  // observed that path unoccupied"); sweep deletes both rows, so both must be unoccupied.
+  const { store } = fixture(t);
+  const observed = "/repo/.claude/worktrees/STARK-100";
+  const c = config(); c.tasks = c.tasks.slice(0, 1); c.tasks[0].repositoryKey = "o/r";
+  let run = observe(store, store.create(c));
+  run = store.reserve("demo", "leader-one", run.revision, "one");
+  run = store.attach("demo", "leader-one", run.revision, "one", run.tasks[0].token!,
+    { ...worker("one"), worktree: observed }, adoptionProof(observed, "/worktrees/one", "o/r"));
+  assert.deepEqual(store.owned("demo", "one").filter(r => r.startsWith("tree:")), [`tree:${observed}`, "tree:/worktrees/one"]);
+  const closed = { "STARK-100": "Closed" };
+  const squatter = { ...livePeer("squatter"), cwd: "/worktrees/one" };
+  const [held] = store.sweepVerdicts(run, await sweepEvidence(run, { tickets: closed, sessions: [terminated("one")], peers: [squatter] }));
+  assert.equal(held.reason, `Hermod peer codex:squatter occupies a worktree this task owns (${observed}, /worktrees/one)`);
+  const { run: swept } = store.sweep("demo", run.revision, await sweepEvidence(run, { tickets: closed, sessions: [terminated("one")] }), null);
+  assert.equal(swept.tasks[0].phase, "swept");
+  assert.deepEqual(swept.tasks[0].swept!.released.filter(r => r.startsWith("tree:")), [`tree:${observed}`, "tree:/worktrees/one"]);
+  assert.deepEqual(store.owned("demo", "one"), []);
 });

@@ -14,7 +14,7 @@ export function assertAbsentWorktree(value: string): void {
 
 export type Provider = "claude" | "codex";
 export type Phase = "pending" | "reserved" | "intake" | "working" | "blocked" |
-  "review" | "integrating" | "done" | "stopping" | "stopped";
+  "review" | "integrating" | "done" | "stopping" | "stopped" | "swept";
 export interface TaskSpec {
   id: string;
   ticket: string;
@@ -122,6 +122,58 @@ export interface TakeoverRecord {
   previousObservation?: Observation;
   previousReport?: Assignment["report"];
 }
+/** What one sweep observed for one task, under `reconcile`'s own observation rules. */
+export interface SweepTaskEvidence {
+  /** The bound worker's observation; `unknown` when no worker is bound. */
+  observation: Observation;
+  /** Both the task's discovery namespace and the unscoped one occupancy is read from
+   * reported themselves complete; absence inside either incomplete view proves nothing. */
+  complete: boolean;
+}
+/** A live or uncertain Hermod peer of any provider, or a saved session whose pid probes alive,
+ * with its working directory canonicalized. */
+export interface SweepPeer {
+  /** The peer id, or `session:<id>` for a live saved session the peer view does not list. */
+  id: string;
+  agent: string;
+  /** Undefined when Hermod could not resolve it. */
+  cwd?: string;
+}
+export interface SweepEvidence {
+  /** Stamped before Alfred and Hermod were queried, so slow commands cannot look fresh. */
+  observedAt: string;
+  /** The engagement revision the evidence was gathered against; `sweep` refuses any other. */
+  revision: number;
+  tickets: Record<string, string>;
+  tasks: Record<string, SweepTaskEvidence>;
+  /** Every live or uncertain peer in the unscoped view, plus every live saved session it omits;
+   * the store checks them against the worktrees a task actually owns, which is exactly what a
+   * release deletes. */
+  peers: SweepPeer[];
+}
+export interface SweepVerdict {
+  task: string;
+  ticket: string;
+  phase: Phase;
+  ticketState: string;
+  action: "release" | "held";
+  reason: string;
+}
+export const SWEEP_AUTHORITY = "proof-based sweep, not a leader action";
+/** The audit trail of one release: who invoked it, which leader it bypassed, and the proof. */
+export interface SweepRecord {
+  authority: typeof SWEEP_AUTHORITY;
+  invokedBy: string | null;
+  leaderOfRecord: string;
+  revision: number;
+  epoch: number;
+  verdict: SweepVerdict;
+  stoppedFrom?: Phase;
+  worker?: Worker;
+  evidence: SweepTaskEvidence & { observedAt: string; peers: SweepPeer[] };
+  released: string[];
+  files: string[];
+}
 export interface Assignment {
   spec: TaskSpec;
   phase: Phase;
@@ -138,13 +190,14 @@ export interface Assignment {
   reconnect?: { id: string; startedAt: string; phase: Phase; pending: boolean };
   evidence?: CompletionEvidence;
   takeovers?: TakeoverRecord[];
+  swept?: SweepRecord;
 }
 export interface Run {
   schema: 1;
   config: Engagement;
   revision: number;
   epoch: number;
-  mode: "running" | "stopping" | "stopped" | "complete";
+  mode: "running" | "stopping" | "stopped" | "complete" | "swept";
   reconciled: boolean;
   received: string[];
   tasks: Assignment[];
@@ -185,7 +238,7 @@ export function parseTakeover(value: unknown): TakeoverRequest {
   if (value.limits !== undefined) requireLimits(value.limits, "takeover limits must be a non-empty list of strings");
   return structuredClone(value) as unknown as TakeoverRequest;
 }
-const active = (t: Assignment) => !["pending", "done", "stopped"].includes(t.phase);
+const active = (t: Assignment) => !["pending", "done", "stopped", "swept"].includes(t.phase);
 const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped" ||
   // Takeover retains the orphan's scope until its replacement reserves or the
   // retained merge settles. Normal recover() keeps its worker and is unchanged.
@@ -204,7 +257,7 @@ const completeChecks = (checks: string[], required: readonly string[]) =>
 const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
 const workerResources = (worker: Worker) => [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`];
-const fresh = (o?: Pick<Observation, "observedAt">) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
+export const fresh = (o?: Pick<Observation, "observedAt">) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
 /** A retained merge is settleable only while no replacement owns the work, or while
  * this task's own integration is live or frozen. `attach` is the ownership line:
@@ -220,6 +273,55 @@ export function verificationReady(task: Assignment): task is Assignment & { inte
   return Boolean(task.integrationBase && !task.reconnect?.pending &&
     (task.phase === "integrating" || task.phase === "pending" || task.phase === "reserved" ||
       (task.phase === "stopped" && task.stoppedFrom === "integrating")));
+}
+
+/** Alfred's completion states: the one predicate `complete` and `sweep` both apply. */
+export const ticketClosed = (state: string) => state === "done" || state === "Closed";
+
+/** Tasks a sweep evaluates. A `pending` task no reservation ever touched holds nothing:
+ * `reserve` writes the first owner rows and spends the first attempt. `done` stays out on
+ * purpose — completion retains ticket, worktree, and saved-session ownership by design. */
+export function sweepCandidates(run: Run): Assignment[] {
+  return run.tasks.filter(t => t.phase !== "done" && t.phase !== "swept" && (t.phase !== "pending" || t.attempts > 0));
+}
+
+/** The release rule. Alfred must report the ticket closed AND no live Hermod peer may be
+ * bound to the task; anything uncertain is held. Elapsed time is never evidence.
+ * `owned` lists a task's owner rows: a release deletes every `tree:` row, however it was
+ * acquired (reserve, takeover, adoption), so occupancy is checked against all of them. */
+export function sweepVerdicts(run: Run, evidence: SweepEvidence, owned: (taskId: string) => readonly string[]): SweepVerdict[] {
+  return sweepCandidates(run).map(task => {
+    const { id, ticket } = task.spec;
+    const ticketState = evidence.tickets[ticket];
+    const found = evidence.tasks[id];
+    requireValue(nonempty(ticketState) && found, `sweep evidence is missing ${id}; sweep again`);
+    const verdict = (action: SweepVerdict["action"], reason: string): SweepVerdict =>
+      ({ task: id, ticket, phase: task.phase, ticketState, action, reason });
+    if (!ticketClosed(ticketState)) return verdict("held", `ticket ${ticket} is ${ticketState}; an open ticket is never released`);
+    // A worker closes its ticket at merge, before Gru verifies, and `verify` settles a
+    // retained merge. Releasing that grant would strand the verification and its dependents.
+    // `verify` needs a merged PR, so a grant whose PR never merged stays held here too.
+    if (task.integrationBase) return verdict("held", `holds an integration grant at ${task.integrationBase}; settle it with verify once its PR merges`);
+    if (task.reconnect?.pending) return verdict("held", "reconnect outcome is uncertain; old process death does not settle startup");
+    // `reserve` records intent, not startup. A running engagement's leader may still be
+    // launching into this reservation, and Hermod cannot show a launch before it registers.
+    if (!task.worker && task.phase === "reserved" && run.mode === "running") {
+      return verdict("held", "launch reserved in a running engagement may still be starting; stop the engagement before sweeping");
+    }
+    if (task.worker && found.observation.liveness !== "dead") {
+      return verdict("held", `worker ${task.worker.id} observed ${found.observation.liveness}; only observed termination releases it`);
+    }
+    // An unattached launch is uncertain, not absent: it may be running in its reserved worktree.
+    if (!found.complete) return verdict("held", "Hermod discovery incomplete; absence proves nothing");
+    const trees = owned(id).filter(r => r.startsWith("tree:")).map(r => canonicalWorktree(r.slice("tree:".length)));
+    // A same-provider peer whose cwd Hermod could not resolve may be this task's launch.
+    const occupants = evidence.peers.filter(p => p.cwd === undefined ? p.agent === task.spec.provider
+      : trees.some(tree => (p.cwd + "/").startsWith(tree + "/"))).map(p => p.id);
+    if (occupants.length > 0) return verdict("held", `Hermod peer ${occupants.join(", ")} occupies a worktree this task owns (${trees.join(", ")})`);
+    return verdict("release", task.worker
+      ? `ticket ${ticketState}; worker ${task.worker.id} observed terminal (${found.observation.evidence.join("; ")})`
+      : `ticket ${ticketState}; no worker attached`);
+  });
 }
 
 /** Reject a malformed DAG or unspecified authority before creating any state. */
@@ -315,7 +417,14 @@ export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[
 /** One SQLite transaction serializes state and ownership, across leader processes. */
 export class GruStore {
   private db: DatabaseSync;
-  constructor(file: string) {
+  /** `readOnly` inspects an existing store without side effects on it: no directory creation,
+   * permission change, journal-mode switch, or schema DDL, and every write is refused. */
+  constructor(file: string, options: { readOnly?: boolean } = {}) {
+    if (options.readOnly) {
+      this.db = new DatabaseSync(file, { readOnly: true });
+      this.db.exec("PRAGMA busy_timeout=5000;");
+      return;
+    }
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(file);
     fs.chmodSync(file, 0o600);
@@ -328,6 +437,18 @@ export class GruStore {
     const row = this.db.prepare("SELECT body FROM runs WHERE id=?").get(id) as { body: string } | undefined;
     requireValue(row, `unknown engagement ${id}`);
     return JSON.parse(row.body) as Run;
+  }
+  /** Every engagement in this store. */
+  list(): Run[] {
+    return (this.db.prepare("SELECT body FROM runs ORDER BY id").all() as { body: string }[]).map(row => JSON.parse(row.body) as Run);
+  }
+  /** Resources this task currently owns, in a stable order. */
+  owned(id: string, taskId: string): string[] {
+    return (this.db.prepare("SELECT resource FROM owners WHERE run=? AND task=? ORDER BY resource").all(id, taskId) as { resource: string }[]).map(row => row.resource);
+  }
+  /** The release rule against this store's owner rows; `sweep` applies the same verdicts. */
+  sweepVerdicts(run: Run, evidence: SweepEvidence): SweepVerdict[] {
+    return sweepVerdicts(run, evidence, taskId => this.owned(run.config.id, taskId));
   }
   /** Every other engagement in this store, for cross-run ownership checks. */
   private others(id: string): Run[] {
@@ -365,10 +486,14 @@ export class GruStore {
     return run;
   }
   private transaction(id: string, leader: string, revision: number, fn: (run: Run) => void | boolean): Run {
+    return this.write(id, revision, run => requireValue(run.config.leader === leader, "stale leader; resume and reconcile before writing"), fn);
+  }
+  /** The fence every write shares, led or not: an exclusive re-read, then the exact revision. */
+  private write(id: string, revision: number, authorize: (run: Run) => void, fn: (run: Run) => void | boolean): Run {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const run = this.read(id);
-      requireValue(run.config.leader === leader, "stale leader; resume and reconcile before writing");
+      authorize(run);
       requireValue(run.revision === revision, `stale revision; expected ${run.revision}`);
       // A no-op transition (fn returns false) must not bump the revision or rewrite
       // state: an idempotent replay would otherwise invalidate the leader's held
@@ -453,9 +578,11 @@ export class GruStore {
     requireValue(!task.takeovers?.some(t => [t.previousSpec.worktree, t.evidence.worker.worktree].some(p => canonicalWorktree(p) === observed)),
       `worker worktree mismatch: ${observed} belongs to a fenced worker; takeover requires a fresh worktree`);
     requireValue(namesTicket(task.spec.ticket, path.basename(observed), adoption.branch), `worker worktree mismatch: ${observed} does not name ${task.spec.ticket}`);
+    // A swept task released its worktree, and `reserve` already admits the path again;
+    // its lingering declaration must not refuse the same path to adoption alone.
     const declaredBy = [run, ...this.others(run.config.id)].flatMap(r => r.tasks)
       // Stored worktrees are canonical already; compare them as `tree:` ownership keys do, off the filesystem.
-      .find(t => t !== task && path.resolve(t.spec.worktree) === observed);
+      .find(t => t !== task && t.phase !== "swept" && path.resolve(t.spec.worktree) === observed);
     requireValue(!declaredBy, `worker worktree mismatch: ${observed} is declared by ${declaredBy?.spec.ticket}`);
     this.own(run, task, [`tree:${observed}`]);
     this.respec(run, task, { ...task.spec, worktree: observed });
@@ -529,6 +656,7 @@ export class GruStore {
     return this.transaction(id, oldLeader, revision, run => {
       requireValue(nonempty(newLeader), "leader identity is required");
       requireValue(run.mode !== "complete", "engagement already complete");
+      requireValue(run.mode !== "swept", "engagement was swept; it is terminal");
       let replaced: string[] | undefined;
       if (limits !== undefined) {
         // A same-session resume is a legal no-op transfer, so without this the sitting
@@ -663,7 +791,7 @@ export class GruStore {
       requireValue(evidence.base === task.integrationBase, "integration base changed; rebase and reverify");
       for (const sha of [evidence.head, evidence.base, evidence.merge]) requireValue(/^[0-9a-f]{40,64}$/.test(sha), "invalid evidence revision");
       requireValue(nonempty(evidence.pr) && nonempty(evidence.review) && nonempty(evidence.verifiedAt), "PR, review, and verification evidence required");
-      requireValue(evidence.ticketState === "done" || evidence.ticketState === "Closed", "repository completion milestone not recorded in Alfred");
+      requireValue(ticketClosed(evidence.ticketState), "repository completion milestone not recorded in Alfred");
       requireValue(evidence.checks.length === task.spec.checks.length, "missing completion checks");
       task.spec.checks.forEach((argv, i) => requireValue(JSON.stringify(evidence.checks[i].argv) === JSON.stringify(argv) && evidence.checks[i].exitCode === 0 && nonempty(evidence.checks[i].log), "check failed, changed, or missing output"));
       // Clear `stoppedFrom` with the phase, as `reserve` and `finishReconnect` already do.
@@ -675,8 +803,8 @@ export class GruStore {
       task.evidence = structuredClone(evidence); task.phase = "done"; task.stoppedFrom = undefined;
       // Completion releases integration gates, but a saved session still owns its tree.
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND (resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%' OR resource LIKE 'exclusive:%')").run(id, taskId);
-      if (run.tasks.every(t => t.phase === "done")) run.mode = "complete";
       this.event(run, "verified", evidence.merge, taskId);
+      this.settle(run);
     });
   }
   retire(id: string, leader: string, revision: number, taskId: string, token: string, surface: string): Run {
@@ -691,6 +819,7 @@ export class GruStore {
   stop(id: string, leader: string, revision: number): Run {
     return this.transaction(id, leader, revision, run => {
       requireValue(run.mode !== "complete", "engagement already complete");
+      requireValue(run.mode !== "swept", "engagement was swept; it is terminal");
       run.mode = "stopping";
       for (const task of run.tasks.filter(active)) {
         if (task.phase !== "stopping") task.stoppedFrom = task.phase;
@@ -713,5 +842,45 @@ export class GruStore {
       if (!run.tasks.some(active)) run.mode = "stopped";
       this.event(run, "stopped", "worker terminal; worktree retained", taskId);
     });
+  }
+  /** Maintenance, not leadership: releases what `sweepVerdicts` proves dead. No leader identity
+   * is required, because the leader may be gone; the exact revision the evidence was gathered
+   * against still fences it. Verdicts are recomputed here, never trusted from the caller. */
+  sweep(id: string, revision: number, evidence: SweepEvidence, invokedBy: string | null): { run: Run; verdicts: SweepVerdict[] } {
+    let verdicts: SweepVerdict[] = [];
+    const run = this.write(id, revision, () => undefined, run => {
+      // The write fence proves the run is at `revision`, not that the evidence was read there.
+      requireValue(evidence.revision === revision, "sweep evidence was gathered at another revision; sweep again");
+      verdicts = this.sweepVerdicts(run, evidence);
+      const releases = verdicts.filter(v => v.action === "release");
+      if (releases.length === 0) return false;
+      requireValue(fresh(evidence), "sweep evidence is stale; sweep again");
+      for (const verdict of releases) {
+        const task = this.task(run, verdict.task);
+        const record: SweepRecord = { authority: SWEEP_AUTHORITY, invokedBy, leaderOfRecord: run.config.leader,
+          revision, epoch: run.epoch, verdict, ...(task.stoppedFrom ? { stoppedFrom: task.stoppedFrom } : {}),
+          ...(task.worker ? { worker: structuredClone(task.worker) } : {}),
+          evidence: { ...structuredClone(evidence.tasks[task.spec.id]), observedAt: evidence.observedAt, peers: structuredClone(evidence.peers) },
+          released: this.owned(id, task.spec.id), files: [...task.spec.files] };
+        this.db.prepare("DELETE FROM owners WHERE run=? AND task=?").run(id, task.spec.id);
+        // The record keeps the worker for audit; the task drops it, so no capacity rule or
+        // later reconcile keeps observing a released identity.
+        task.phase = "swept"; task.stoppedFrom = undefined; task.worker = undefined; task.observation = undefined; task.swept = record;
+        this.event(run, "swept", JSON.stringify(record), task.spec.id);
+      }
+      if (!this.settle(run) && run.mode === "stopping" && !run.tasks.some(active)) run.mode = "stopped";
+    });
+    return { run, verdicts };
+  }
+  /** The one terminal-mode rule `complete` and `sweep` share. Every task verified is `complete`;
+   * every task verified or swept, with at least one swept, is terminal `swept`. Applying it in
+   * `sweep` alone would leave a partially swept run `running` forever once its last task is
+   * verified: `sweep` then has no candidate left, so it never runs again to settle the mode. */
+  private settle(run: Run): boolean {
+    if (run.tasks.every(t => t.phase === "done")) { run.mode = "complete"; return true; }
+    if (!run.tasks.every(t => t.phase === "done" || t.phase === "swept")) return false;
+    run.mode = "swept";
+    this.event(run, "swept", `every task verified or released; engagement terminal (${SWEEP_AUTHORITY})`);
+    return true;
   }
 }

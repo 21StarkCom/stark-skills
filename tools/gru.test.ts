@@ -20,12 +20,13 @@ const CLI = path.join(import.meta.dirname, "gru.ts");
  * ALSO captures node:test's reporter, which flushes asynchronously — two tests silently
  * vanished from the run that way, reported as neither pass nor fail. A subprocess keeps
  * the harness's stdout untouched, exercises the real entrypoint including its exit code,
- * and needs no global env mutation. `CODEX_THREAD_ID` is cleared because it outranks
- * `CLAUDE_CODE_SESSION_ID`; a stray one would pick the identity for every case here. */
-async function run(argv: string[], leader: string, extraEnv: Record<string, string> = {}): Promise<{ code: number; out: string; error: string }> {
-  const { CODEX_THREAD_ID: _drop, ...env } = process.env;
+ * and needs no global env mutation. Every ambient session identity is cleared: `CODEX_THREAD_ID`
+ * outranks `CLAUDE_CODE_SESSION_ID`, so a stray one would pick the identity for every case here.
+ * An undefined `leader` runs the CLI the way a plain operator shell would, with no session. */
+async function run(argv: string[], leader: string | undefined, extraEnv: Record<string, string> = {}, cwd?: string): Promise<{ code: number; out: string; error: string }> {
+  const { CODEX_THREAD_ID: _codex, CLAUDE_CODE_SESSION_ID: _claude, CLAUDE_SESSION_ID: _legacy, ...env } = process.env;
   const child = spawnSync(process.execPath, [CLI, ...argv], {
-    encoding: "utf8", env: { ...env, ...extraEnv, CLAUDE_CODE_SESSION_ID: leader },
+    encoding: "utf8", cwd, env: { ...env, ...extraEnv, ...(leader === undefined ? {} : { CLAUDE_CODE_SESSION_ID: leader }) },
   });
   return { code: child.status ?? -1, out: child.stdout, error: child.stderr };
 }
@@ -78,6 +79,111 @@ console.log(JSON.stringify(verb === "msg" ? {peers: [], observedAt: new Date().t
   assert.equal(replay.code, 2);
   assert.match(replay.error, /stale revision/);
   assert.equal(store.read("cli").revision, adopted.revision);
+});
+
+test("gru CLI: sweep dry-runs by default, applies from a leaderless shell, and releases nothing when Alfred fails", async t => {
+  const { dir, state, file } = engagement(t);
+  const config = JSON.parse(fs.readFileSync(file, "utf8"));
+  const store = new GruStore(state); t.after(() => store.close());
+  // The incident shape: reserved, never attached, then stopped.
+  let current = store.create(config);
+  current = store.reconcile("cli", "leader-one", current.revision, {});
+  current = store.reserve("cli", "leader-one", current.revision, "t");
+  current = store.reconcile("cli", "leader-one", current.revision, { t: { observedAt: new Date().toISOString(),
+    liveness: "unknown", activity: "unknown", evidence: [] } });
+  current = store.stop("cli", "leader-one", current.revision);
+  const bin = path.join(dir, "bin"); fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "hermod"), `#!/usr/bin/env node
+console.log(JSON.stringify(process.argv[2] === "sessions" ? {sessions: [], totalMatches: 0} : {peers: [], observedAt: new Date().toISOString(), incomplete: false}));
+`, { mode: 0o755 });
+  // Like the real Alfred, work verbs refuse outside a git checkout: the recorded repo here.
+  const alfred = (ticketState: string | null) => fs.writeFileSync(path.join(bin, "alfred"), `#!/usr/bin/env node
+if (process.cwd() !== ${JSON.stringify(fs.realpathSync(config.tasks[0].repo))}) { console.error("alfred: not a git repo — work verbs refuse"); process.exit(2); }
+${ticketState === null ? 'console.error("ClickUp unreachable"); process.exit(1);'
+    : `console.log(JSON.stringify({item: {ref: {custom_id: process.argv[4]}, state: ${JSON.stringify(ticketState)}}, comments: [], comments_read: true}));`}
+`, { mode: 0o755 });
+  // Invoked from a directory that is not a repository, as a machine-wide clean would be.
+  const sweep = (...extra: string[]) => run(["sweep", "--state", state, ...extra], undefined, { PATH: `${bin}${path.delimiter}${process.env.PATH}` }, dir);
+  const held = ["ticket:STARK-1", `tree:${config.tasks[0].worktree}`];
+  // A writable open would chmod the store to 0600; a preview must leave it exactly as found.
+  fs.chmodSync(state, 0o640);
+
+  alfred("in progress");
+  const open = await sweep();
+  assert.equal(open.code, 0, open.error);
+  assert.equal(JSON.parse(open.out).runs[0].tasks[0].action, "held");
+  assert.match(JSON.parse(open.out).runs[0].tasks[0].reason, /STARK-1 is in progress/);
+
+  alfred("Closed");
+  const dry = await sweep();
+  assert.equal(dry.code, 0, dry.error);
+  const planned = JSON.parse(dry.out);
+  assert.equal(planned.apply, false);
+  assert.deepEqual(planned.runs[0].tasks.map((v: { action: string; resources: string[] }) => [v.action, v.resources]), [["release", held]]);
+  assert.equal(store.read("cli").revision, current.revision, "a dry run mutates nothing");
+  assert.equal(fs.statSync(state).mode & 0o777, 0o640, "a dry run opens the store read-only");
+  // No store yet means nothing to release, and neither mode creates one.
+  const absent = path.join(dir, "absent", "state.sqlite");
+  for (const mode of [[], ["--apply"]]) {
+    const empty = await run(["sweep", "--state", absent, ...mode], undefined, {}, dir);
+    assert.equal(empty.code, 0, empty.error);
+    assert.deepEqual(JSON.parse(empty.out).runs, []);
+  }
+  const named = await run(["sweep", "--state", absent, "--run", "cli"], undefined, {}, dir);
+  assert.equal(named.code, 2);
+  assert.match(named.error, /unknown engagement cli/);
+  assert.equal(fs.existsSync(path.dirname(absent)), false);
+
+  alfred(null);
+  const down = await sweep("--apply");
+  assert.equal(down.code, 2);
+  assert.match(down.error, /alfred failed \(1\): ClickUp unreachable/);
+  assert.equal(store.read("cli").revision, current.revision);
+  assert.deepEqual(store.owned("cli", "t"), held);
+
+  alfred("Closed");
+  const applied = await sweep("--apply", "--run", "cli");
+  assert.equal(applied.code, 0, applied.error);
+  const result = JSON.parse(applied.out).runs[0];
+  assert.deepEqual([result.applied, result.modeAfter, result.revisionAfter], [true, "swept", current.revision + 1]);
+  const after = store.read("cli");
+  assert.equal(after.tasks[0].phase, "swept");
+  assert.equal(after.tasks[0].swept!.invokedBy, null);
+  assert.deepEqual(after.tasks[0].swept!.released, held);
+  assert.deepEqual(store.owned("cli", "t"), []);
+  const status = await run(["status", "--run", "cli", "--state", state], "leader-one");
+  assert.equal(status.code, 0, status.error);
+  assert.deepEqual(JSON.parse(status.out).waiting, [], "a swept task is terminal, not outstanding work");
+  // Nothing left to release: the store-wide sweep lists no run, a named one lists no task.
+  assert.deepEqual(JSON.parse((await sweep("--apply")).out).runs, []);
+  assert.deepEqual(JSON.parse((await sweep("--run", "cli")).out).runs[0].tasks, []);
+  assert.equal(store.read("cli").revision, after.revision);
+  // A `--run` sweep of an engagement whose only repository Alfred cannot read from still
+  // reads its ticket through another repository the store records.
+  const foreign = path.join(dir, "foreign-repo"); fs.mkdirSync(path.join(foreign, "wt"), { recursive: true });
+  let other = store.create({ ...config, id: "foreign", tasks: [{ ...config.tasks[0], ticket: "STARK-2", repo: foreign,
+    worktree: path.join(foreign, "wt"), files: ["b.ts"] }] });
+  other = store.reconcile("foreign", "leader-one", other.revision, {});
+  other = store.reserve("foreign", "leader-one", other.revision, "t");
+  store.stop("foreign", "leader-one", other.revision);
+  const borrowed = await sweep("--run", "foreign");
+  assert.equal(borrowed.code, 0, borrowed.error);
+  assert.deepEqual(JSON.parse(borrowed.out).runs[0].tasks.map((v: { action: string }) => v.action), ["release"]);
+});
+
+test("gru CLI: sweep flags are refused where they would be silently ignored", async t => {
+  const { state } = engagement(t);
+  const wrongVerb = await run(["status", "--run", "cli", "--state", state, "--apply"], "leader-one");
+  assert.equal(wrongVerb.code, 2);
+  assert.match(wrongVerb.error, /--apply applies to sweep, not status/);
+  for (const flag of ["--task", "--revision"]) {
+    const narrowed = await run(["sweep", "--state", state, flag, "t"], undefined);
+    assert.equal(narrowed.code, 2);
+    assert.match(narrowed.error, new RegExp(`${flag} does not apply to sweep`));
+  }
+  const unidentified = await run(["status", "--run", "cli", "--state", state], undefined);
+  assert.equal(unidentified.code, 2);
+  assert.match(unidentified.error, /current session identity unavailable/, "only sweep runs without a session");
 });
 
 function engagement(t: TestContext) {
@@ -295,6 +401,8 @@ test("verifyBlocker names the command that actually repairs each phase", () => {
   // `integrate` only accepts phase `review`, so a stopped task must hear `continue`.
   assert.match(at("stopped"), /continue it/);
   assert.match(at("working"), /report ready and receive integration/);
+  // Checked before any grant branch: a swept task has no repair, only an explanation.
+  assert.match(at("swept"), /released by a proof-based sweep; it cannot be verified/);
 
   // Reaching `review` IS the READY report, so the generic default told a task to take a
   // step it had already taken and never named `integrate` — the one command that applies.

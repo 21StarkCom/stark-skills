@@ -6,7 +6,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
-import { canonicalRepository, checkLeadershipTransfer, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -32,9 +32,11 @@ Usage: node tools/gru.ts <command> [options]
   interrupt    --run ID --revision N --task ID --token TOKEN
   stopped      --run ID --revision N --task ID --token TOKEN
   retire       --run ID --revision N --task ID --token TOKEN
+  sweep        [--run ID] [--apply]
 
 Every command returns JSON. packet returns the complete worker brief as text.
-Writes require the current leader identity and an exact state revision.
+Writes require the current leader identity and an exact state revision; sweep is
+the one maintenance write that needs no leader.
 The leader identity is CODEX_THREAD_ID or CLAUDE_CODE_SESSION_ID from the
 environment (legacy CLAUDE_SESSION_ID is accepted); --leader is the fallback.
 State defaults to ~/.stark/gru/state.sqlite, shared across runtimes.
@@ -43,10 +45,10 @@ State defaults to ~/.stark/gru/state.sqlite, shared across runtimes.
 reserve records intent, not successful startup. Launch through Hermod only.
 attach requires a live Hermod peer; receive requires a confirmed worker message.
 A peer outside the declared worktree attaches only from a linked worktree root of the
-same repository whose directory or branch names the ticket, with no other task
-declaring or owning it and no takeover having fenced it; attach then adopts that path,
-audited, and issues a new token for the fresh packet. Anything else refuses, as does
-the leader's own session.
+same repository whose directory or branch names the ticket, with no other unswept task
+declaring it, no other task owning it, and no takeover having fenced it; attach then
+adopts that path, audited, and issues a new token for the fresh packet. Anything else
+refuses, as does the leader's own session; identity refusals are named before git is read.
 reconcile never equates missing discovery with death. Keep uncertain reservations.
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
@@ -63,6 +65,16 @@ No command publishes, changes authentication, or deletes worker/session worktree
 takeover requires explicit operator authorization bound to the run/task/token/revision.
 It checks complete Hermod absence, fences the old worker, preserves budgets and merge
 ownership, and permits an explicitly selected provider/new worktree. Unknown stays unknown.
+sweep releases a held task only on proof, never on elapsed time: Alfred (read from a
+recorded repository, else this directory, that reads the handle) reports its ticket
+done or Closed, it holds no integration grant or uncertain reconnect, it is not a
+reserved launch in a running engagement, any bound worker is observed terminal, and
+complete Hermod discovery finds no live or uncertain peer, and no saved session whose
+pid probes alive, in any worktree it owns.
+Without --run it evaluates every engagement.
+It is a read-only dry run unless --apply; --apply fences on the exact revision, records
+a swept event naming the proof, and ends a run whose tasks are all verified or
+released. Alfred or Hermod failure exits non-zero with nothing released.
 `;
 
 /** Explain why `verificationReady` refused, naming the command that actually repairs it.
@@ -79,6 +91,7 @@ ownership, and permits an explicitly selected provider/new worktree. Unknown sta
  * can never reach this function; a branch for it is dead text that reads as live guidance.
  * `gru_lib.test.ts` pins that invariant. */
 export function verifyBlocker(task: Assignment): string {
+  if (task.phase === "swept") return "task was released by a proof-based sweep; it cannot be verified";
   if (task.reconnect?.pending) return "reconnect outcome is uncertain; observe it before verification";
   if (!task.integrationBase) {
     // Phase-aware, because this branch — not the switch — is the one an ordinary `review`
@@ -116,6 +129,36 @@ const canonicalLeaf = (p: string): string => {
   }
 };
 
+/** Report each held task as `release` or `held`; with `apply`, release through the store. */
+async function sweep(store: GruStore | null, runId: string | undefined, apply: boolean, invokedBy: string | null): Promise<number> {
+  if (store === null && runId !== undefined) throw new Error(`unknown engagement ${runId}`);
+  const all = store === null ? [] : store.list();
+  const runs = runId === undefined ? all : [store!.read(runId)];
+  // Gather everything before writing anything: an Alfred or Hermod failure releases nothing.
+  // Every repository the store records is an Alfred context, even when --run narrows the sweep.
+  const repositories = all.flatMap(run => run.config.tasks.map(task => task.repo));
+  const evidence = await observeSweep(runs, undefined, repositories);
+  let failed = false;
+  const report = runs.filter(run => runId !== undefined || evidence.has(run.config.id)).map(run => {
+    const id = run.config.id;
+    const gathered = evidence.get(id);
+    const verdicts = gathered ? store!.sweepVerdicts(run, gathered) : [];
+    const entry = { run: id, mode: run.mode, revision: run.revision, leader: run.config.leader,
+      tasks: verdicts.map(v => ({ ...v, resources: store!.owned(id, v.task), files: run.tasks.find(t => t.spec.id === v.task)!.spec.files })) };
+    if (!apply || !gathered || !verdicts.some(v => v.action === "release")) return entry;
+    try {
+      const swept = store!.sweep(id, run.revision, gathered, invokedBy);
+      return { ...entry, applied: true, modeAfter: swept.run.mode, revisionAfter: swept.run.revision };
+    } catch (error) {
+      failed = true;
+      process.stderr.write(`gru: sweep ${id}: ${(error as Error).message}\n`);
+      return { ...entry, applied: false, error: (error as Error).message };
+    }
+  });
+  process.stdout.write(JSON.stringify({ apply, runs: report }, null, 2) + "\n");
+  return failed ? 2 : 0;
+}
+
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   // Only a leading `help` verb or a real `--help`/`-h` flag: a bare "help" scanned
   // anywhere in argv turns a flag VALUE (--run help, --task help) into a silent exit-0 no-op.
@@ -123,8 +166,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   let store: GruStore | undefined;
   try {
     const verb = argv[0];
-    const { values } = parseArgs({ args: argv.slice(1), strict: true, options: Object.fromEntries(
-      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader", "limits-file"].map(key => [key, { type: "string" as const }])) });
+    const options: Record<string, { type: "string" | "boolean" }> = { apply: { type: "boolean" }, ...Object.fromEntries(
+      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader", "limits-file"].map(key => [key, { type: "string" }])) };
+    const { values } = parseArgs({ args: argv.slice(1), strict: true, options });
     const flag = (name: string): string => {
       const value = values[name];
       if (typeof value !== "string" || !value) throw new Error(`--${name} is required`);
@@ -138,6 +182,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       throw new Error(`--limits-file applies to resume, not ${verb}`);
     }
     if (!["init", "takeover"].includes(verb) && values.file !== undefined) throw new Error(`--file applies to init or takeover, not ${verb}`);
+    if (verb !== "sweep" && values.apply !== undefined) throw new Error(`--apply applies to sweep, not ${verb}`);
+    // sweep evaluates whole engagements: a --task it ignored would read as a narrowed sweep.
+    const unused = verb === "sweep" && Object.keys(values).find(key => !["run", "apply", "state", "leader"].includes(key));
+    if (unused) throw new Error(`--${unused} does not apply to sweep`);
     // Read a JSON file named by a flag, attributing any failure to the FLAG and the PATH.
     // A bare `JSON.parse` surfaces "Unexpected token } in JSON at position 41" — an offset
     // into an unnamed buffer. The operator is running several files through several flags;
@@ -158,9 +206,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     };
     // Claude Code exports CLAUDE_CODE_SESSION_ID to its shells; CLAUDE_SESSION_ID is the older name.
     const identity = process.env.CODEX_THREAD_ID || process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID || values.leader;
-    if (!identity || typeof identity !== "string") throw new Error("current session identity unavailable; supply --leader SESSION");
     if (values.leader && values.leader !== identity) throw new Error("--leader differs from the runtime session identity");
     const statePath = typeof values.state === "string" ? path.resolve(values.state) : path.join(os.homedir(), ".stark", "gru", "state.sqlite");
+    // sweep is maintenance, not leadership: it runs from any shell and records the invoker it has.
+    if (verb === "sweep") {
+      const runId = values.run === undefined ? undefined : flag("run");
+      const apply = values.apply === true;
+      // A dry run is a preview: it opens the store read-only, and neither mode creates a store
+      // that does not exist yet — there is nothing in it to release.
+      if (fs.existsSync(statePath)) store = new GruStore(statePath, { readOnly: !apply });
+      return await sweep(store ?? null, runId, apply, typeof identity === "string" ? identity : null);
+    }
+    if (!identity || typeof identity !== "string") throw new Error("current session identity unavailable; supply --leader SESSION");
     store = new GruStore(statePath);
     const emit = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + "\n");
     if (verb === "init") {
@@ -184,7 +241,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (verb === "status") {
       const reasons = store.readyReasons(run);
       emit({ ...run, ready: run.tasks.filter(t => reasons.get(t.spec.id) === null).map(t => t.spec.id),
-        waiting: run.tasks.filter(t => t.phase !== "done").map(t => ({ task: t.spec.id, reason: reasons.get(t.spec.id) })) }); return 0;
+        waiting: run.tasks.filter(t => t.phase !== "done" && t.phase !== "swept").map(t => ({ task: t.spec.id, reason: reasons.get(t.spec.id) })) }); return 0;
     }
     const task = (token?: string) => {
       const found = run.tasks.find(t => t.spec.id === flag("task"));

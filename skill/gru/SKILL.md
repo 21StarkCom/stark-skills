@@ -162,6 +162,9 @@ use the [operator takeover contract](references/operations.md#operator-takeover-
 `takeover` records the direct operator instruction and rechecks complete Hermod
 absence; it never turns unknown into dead or resets budgets. Normal recovery stays
 fail-closed. Do not invent authorization or edit the database to release ownership.
+A finished ticket's reservation that outlived its run is released by
+[proof-based sweep](references/operations.md#proof-based-sweep-of-dead-reservations)
+only: closed ticket, no live bound peer, never age. Apply it at the operator's direction.
 
 Resume from the saved run, not a reconstructed conversation summary.
 Reconnect its existing worker identities before considering replacements.

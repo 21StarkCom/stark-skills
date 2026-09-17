@@ -4,8 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { ADOPTION_CHECKS, assertAbsentWorktree, canonicalWorktree, namesTicket, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, verificationReady } from "./gru_lib.ts";
-import type { Assignment, CompletionEvidence, Observation, OrphanEvidence, Provider, Run, Worker, WorktreeAdoption } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, assertAbsentWorktree, canonicalWorktree, fresh, namesTicket, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, sweepCandidates, verificationReady } from "./gru_lib.ts";
+import type { Assignment, CompletionEvidence, Observation, OrphanEvidence, Provider, Run, SweepEvidence, Worker, WorktreeAdoption } from "./gru_lib.ts";
 
 export interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut?: boolean }
 export type Command = (argv: string[], cwd?: string, timeoutMs?: number) => Promise<CommandResult>;
@@ -38,7 +38,7 @@ export interface HermodPeer {
   messaging: { available: boolean };
 }
 export interface Discovery { peers: HermodPeer[]; observedAt: string; incomplete?: boolean }
-export interface SavedSession { sessionId: string; agent: string; surfaceId?: string; pid?: number; alive?: boolean }
+export interface SavedSession { sessionId: string; agent: string; surfaceId?: string; cwd?: string; pid?: number; alive?: boolean }
 /** `provider` scopes Hermod's `incomplete` flag to that runtime's namespace; unscoped, one
  *  uninspectable process of any provider anywhere on the host taints the whole fleet. */
 export async function discover(call: Command = command, provider?: Provider): Promise<Discovery> {
@@ -122,6 +122,12 @@ export function observations(run: Run, discoveries: Discoveries, sessions: Saved
         : retired ? [`Hermod closed surface ${task.retired!.surface}; complete discovery finds no live session`] : [] } as Observation];
   }));
 }
+/** Every saved session Hermod knows, refusing a truncated listing. */
+async function savedSessions(call: Command): Promise<SavedSession[]> {
+  const sessions = JSON.parse(await checked(call, ["hermod", "sessions", "--all", "--json"]));
+  if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
+  return sessions.sessions;
+}
 export async function observeWorkers(run: Run, call: Command = command): Promise<Record<string, Observation>> {
   const groups = new Map<Provider | undefined, Assignment[]>();
   for (const task of run.tasks) {
@@ -129,13 +135,82 @@ export async function observeWorkers(run: Run, call: Command = command): Promise
     if (!groups.has(provider)) groups.set(provider, []);
     groups.get(provider)!.push(task);
   }
-  const [views, saved] = await Promise.all([
+  const [views, sessions] = await Promise.all([
     Promise.all([...groups].map(async ([provider, tasks]) => ({ tasks, peers: await discover(call, provider) }))),
-    checked(call, ["hermod", "sessions", "--all", "--json"]),
+    savedSessions(call),
   ]);
-  const sessions = JSON.parse(saved);
-  if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
-  return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions.sessions)));
+  return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions)));
+}
+/** Alfred's state for a ticket, refusing evidence for another ticket or an unread thread. */
+export async function readTicketState(ticket: string, call: Command = command, cwd?: string): Promise<string> {
+  const value = JSON.parse(await checked(call, ["alfred", "task", "show", ticket, "--json"], cwd));
+  if (value.item?.ref?.custom_id !== ticket || value.comments_read !== true || !Array.isArray(value.comments) ||
+    typeof value.item.state !== "string" || !value.item.state) throw new Error("Alfred ticket evidence incomplete");
+  return value.item.state;
+}
+/** Alfred states for STARK tickets, read from one context that can read them.
+ * Every Gru ticket is a ClickUp `STARK-n` handle, but Alfred binds its provider from the cwd
+ * checkout's origin org and refuses outside a checkout, so a task's own repository can be
+ * Jira-bound and read its handle as missing. The first context yielding validated evidence for
+ * the first ticket reads the rest; nothing is inferred from a failure, and if no context reads,
+ * every context's error is reported. `undefined` is the caller's directory. */
+async function readTicketStates(tickets: readonly string[], contexts: readonly (string | undefined)[], call: Command): Promise<Record<string, string>> {
+  const failures: string[] = [];
+  for (const cwd of contexts) {
+    let first: string;
+    try {
+      first = await readTicketState(tickets[0], call, cwd);
+    } catch (error) {
+      failures.push(`${cwd ?? "current directory"}: ${(error as Error).message.trim()}`);
+      continue;
+    }
+    const rest = await Promise.all(tickets.slice(1).map(async ticket => [ticket, await readTicketState(ticket, call, cwd)] as const));
+    return Object.fromEntries([[tickets[0], first], ...rest]);
+  }
+  throw new Error(`no Alfred context read ${tickets[0]}: ${failures.join("; ")}`);
+}
+/** Evidence for `sweep`, per run: each held task's ticket state, its bound worker observed
+ * under `reconcile`'s rules, and every live or uncertain peer's location, which the store
+ * checks against the worktrees the task owns. Any Alfred or Hermod failure rejects the
+ * whole gathering, so nothing is released. `repositories` offers further Alfred contexts,
+ * such as every repository recorded in the store: `--run` on a Jira-bound engagement has
+ * no ClickUp checkout of its own. */
+export async function observeSweep(runs: readonly Run[], call: Command = command, repositories: readonly string[] = []): Promise<Map<string, SweepEvidence>> {
+  const held = runs.map(run => ({ run, tasks: sweepCandidates(run) })).filter(entry => entry.tasks.length > 0);
+  if (held.length === 0) return new Map();
+  // Stamp before the commands run: slow discovery must not make old evidence look fresh.
+  const observedAt = new Date().toISOString();
+  const all = held.flatMap(entry => entry.tasks);
+  // The unscoped namespace is always read too: an `--agent` view omits ACP peers and every
+  // other provider, and a session of any of them can occupy a reserved worktree.
+  const providers = [...new Set([...all.map(task => discoveryProvider(task.spec.provider, task.worker?.id)), undefined])];
+  // A machine-wide sweep runs from anywhere: try the swept tasks' repositories, the other
+  // offered repositories, then the caller's directory.
+  const contexts = [...new Set<string | undefined>([...all.map(task => task.spec.repo), ...repositories, undefined])];
+  const [tickets, views, sessions] = await Promise.all([
+    readTicketStates([...new Set(all.map(task => task.spec.ticket))], contexts, call),
+    Promise.all(providers.map(async provider => [provider, await discover(call, provider)] as const)),
+    savedSessions(call),
+  ]);
+  const discoveries = new Map(views);
+  for (const discovery of discoveries.values()) if (!fresh(discovery)) throw new Error("Hermod discovery stale; nothing swept");
+  // Canonicalize each live or uncertain peer's cwd once, not once per task.
+  const unscoped = discoveries.get(undefined)!;
+  const located = (cwd?: string) => typeof cwd === "string" ? { cwd: canonicalWorktree(cwd) } : {};
+  const current = unscoped.peers.filter(p => p.liveness !== "stale");
+  const listed = new Set(current.map(p => p.threadId || p.sessionId));
+  // A saved session whose pid probes alive is a running process in its cwd even when the peer
+  // view does not list it (takeover's absence checks read both sources for the same reason).
+  const peers = [...current.map(p => ({ id: p.id, agent: p.agent, ...located(p.cwd) })),
+    ...sessions.filter(s => s.alive === true && !listed.has(s.sessionId))
+      .map(s => ({ id: `session:${s.sessionId}`, agent: s.agent, ...located(s.cwd) }))];
+  return new Map(held.map(({ run, tasks }) => [run.config.id, { observedAt, revision: run.revision, tickets, peers,
+    tasks: Object.fromEntries(tasks.map(task => {
+      const discovery = discoveries.get(discoveryProvider(task.spec.provider, task.worker?.id))!;
+      const observation = observations({ ...run, tasks: [task] }, discovery, sessions)[task.spec.id];
+      // Occupancy is read from the unscoped view, so claiming none needs that view complete too.
+      return [task.spec.id, { observation, complete: !discovery.incomplete && !unscoped.incomplete }];
+    })) }]));
 }
 /** Git evidence that an observed worker's checkout can replace the declared worktree.
  * Hermod v0.17.4 places Claude at `<repo>/.claude/worktrees/<ticket>` and Codex at
@@ -379,10 +454,9 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
       if (result.code !== 0 || result.timedOut) throw new Error(`independent check ${result.timedOut ? "timed out" : "failed"}; evidence: ${log}`);
       checks.push({ argv, exitCode: result.code, log });
     }
-    const ticket = JSON.parse(await checked(call, ["alfred", "task", "show", task.spec.ticket, "--json"], repoDir));
-    if (ticket.item?.ref?.custom_id !== task.spec.ticket || ticket.comments_read !== true || !Array.isArray(ticket.comments)) throw new Error("Alfred ticket evidence incomplete");
+    const ticketState = await readTicketState(task.spec.ticket, call, repoDir);
     const proof = { head: pr.head.sha, base: task.integrationBase, merge: pr.merge_commit_sha,
-      pr: pr.html_url, review: review.html_url, checks, verifiedAt: new Date().toISOString(), ticketState: ticket.item.state };
+      pr: pr.html_url, review: review.html_url, checks, verifiedAt: new Date().toISOString(), ticketState };
     fs.writeFileSync(path.join(evidenceDir, `completion-${task.token}.json`), JSON.stringify({ ...proof, verifiedMain: baseTip, prRecord: pr, reviewRecord: review }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
     return proof;
   } catch (error) {
