@@ -120,6 +120,8 @@ ${ticketState === null ? 'console.error("ClickUp unreachable"); process.exit(1);
   const planned = JSON.parse(dry.out);
   assert.equal(planned.apply, false);
   assert.deepEqual(planned.runs[0].tasks.map((v: { action: string; resources: string[] }) => [v.action, v.resources]), [["release", held]]);
+  // The verdict reports released owner rows only; declared files stopped being ownership in STARK-5049.
+  assert.equal("files" in planned.runs[0].tasks[0], false);
   assert.equal(store.read("cli").revision, current.revision, "a dry run mutates nothing");
   assert.equal(fs.statSync(state).mode & 0o777, 0o640, "a dry run opens the store read-only");
   // No store yet means nothing to release, and neither mode creates one.

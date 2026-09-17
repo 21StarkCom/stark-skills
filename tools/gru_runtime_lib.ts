@@ -358,6 +358,10 @@ export function packet(run: Run, task: Assignment): string {
     `Done-when: ${task.spec.doneWhen}`,
     `Files/directories: ${JSON.stringify(task.spec.files)}`,
     "Keep edits within those declared files/directories; report any needed scope expansion to Gru.",
+    // The /minion contract says this too, but the packet is the only brief every worker gets:
+    // the line above tells it to run the skill "if available". Without this, a worker that sees a
+    // sibling task's PR touching its files reports `blocked` — the stall STARK-5049 removed.
+    "Another task may declare overlapping files; implement anyway and reconcile them at your rebase before merge.",
     ...(task.integrationBase ? [
       `Pending integration base: ${task.integrationBase}. Existing report: ${JSON.stringify(task.report ?? null)}`,
       "Before new work, ask Gru to inspect the existing PR's merge outcome. Do not duplicate that PR.",

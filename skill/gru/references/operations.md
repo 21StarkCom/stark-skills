@@ -58,6 +58,11 @@ Release files can be modeled as integration resources.
 Declared files scope each worker's brief; overlapping files never block dispatch.
 Each worker edits its own worktree, and tasks touching the same files reconcile at the
 rebase before merge (a 3-way merge), one merge at a time under the repository's merge lock.
+That holds only if you grant `integrate` at the base the previous merge produced —
+its verified `merge` commit, not a tip you observed before it: the store validates
+the SHA's shape alone (40 to 64 hex characters), and `verify` only requires that base
+in the merged head's ancestry, so a stale grant lets a diff built without the other
+task's changes squash cleanly whenever git sees no textual conflict.
 
 ## Durable commands
 
@@ -377,10 +382,11 @@ The transaction fences the old token immediately, retains all former identity an
 worktree reservations, preserves spent attempts/recoveries and pending integration
 ownership, and records the request, observation, prior spec, limits and PR report.
 It moves the assignment to `pending`, retaining its exclusive resources against
-competing tasks; a subsequent `reserve` spends the next launch
-attempt and supplies a fresh token. The packet includes the prior report so an
-existing PR is continued, not duplicated. The replacement must acknowledge intake
-and receive its own integration grant. Never resume a fenced old session.
+competing tasks and engagements (`exclusive:` owner rows are global); a subsequent
+`reserve` spends the next launch attempt and supplies a fresh token. The packet
+includes the prior report so an existing PR is continued, not duplicated. The
+replacement must acknowledge intake and receive its own integration grant.
+Never resume a fenced old session.
 
 ### Proof-based sweep of dead reservations
 

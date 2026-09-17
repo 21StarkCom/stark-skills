@@ -175,7 +175,6 @@ export interface SweepRecord {
   worker?: Worker;
   evidence: SweepTaskEvidence & { observedAt: string; peers: SweepPeer[] };
   released: string[];
-  files: string[];
 }
 export interface Assignment {
   spec: TaskSpec;
@@ -863,7 +862,7 @@ export class GruStore {
           revision, epoch: run.epoch, verdict, ...(task.stoppedFrom ? { stoppedFrom: task.stoppedFrom } : {}),
           ...(task.worker ? { worker: structuredClone(task.worker) } : {}),
           evidence: { ...structuredClone(evidence.tasks[task.spec.id]), observedAt: evidence.observedAt, peers: structuredClone(evidence.peers) },
-          released: this.owned(id, task.spec.id), files: [...task.spec.files] };
+          released: this.owned(id, task.spec.id) };
         this.db.prepare("DELETE FROM owners WHERE run=? AND task=?").run(id, task.spec.id);
         // The record keeps the worker for audit; the task drops it, so no capacity rule or
         // later reconcile keeps observing a released identity.

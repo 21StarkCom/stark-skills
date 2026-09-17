@@ -74,7 +74,8 @@ Read repository instructions, ticket descriptions, and every ticket comment.
 Check dependencies against the accepted spec and current repository state.
 Derive exact done-whens, verification commands, and completion milestones.
 Identify fixed ports, databases, and release files as exclusive or integration resources.
-Overlapping files do not block dispatch; they reconcile at rebase under the merge lock.
+Overlapping files do not block dispatch; they reconcile at rebase under the merge lock,
+which is sound only while each grant names the base the previous merge produced.
 Capture these facts and authorized limits in the engagement input.
 Declare each `worktree` where Hermod places that provider's worker: Claude at
 `<repo>/.claude/worktrees/<ticket>`, Codex at `<main checkout>/.worktrees/<ticket>`
@@ -152,7 +153,8 @@ Post every finding using the repository's approved review-posting path.
 Resolve or answer every finding before authorizing integration.
 
 Hold Gru's integration reservation across rebase, regeneration, tests, and merge.
-Grant integration to one specific assignment and current base SHA.
+Grant integration to one specific assignment at the base the previous merge
+produced (its verified `merge` commit), never one observed before it.
 After merging, independently inspect the actual PR and merge ancestry.
 Rerun completion checks against the fetched base in an isolated verifier.
 Confirm review evidence covers the final PR head.
