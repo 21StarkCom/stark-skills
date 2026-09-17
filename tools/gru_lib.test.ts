@@ -1062,6 +1062,23 @@ test("sweep holds integration grants, uncertain reconnects, and launches Hermod 
   const sessioned = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed, sessions, peers: [listedPeer] }));
   assert.deepEqual(sessioned.map(v => v.action), ["held", "release"]);
   assert.equal(sessioned[0].reason, "Hermod peer session:unlisted occupies a worktree this task owns (/worktrees/one)");
+  // Hermod places a launch at its own path, not the declared one: a launch that never attached
+  // owns no `tree:` row where it actually runs, so a live peer in a directory naming the ticket holds.
+  const placedLaunch = { ...foreign, id: "claude:placed", cwd: "/repo/.claude/worktrees/STARK-101/tools" };
+  const longerTicket = { ...foreign, id: "claude:longer", cwd: "/repo/.claude/worktrees/STARK-1000" };
+  const misplaced = other.sweepVerdicts(launches, await sweepEvidence(launches, { tickets: closed, peers: [placedLaunch, longerTicket] }));
+  assert.deepEqual(misplaced.map(v => v.action), ["release", "held"], "STARK-1000 never names STARK-100");
+  assert.equal(misplaced[1].reason, "Hermod peer claude:placed (/repo/.claude/worktrees/STARK-101/tools) works in a directory naming STARK-101; it may be this task's launch outside the worktrees it owns");
+  // An empty or relative cwd names no place; it must not resolve against the sweeper's own directory.
+  for (const cwd of ["", "worktrees/one"]) {
+    const gathered = await sweepEvidence(launches, { tickets: closed, peers: [{ ...livePeer("blank"), cwd }] });
+    // Both layers: the gatherer drops the cwd, and the store's rule refuses one it is handed directly.
+    for (const evidence of [gathered, { ...gathered, peers: [{ id: "codex:blank", agent: "codex", cwd }] }]) {
+      const blank = other.sweepVerdicts(launches, evidence);
+      assert.deepEqual(blank.map(v => v.action), ["held", "held"], `cwd ${JSON.stringify(cwd)} is unresolved`);
+      assert.match(blank[0].reason, /Hermod peer codex:blank occupies a worktree this task owns/);
+    }
+  }
 });
 
 test("sweep fails closed: unreachable Alfred or Hermod, stale evidence, and a moved revision release nothing", async t => {
@@ -1088,6 +1105,9 @@ test("sweep fails closed: unreachable Alfred or Hermod, stale evidence, and a mo
   assert.throws(() => store.sweep("demo", run.revision, { ...evidence, tasks: {} }, null), /sweep evidence is missing one/);
   // The write fence alone proves the run's revision, not the revision the evidence was read at.
   assert.throws(() => store.sweep("demo", run.revision, { ...evidence, revision: run.revision - 1 }, null), /gathered at another revision/);
+  // Nor the engagement: a corrected run repeats task ids, tickets, and possibly the revision.
+  assert.throws(() => store.sweep("demo", run.revision, { ...evidence, run: "retry" }, null), /gathered for engagement retry, not demo/);
+  assert.throws(() => store.sweepVerdicts(run, { ...evidence, run: "retry" }), /gathered for engagement retry/);
   const moved = observe(store, run, "unknown");
   assert.throws(() => store.sweep("demo", run.revision, evidence, null), /stale revision/);
   assert.deepEqual(store.read("demo"), stored(moved));

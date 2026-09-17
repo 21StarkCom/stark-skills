@@ -122,11 +122,15 @@ export function observations(run: Run, discoveries: Discoveries, sessions: Saved
         : retired ? [`Hermod closed surface ${task.retired!.surface}; complete discovery finds no live session`] : [] } as Observation];
   }));
 }
-/** Every saved session Hermod knows, refusing a truncated listing. */
-async function savedSessions(call: Command): Promise<SavedSession[]> {
-  const sessions = JSON.parse(await checked(call, ["hermod", "sessions", "--all", "--json"]));
+/** `hermod sessions --all --json` output, refusing a truncated listing. */
+function parseSavedSessions(raw: string): SavedSession[] {
+  const sessions = JSON.parse(raw);
   if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
   return sessions.sessions;
+}
+/** Every saved session Hermod knows, refusing a truncated listing. */
+async function savedSessions(call: Command): Promise<SavedSession[]> {
+  return parseSavedSessions(await checked(call, ["hermod", "sessions", "--all", "--json"]));
 }
 export async function observeWorkers(run: Run, call: Command = command): Promise<Record<string, Observation>> {
   const groups = new Map<Provider | undefined, Assignment[]>();
@@ -196,7 +200,9 @@ export async function observeSweep(runs: readonly Run[], call: Command = command
   for (const discovery of discoveries.values()) if (!fresh(discovery)) throw new Error("Hermod discovery stale; nothing swept");
   // Canonicalize each live or uncertain peer's cwd once, not once per task.
   const unscoped = discoveries.get(undefined)!;
-  const located = (cwd?: string) => typeof cwd === "string" ? { cwd: canonicalWorktree(cwd) } : {};
+  // Only an absolute cwd names a place: `canonicalWorktree` would resolve "" or a relative path
+  // against this process's own directory and hide an unresolved same-provider peer.
+  const located = (cwd?: string) => typeof cwd === "string" && path.isAbsolute(cwd) ? { cwd: canonicalWorktree(cwd) } : {};
   const current = unscoped.peers.filter(p => p.liveness !== "stale");
   const listed = new Set(current.map(p => p.threadId || p.sessionId));
   // A saved session whose pid probes alive is a running process in its cwd even when the peer
@@ -204,7 +210,7 @@ export async function observeSweep(runs: readonly Run[], call: Command = command
   const peers = [...current.map(p => ({ id: p.id, agent: p.agent, ...located(p.cwd) })),
     ...sessions.filter(s => s.alive === true && !listed.has(s.sessionId))
       .map(s => ({ id: `session:${s.sessionId}`, agent: s.agent, ...located(s.cwd) }))];
-  return new Map(held.map(({ run, tasks }) => [run.config.id, { observedAt, revision: run.revision, tickets, peers,
+  return new Map(held.map(({ run, tasks }) => [run.config.id, { observedAt, run: run.config.id, revision: run.revision, tickets, peers,
     tasks: Object.fromEntries(tasks.map(task => {
       const discovery = discoveries.get(discoveryProvider(task.spec.provider, task.worker?.id))!;
       const observation = observations({ ...run, tasks: [task] }, discovery, sessions)[task.spec.id];
@@ -268,11 +274,10 @@ export async function observeOrphan(task: Assignment, replacementWorktree: strin
   if (peers.incomplete) throw new Error("Hermod discovery incomplete; takeover withheld");
   const peerAge = Date.now() - Date.parse(peers.observedAt);
   if (!Number.isFinite(peerAge) || peerAge > 60_000 || peerAge < -5_000) throw new Error("Hermod discovery stale; takeover withheld");
-  const sessions = JSON.parse(rawSessions) as { sessions: (SavedSession & { cwd?: string })[]; totalMatches: number };
+  const sessions = parseSavedSessions(rawSessions);
   const tabs = JSON.parse(rawTabs) as { id: string }[];
   const processes = JSON.parse(rawProcesses) as { pid: number; cmuxSurfaceId?: string }[];
-  if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length ||
-    sessions.sessions.some(s => !s.sessionId || !s.agent)) throw new Error("Hermod session observation incomplete");
+  if (sessions.some(s => !s.sessionId || !s.agent)) throw new Error("Hermod session observation incomplete");
   if (!Array.isArray(tabs) || tabs.some(t => typeof t.id !== "string") ||
     !Array.isArray(processes) || processes.some(p => !Number.isSafeInteger(p.pid) || p.pid <= 0)) throw new Error("Hermod surface/process observation unavailable");
   const anchors = [canonicalWorktree(worker.worktree), canonicalWorktree(replacementWorktree)];
@@ -281,7 +286,7 @@ export async function observeOrphan(task: Assignment, replacementWorktree: strin
     p.surfaceId === worker.surface || p.pid === worker.pid || matchesPath(p.cwd)) && p.liveness !== "stale")) {
     throw new Error("matching live or uncertain peer prevents takeover");
   }
-  if (sessions.sessions.some(s => (s.sessionId === worker.session || s.surfaceId === worker.surface ||
+  if (sessions.some(s => (s.sessionId === worker.session || s.surfaceId === worker.surface ||
     s.pid === worker.pid || matchesPath(s.cwd)) && s.alive !== false)) throw new Error("matching live or uncertain saved session prevents takeover");
   if (tabs.some(t => t.id === worker.surface)) throw new Error("recorded surface still exists; takeover withheld");
   if (processes.some(p => p.pid === worker.pid || p.cmuxSurfaceId === worker.surface)) throw new Error("recorded process or surface process still exists; takeover withheld");

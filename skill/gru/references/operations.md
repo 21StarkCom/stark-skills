@@ -375,9 +375,14 @@ outside the store. `sweep [--run ID] [--apply]` releases a held task only when b
    there. A release deletes every `tree:` row, so every one is checked: the reserved
    worktree, one an earlier `takeover` retired, and a declared one `attach` kept when
    it adopted Hermod's actual worktree.
+   Hermod places a launch at its own path, not necessarily the declared one (see
+   [worktree placement](#worktree-placement)), and a launch that never attached owns no
+   `tree:` row there, so a live or uncertain peer in any directory naming the ticket as a
+   whole segment is held as a possible launch too.
    Occupancy reads every provider and ACP peer, so both that unscoped view and the
    task's own namespace must report complete. A same-provider peer whose working
-   directory Hermod cannot resolve counts as an occupant. A saved session in
+   directory Hermod cannot resolve, including an empty or relative one, counts as an
+   occupant. A saved session in
    `hermod sessions --all` whose pid probes alive (`alive: true`) counts as an occupant
    too, even when the peer view does not list it, as takeover's absence checks already
    read both sources; a gone or unprobed session does not.
@@ -390,12 +395,13 @@ before it registers, so stop the engagement first.
 Elapsed time is never evidence. Verified `done` tasks keep their ownership by design.
 
 Without `--apply` it prints each held task as `release` or `held` with its reason,
-opening the store read-only: no directory, permission, journal-mode, or schema change.
+opening the store read-only: no directory, permission, journal-mode, or schema change
+(SQLite still creates the store's `-wal`/`-shm` sidecars when absent, with the store's permissions).
 Neither mode creates a store that does not exist; it reports no engagements.
 `--apply` gathers all Alfred and Hermod evidence before writing; any failure exits
 non-zero with nothing released. Each engagement is then written in one store
-transaction, fenced on the exact revision the evidence was read at and on
-one-minute freshness. No leader identity is needed, because the leader may be gone.
+transaction, fenced on the engagement and exact revision the evidence was read at
+and on one-minute freshness. No leader identity is needed, because the leader may be gone.
 Each release records a `swept` event stating it was a proof-based sweep, not a leader
 action, with the invoking session, leader of record, proof, and released resources.
 A swept task owns no resources, files, or capacity, cannot be verified, and leaves

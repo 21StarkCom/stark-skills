@@ -70,7 +70,7 @@ recorded repository, else this directory, that reads the handle) reports its tic
 done or Closed, it holds no integration grant or uncertain reconnect, it is not a
 reserved launch in a running engagement, any bound worker is observed terminal, and
 complete Hermod discovery finds no live or uncertain peer, and no saved session whose
-pid probes alive, in any worktree it owns.
+pid probes alive, in any worktree it owns or any directory naming its ticket.
 Without --run it evaluates every engagement.
 It is a read-only dry run unless --apply; --apply fences on the exact revision, records
 a swept event naming the proof, and ends a run whose tasks are all verified or
