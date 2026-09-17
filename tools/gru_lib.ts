@@ -142,6 +142,9 @@ export interface SweepPeer {
 export interface SweepEvidence {
   /** Stamped before Alfred and Hermod were queried, so slow commands cannot look fresh. */
   observedAt: string;
+  /** The engagement the evidence was gathered for. Task ids and tickets repeat across engagements
+   * (a corrected run reuses both), so a revision alone cannot tell one run's evidence from another's. */
+  run: string;
   /** The engagement revision the evidence was gathered against; `sweep` refuses any other. */
   revision: number;
   tickets: Record<string, string>;
@@ -288,8 +291,12 @@ export function sweepCandidates(run: Run): Assignment[] {
 /** The release rule. Alfred must report the ticket closed AND no live Hermod peer may be
  * bound to the task; anything uncertain is held. Elapsed time is never evidence.
  * `owned` lists a task's owner rows: a release deletes every `tree:` row, however it was
- * acquired (reserve, takeover, adoption), so occupancy is checked against all of them. */
+ * acquired (reserve, takeover, adoption), so occupancy is checked against all of them, and
+ * against any directory naming the ticket, where Hermod may have placed an unattached launch. */
 export function sweepVerdicts(run: Run, evidence: SweepEvidence, owned: (taskId: string) => readonly string[]): SweepVerdict[] {
+  // Another engagement's evidence can carry the same revision, task ids, and tickets, and its
+  // terminated worker would then release this run's live one.
+  requireValue(evidence.run === run.config.id, `sweep evidence was gathered for engagement ${evidence.run}, not ${run.config.id}; sweep again`);
   return sweepCandidates(run).map(task => {
     const { id, ticket } = task.spec;
     const ticketState = evidence.tickets[ticket];
@@ -314,10 +321,20 @@ export function sweepVerdicts(run: Run, evidence: SweepEvidence, owned: (taskId:
     // An unattached launch is uncertain, not absent: it may be running in its reserved worktree.
     if (!found.complete) return verdict("held", "Hermod discovery incomplete; absence proves nothing");
     const trees = owned(id).filter(r => r.startsWith("tree:")).map(r => canonicalWorktree(r.slice("tree:".length)));
-    // A same-provider peer whose cwd Hermod could not resolve may be this task's launch.
-    const occupants = evidence.peers.filter(p => p.cwd === undefined ? p.agent === task.spec.provider
-      : trees.some(tree => (p.cwd + "/").startsWith(tree + "/"))).map(p => p.id);
+    // A same-provider peer whose cwd Hermod could not resolve may be this task's launch. An empty or
+    // relative cwd is unresolved too: it names no place, and resolving it would use the sweeper's own.
+    const placed = (p: SweepPeer) => typeof p.cwd === "string" && path.isAbsolute(p.cwd) ? p.cwd : undefined;
+    const occupants = evidence.peers.filter(p => {
+      const cwd = placed(p);
+      return cwd === undefined ? p.agent === task.spec.provider : trees.some(tree => (cwd + "/").startsWith(tree + "/"));
+    }).map(p => p.id);
     if (occupants.length > 0) return verdict("held", `Hermod peer ${occupants.join(", ")} occupies a worktree this task owns (${trees.join(", ")})`);
+    // Hermod places a launch at its own path, not the declared one (see `adopt`), and a launch that
+    // never attached owns no `tree:` row there. A live peer in a directory naming the ticket may be it.
+    const named = evidence.peers.filter(p => { const cwd = placed(p); return cwd !== undefined && namesTicket(ticket, cwd); });
+    if (named.length > 0) {
+      return verdict("held", `Hermod peer ${named.map(p => `${p.id} (${p.cwd})`).join(", ")} works in a directory naming ${ticket}; it may be this task's launch outside the worktrees it owns`);
+    }
     return verdict("release", task.worker
       ? `ticket ${ticketState}; worker ${task.worker.id} observed terminal (${found.observation.evidence.join("; ")})`
       : `ticket ${ticketState}; no worker attached`);
@@ -417,8 +434,9 @@ export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[
 /** One SQLite transaction serializes state and ownership, across leader processes. */
 export class GruStore {
   private db: DatabaseSync;
-  /** `readOnly` inspects an existing store without side effects on it: no directory creation,
-   * permission change, journal-mode switch, or schema DDL, and every write is refused. */
+  /** `readOnly` inspects an existing store without changing it: no directory creation, permission
+   * change, journal-mode switch, or schema DDL, and every write is refused. SQLite still creates the
+   * WAL store's `-wal`/`-shm` sidecars beside it when absent, with the store file's own permissions. */
   constructor(file: string, options: { readOnly?: boolean } = {}) {
     if (options.readOnly) {
       this.db = new DatabaseSync(file, { readOnly: true });
