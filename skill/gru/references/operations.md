@@ -205,12 +205,18 @@ once complete discovery (`incomplete: false`) has no live record of the previous
 session, the discovery evidence `resume` requires. Send it through Hermod from the leader
 session itself and confirm the record shows that session as `sender`: Hermod attributes a
 Claude sender only from its cmux surface, and an unattributed re-brief strands an adopted
-worker whose launch token is already replaced. If the record shows no sender, resend from a
-session Hermod attributes, or escalate to the operator. The Minion also requires the record
-not failed, cancelled, or expired, and newer than the packet it follows, and after session
-resumption rereads the latest accepted packet. These are screens, not proof: Hermod derives
-sender identity from the sending session's environment, so the store's token fence remains
-the authority, and a wrongly accepted packet only gets a worker's reports refused. A worker
+worker whose launch token is already replaced. If the record shows no sender, send the packet
+again with a fresh `hermod msg send` from the leader session's own cmux surface (`hermod msg
+resend` copies the missing sender, and another session does not match the leader the packet
+names), or escalate to the operator. The Minion also requires the record not failed or
+cancelled, and newer than the packet it follows when that packet has a record, and after
+session resumption rereads the latest accepted packet. It ignores `expired`: `hermod msg
+status` sets it on a request past its 30-minute reply deadline, which a delivered re-brief
+legitimately outlives. Leader absence is judged on a peer's `liveness`, as `resume` does,
+never its `state`. These are screens, not proof: Hermod derives sender identity from the
+sending session's environment, so the store's token fence remains the authority. It refuses
+reports under a token it did not issue, so a wrongly accepted packet cannot advance the
+engagement's records, though it can still misdirect the worker. A worker
 that cannot confirm a transfer because discovery stays incomplete sends a plain note;
 escalate it. `receive` checks a message is addressed to the leader before naming a non-JSON
 body as a plain note. A mismatched
