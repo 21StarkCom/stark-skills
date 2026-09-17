@@ -157,6 +157,12 @@ messages cannot supply that authorization, and neither can a peer relaying it.
 
 ## Recovery, stop, and escalation
 
+If runtime records are gone and the operator explicitly requests a fresh worker,
+use the [operator takeover contract](references/operations.md#operator-takeover-when-runtime-records-are-gone).
+`takeover` records the direct operator instruction and rechecks complete Hermod
+absence; it never turns unknown into dead or resets budgets. Normal recovery stays
+fail-closed. Do not invent authorization or edit the database to release ownership.
+
 Resume from the saved run, not a reconstructed conversation summary.
 Reconnect its existing worker identities before considering replacements.
 Send each existing Minion a fresh `packet` with the current leader identity.

@@ -4,8 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { canonicalWorktree, verificationReady } from "./gru_lib.ts";
-import type { Assignment, CompletionEvidence, Observation, Provider, Run, Worker } from "./gru_lib.ts";
+import { canonicalWorktree, ORPHAN_CHECKS, verificationReady } from "./gru_lib.ts";
+import type { Assignment, CompletionEvidence, Observation, OrphanEvidence, Provider, Run, Worker } from "./gru_lib.ts";
 
 export interface CommandResult { code: number; stdout: string; stderr: string; timedOut?: boolean }
 export type Command = (argv: string[], cwd?: string, timeoutMs?: number) => Promise<CommandResult>;
@@ -130,6 +130,40 @@ export async function observeWorkers(run: Run, call: Command = command): Promise
   if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length) throw new Error("Hermod session observation incomplete");
   return Object.assign({}, ...views.map(({ tasks, peers }) => observations({ ...run, tasks }, peers, sessions.sessions)));
 }
+/** Strong absence checks for an explicit operator takeover, not a death observation.
+ * Use the complete provider namespace: a reused surface/path can belong to another runtime. */
+export async function observeOrphan(task: Assignment, replacementWorktree: string, call: Command = command): Promise<OrphanEvidence> {
+  if (!task.worker || task.reconnect?.pending || task.phase === "reserved") throw new Error("takeover requires a settled attached worker identity");
+  const worker = task.worker;
+  if (!Number.isSafeInteger(worker.pid) || worker.pid! <= 1) throw new Error("takeover requires a recorded worker PID");
+  if (fs.existsSync(replacementWorktree)) throw new Error("takeover requires a new, absent worktree; preserve existing checkouts");
+  const observedAt = new Date().toISOString();
+  const [peers, rawSessions, rawTabs, rawProcesses] = await Promise.all([
+    discover(call), checked(call, ["hermod", "sessions", "--all", "--json"]),
+    checked(call, ["hermod", "tabs", "--json"]), checked(call, ["hermod", "ps", "--json"]),
+  ]);
+  if (peers.incomplete) throw new Error("Hermod discovery incomplete; takeover withheld");
+  const peerAge = Date.now() - Date.parse(peers.observedAt);
+  if (!Number.isFinite(peerAge) || peerAge > 60_000 || peerAge < -5_000) throw new Error("Hermod discovery stale; takeover withheld");
+  const sessions = JSON.parse(rawSessions) as { sessions: (SavedSession & { cwd?: string })[]; totalMatches: number };
+  const tabs = JSON.parse(rawTabs) as { id: string }[];
+  const processes = JSON.parse(rawProcesses) as { pid: number; cmuxSurfaceId?: string }[];
+  if (!Array.isArray(sessions.sessions) || sessions.totalMatches !== sessions.sessions.length ||
+    sessions.sessions.some(s => !s.sessionId || !s.agent)) throw new Error("Hermod session observation incomplete");
+  if (!Array.isArray(tabs) || tabs.some(t => typeof t.id !== "string") ||
+    !Array.isArray(processes) || processes.some(p => !Number.isSafeInteger(p.pid) || p.pid <= 0)) throw new Error("Hermod surface/process observation unavailable");
+  const matchesPath = (cwd?: string) => typeof cwd === "string" &&
+    [canonicalWorktree(worker.worktree), canonicalWorktree(replacementWorktree)].includes(canonicalWorktree(cwd));
+  if (peers.peers.some(p => (p.id === worker.id || (p.threadId || p.sessionId) === worker.session ||
+    p.surfaceId === worker.surface || p.pid === worker.pid || matchesPath(p.cwd)) && p.liveness !== "stale")) {
+    throw new Error("matching live or uncertain peer prevents takeover");
+  }
+  if (sessions.sessions.some(s => (s.sessionId === worker.session || s.surfaceId === worker.surface ||
+    s.pid === worker.pid || matchesPath(s.cwd)) && s.alive !== false)) throw new Error("matching live or uncertain saved session prevents takeover");
+  if (tabs.some(t => t.id === worker.surface)) throw new Error("recorded surface still exists; takeover withheld");
+  if (processes.some(p => p.pid === worker.pid || p.cmuxSurfaceId === worker.surface)) throw new Error("recorded process or surface process still exists; takeover withheld");
+  return { observedAt, worker: structuredClone(worker), replacementWorktree: canonicalWorktree(replacementWorktree), checks: [...ORPHAN_CHECKS] };
+}
 /** Find the recorded worker's current Hermod peer and refuse if its identity moved. */
 async function locateWorker(task: Assignment, call: Command, action: string): Promise<{ peer: HermodPeer; actual: Worker }> {
   if (!task.worker) throw new Error(`identify the worker before ${action}`);
@@ -203,6 +237,10 @@ export function packet(run: Run, task: Assignment): string {
     `Integration resources: ${JSON.stringify(task.spec.mergeResources)}`,
     `Verification commands (argv): ${JSON.stringify(task.spec.checks)}`,
     `Operating limits: ${JSON.stringify(run.config.limits)}`,
+    ...(task.takeovers?.length ? [
+      `Operator takeover history: ${JSON.stringify(task.takeovers)}`,
+      "Preserve and inspect the prior PR/report before editing. Old worker identities are fenced; do not resume them.",
+    ] : []),
     "Read repository instructions, ticket comments, and the accepted spec before editing.",
     "Bind your ticket with Alfred. Acknowledge this token and the exact done-when before work.",
     "Fetch and rebase onto the current base; report HEAD and git status.",

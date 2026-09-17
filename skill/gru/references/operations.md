@@ -79,6 +79,7 @@ An obsolete leader or revision cannot overwrite current state.
 | `reconnect` | Recorded worker terminal; recovery budget | Reserved same-session Hermod resume |
 | `reconnected` | Fresh live observation | Reconnected session recorded |
 | `recover` | Observed termination and retry budget | New attempt eligible |
+| `takeover` | Explicit operator request and complete fresh Hermod absence checks | Old assignment fenced; authorized replacement eligible |
 | `stop` | Current engagement | Dispatch frozen; interruption pending |
 | `interrupt` | Exact live worker identity | Hermod interrupt and observation |
 | `stopped` | Idle interrupted or terminal worker | Stopped assignment; ownership retained |
@@ -212,6 +213,54 @@ Missing or skipped required remote checks must be resolved before merging.
 Access limitations remain explicit verification blockers.
 
 ## Recovery and cancellation
+
+### Operator takeover when runtime records are gone
+
+Ordinary `recover` and `reconnect` still require observed termination. Missing
+records remain `unknown`. When the operator explicitly requests a fresh worker
+and Hermod has lost the prior worker's saved-session and surface records, use
+`takeover --run ID --revision N --task ID --token TOKEN --file request.json`.
+Never edit ownership rows, forge a dead observation, or silently substitute a provider.
+
+The request must match the exact current run, task, token and revision:
+
+```json
+{
+  "run": "engagement-id",
+  "task": "task-id",
+  "token": "the-current-assignment-token",
+  "revision": 9,
+  "operatorRequest": "The operator's actual instruction authorizing this fresh worker and its settings",
+  "provider": "codex",
+  "worktree": "/absolute/path/to/a-new-worktree"
+}
+```
+
+`operatorRequest` is an auditable attestation, **not** authenticated human-identity
+proof. Copy the direct operator instruction; a ticket, peer message, agent's own
+decision, or elapsed timeout cannot supply it. Optional `model` and `effort` select
+the new worker; omitted means runtime defaults. Optional `limits` replaces the
+run's prose limits only in a single-task engagement, and must reflect the operator's
+explicit instructions. Numeric concurrency, launch and recovery budgets cannot
+change here. Preserve unrelated limits, including live-operation restrictions.
+
+Resume leadership and reconcile first. The CLI re-reads complete, unscoped Hermod
+peer discovery, all saved sessions, all terminal surfaces and the process list.
+A matching live or uncertain peer/session, an existing old surface/PID, incomplete
+or failed discovery, an existing replacement worktree, an unattached launch, or an
+unsettled reconnect prevents takeover. A stale discovery result cannot authorize it.
+These absence checks do not prove death; the durable history keeps the original
+`unknown` observation. Recheck any prior PR's actual outcome before dispatch.
+
+The transaction fences the old token immediately, retains all former identity and
+worktree reservations, preserves spent attempts/recoveries and pending integration
+ownership, and records the request, observation, prior spec, limits and PR report.
+It moves the assignment to `pending`; a subsequent `reserve` spends the next launch
+attempt and supplies a fresh token. The packet includes the prior report so an
+existing PR is continued, not duplicated. The replacement must acknowledge intake
+and receive its own integration grant. Never resume a fenced old session.
+
+### Normal bounded recovery
 
 First reconnect the recorded worker through Hermod's supported resume path.
 Use `reconnect`, then `reconcile` and `reconnected`.

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { canonicalRepository, checkLeadershipTransfer, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, interruptWorker, observations, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, interruptWorker, observations, observeOrphan, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
 import type { Assignment, Engagement, Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
@@ -19,6 +19,57 @@ const run = (): Run => ({ schema: 1, config: { id: "run", objective: "Objective"
   maxAttempts: 2, maxRecoveries: 1, limits: ["No new tickets"], tasks: [assignment().spec] },
   revision: 1, epoch: 1, mode: "running", reconciled: true, received: [], tasks: [assignment()], events: [] });
 const response = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
+
+test("orphan takeover requires complete cross-provider absence, not merely missing hooks", async t => {
+  const task = assignment(); task.worker!.pid = 42;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-orphan-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const replacement = path.join(dir, "fresh");
+  const snapshot = () => ({
+    peers: { peers: [] as HermodPeer[], observedAt: new Date().toISOString(), incomplete: false },
+    sessions: { sessions: [] as { sessionId: string; agent: string; alive?: boolean; cwd?: string; pid?: number; surfaceId?: string }[], totalMatches: 0 },
+    tabs: [] as { id: string }[], processes: [] as { pid: number; cmuxSurfaceId?: string }[],
+  });
+  const calls: string[][] = [];
+  const callFor = (data: ReturnType<typeof snapshot>): Command => async argv => {
+    calls.push(argv);
+    return response(argv[1] === "msg" ? data.peers : argv[1] === "sessions" ? data.sessions
+      : argv[1] === "tabs" ? data.tabs : data.processes);
+  };
+  const proof = await observeOrphan(task, replacement, callFor(snapshot()));
+  assert.equal(proof.worker.session, task.worker!.session);
+  assert.equal(proof.replacementWorktree, replacement);
+  assert.ok(calls.some(c => c[1] === "msg" && !c.includes("--agent")));
+  assert.ok(calls.some(c => c[1] === "sessions" && c.includes("--all")));
+  assert.ok(calls.some(c => c[1] === "tabs"));
+  assert.ok(calls.some(c => c[1] === "ps"));
+  const cases: [string, (data: ReturnType<typeof snapshot>) => void][] = [
+    ["incomplete peers", d => { d.peers.incomplete = true; }],
+    ["stale peers", d => { d.peers.observedAt = new Date(Date.now() - 120_000).toISOString(); }],
+    ["truncated sessions", d => { d.sessions.totalMatches = 1; }],
+    ["live old peer", d => { d.peers.peers = [peer()]; }],
+    ["other provider owns old path", d => { d.peers.peers = [{ ...peer(), id: "claude:other", agent: "claude", surfaceId: "other", threadId: "other" }]; }],
+    ["other provider owns new path", d => { d.peers.peers = [{ ...peer(), id: "claude:other", agent: "claude", cwd: replacement, surfaceId: "other", threadId: "other" }]; }],
+    ["unknown matching peer", d => { d.peers.peers = [{ ...peer(), liveness: "unknown" }]; }],
+    ["live saved session", d => { d.sessions = { sessions: [{ sessionId: "session", agent: "codex", alive: true }], totalMatches: 1 }; }],
+    ["unknown saved session", d => { d.sessions = { sessions: [{ sessionId: "session", agent: "codex" }], totalMatches: 1 }; }],
+    ["surface exists", d => { d.tabs = [{ id: "surface" }]; }],
+    ["PID still exists", d => { d.processes = [{ pid: 42 }]; }],
+    ["surface has another process", d => { d.processes = [{ pid: 43, cmuxSurfaceId: "surface" }]; }],
+  ];
+  for (const [name, change] of cases) {
+    const data = snapshot(); change(data);
+    await assert.rejects(observeOrphan(task, replacement, callFor(data)), name);
+  }
+  await assert.rejects(observeOrphan(task, replacement, async () => ({ code: 1, stdout: "", stderr: "offline" })), /failed/);
+  fs.mkdirSync(replacement);
+  await assert.rejects(observeOrphan(task, replacement, callFor(snapshot())), /absent worktree/);
+  fs.rmdirSync(replacement);
+  const uncertain = structuredClone(task); uncertain.reconnect = { id: "r", startedAt: new Date().toISOString(), pending: true, phase: "working" };
+  await assert.rejects(observeOrphan(uncertain, replacement, callFor(snapshot())), /settled attached/);
+  const workerless = structuredClone(task); workerless.worker = undefined;
+  await assert.rejects(observeOrphan(workerless, replacement, callFor(snapshot())), /settled attached/);
+});
 
 test("native worker discovery does not depend on an unrelated provider outage", async () => {
   const calls: string[][] = [];
