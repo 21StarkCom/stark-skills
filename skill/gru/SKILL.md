@@ -71,8 +71,8 @@ Check dependencies against the accepted spec and current repository state.
 Derive exact done-whens, verification commands, and completion milestones.
 Identify fixed ports, databases, and release files as exclusive or integration resources.
 Overlapping files do not block dispatch; they reconcile at rebase under the merge lock,
-which is sound only while each grant names the base branch's freshly observed tip,
-re-read while you hold the merge lock.
+which is sound only while each grant names the base branch tip you fetch and read
+immediately before `integrate`.
 Capture these facts and authorized limits in the engagement input.
 Declare each `worktree` where Hermod places that provider's worker: Claude at
 `<repo>/.claude/worktrees/<ticket>`, Codex at `<main checkout>/.worktrees/<ticket>`
@@ -140,9 +140,10 @@ Post every finding using the repository's approved review-posting path.
 Resolve or answer every finding before authorizing integration.
 
 Hold Gru's integration reservation across rebase, regeneration, tests, and merge.
-Grant integration to one specific assignment at the base branch's freshly observed
-tip, re-read once you hold the merge lock so it includes any merge that just landed,
-never a tip observed before dispatch.
+Grant integration to one specific assignment at the base branch tip you fetch and read
+immediately before `integrate`, never one observed earlier: `integrate` takes the merge
+lock itself, so its `resource already owned: merge:<repo>` refusal means another task is
+mid-merge — wait for it, fetch again, and read the tip again.
 After merging, independently inspect the actual PR and merge ancestry.
 Rerun completion checks against the fetched base in an isolated verifier.
 Confirm review evidence covers the final PR head.

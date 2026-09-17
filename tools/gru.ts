@@ -77,6 +77,13 @@ a swept event naming the proof, and ends a run whose tasks are all verified or
 released. Alfred or Hermod failure exits non-zero with nothing released.
 `;
 
+/** The one base a grant may name, shared by the three hints below so they cannot drift.
+ * There is no "take the lock, then read the tip" ordering to prescribe: `integrate` takes
+ * `merge:<repo>` in the same transaction that records the base, and refuses a second call
+ * once the phase is `integrating`. A fetch immediately before the call is the whole rule;
+ * the lock refusal names the task to wait for. */
+const GRANT_BASE = "at the base branch tip fetched immediately before the grant";
+
 /** Explain why `verificationReady` refused, naming the command that actually repairs it.
  * `integrate` only accepts phase `review`, so it is the wrong instruction everywhere else;
  * a stopped worker needs `continue`, an in-flight one needs its own READY report
@@ -101,21 +108,21 @@ export function verifyBlocker(task: Assignment): string {
     // "integrate after its READY report" names a prerequisite already behind it — exactly
     // the misdirection the `review` case below exists to remove.
     return task.phase === "review"
-      ? "task reported ready and holds no integration grant; integrate it at the base branch tip observed under the merge lock, then verify"
+      ? `task reported ready and holds no integration grant; integrate it ${GRANT_BASE}, then verify`
       : `task is ${task.phase} with no integration grant; integrate after its READY report`;
   }
   switch (task.phase) {
     case "done": return "task is already verified";
     // Reaching `review` IS the READY report (gru_lib.ts report()), so telling this task to
     // report ready names a step it already took. `integrate` is the one command that applies.
-    case "review": return "task reported ready but holds a stale integration grant; integrate it at the base branch tip observed under the merge lock, then verify";
+    case "review": return `task reported ready but holds a stale integration grant; integrate it ${GRANT_BASE}, then verify`;
     // Reachable only WITH a grant (the guard above took the ungranted case), so "cancelled
     // before integration" would contradict its own precondition. `continue` is the ONLY
     // repair: it needs an observed live idle worker, which is exactly the recoverable case.
     // Do NOT name `reserve` here — `readyReason` refuses every phase except `pending`, so
     // suggesting it hands the operator a command that throws, which is the defect this
     // function exists to remove.
-    case "stopped": return "task was cancelled holding an unsettled integration grant; continue it once its worker is observed live and idle, then integrate at the base branch tip observed under the merge lock";
+    case "stopped": return `task was cancelled holding an unsettled integration grant; continue it once its worker is observed live and idle, then integrate ${GRANT_BASE}`;
     default: return `task is ${task.phase}; its worker must report ready and receive integration before verification`;
   }
 }

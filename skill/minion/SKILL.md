@@ -123,8 +123,9 @@ Missing vendor access is a blocker, not a passing result.
 Wait for Gru's assignment-specific integration grant before merging.
 The grant identifies your token and the base SHA Gru observed for it.
 After another merge, fetch and rebase onto the base branch's current tip, not the
-granted SHA, then regenerate, reconcile, rebuild, retest, and repost your review on
-the new head. Gru verifies a review whose commit is the merged head.
+granted SHA, then regenerate, reconcile, rebuild, retest, and repost your review.
+Send Gru the new head SHA and the new review id before you merge: it verifies the
+review id you last reported, and after the merge nothing can repair that evidence.
 A clean rebase alone does not renew passing evidence.
 
 Report the observed merge SHA and repository completion milestone.

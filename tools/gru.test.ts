@@ -423,6 +423,14 @@ test("verifyBlocker names the command that actually repairs each phase", () => {
   assert.match(ungranted, /integrate/);
   assert.doesNotMatch(ungranted, /after its READY report/);
 
+  // Every hint that names a base names the ONE achievable one. "under the merge lock" was not:
+  // `integrate` takes `merge:<repo>` in the same transaction that records the base and refuses a
+  // second call from `integrating`, so no leader can observe a tip while already holding the lock.
+  for (const hint of [ungranted, review, at("stopped")]) {
+    assert.match(hint, /at the base branch tip fetched immediately before the grant/);
+    assert.doesNotMatch(hint, /merge lock|previous merge/);
+  }
+
   // No `stopping` case: `verify` refuses unless run.mode === "running", and a `stopping`
   // task forces run.mode to `stopping`. gru_lib.test.ts pins that invariant; here we only
   // assert the branch is gone rather than re-asserting a message nothing can read.
