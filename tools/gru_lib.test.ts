@@ -1048,6 +1048,9 @@ test("sweep releases an attached worker only when it is observed terminal and it
   assert.deepEqual(swept.tasks[0].swept!.worker, run.tasks[0].worker);
   assert.deepEqual(swept.tasks[0].swept!.released, ["session:codex:session-one", "surface:surface-one",
     "ticket:STARK-100", "tree:/worktrees/one", "worker:codex:one"]);
+  // Declared files are not ownership (STARK-5049), so the audit record must not list them
+  // beside the rows it released: an operator would read a freeing that never happened.
+  assert.equal("files" in (swept.tasks[0].swept as object), false);
   const next = config(); next.id = "next"; next.tasks = next.tasks.slice(0, 1);
   const other = observe(store, store.create(next));
   assert.equal(store.reserve("next", "leader-one", other.revision, "one").tasks[0].phase, "reserved");

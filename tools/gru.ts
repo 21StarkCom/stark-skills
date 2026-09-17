@@ -144,7 +144,7 @@ async function sweep(store: GruStore | null, runId: string | undefined, apply: b
     const gathered = evidence.get(id);
     const verdicts = gathered ? store!.sweepVerdicts(run, gathered) : [];
     const entry = { run: id, mode: run.mode, revision: run.revision, leader: run.config.leader,
-      tasks: verdicts.map(v => ({ ...v, resources: store!.owned(id, v.task), files: run.tasks.find(t => t.spec.id === v.task)!.spec.files })) };
+      tasks: verdicts.map(v => ({ ...v, resources: store!.owned(id, v.task) })) };
     if (!apply || !gathered || !verdicts.some(v => v.action === "release")) return entry;
     try {
       const swept = store!.sweep(id, run.revision, gathered, invokedBy);
