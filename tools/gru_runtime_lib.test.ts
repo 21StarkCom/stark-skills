@@ -19,6 +19,10 @@ const run = (): Run => ({ schema: 1, config: { id: "run", objective: "Objective"
   maxAttempts: 2, maxRecoveries: 1, limits: ["No new tickets"], tasks: [assignment().spec] },
   revision: 1, epoch: 1, mode: "running", reconciled: true, received: [], tasks: [assignment()], events: [] });
 const response = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
+/** Hermod sees no peers, sessions, tabs or processes, and the OS probe reports the PID absent. */
+const absentHermod: Command = async argv => argv[0] === "ps" ? { code: 1, stdout: "", stderr: "" } : response(
+  argv[1] === "msg" ? { peers: [], observedAt: new Date().toISOString(), incomplete: false }
+    : argv[1] === "sessions" ? { sessions: [], totalMatches: 0 } : []);
 
 test("orphan takeover requires complete cross-provider absence, not merely missing hooks", async t => {
   const task = assignment(); task.worker!.pid = 42;
@@ -82,9 +86,7 @@ test("takeover rejects a live OS PID omitted by Hermod's terminal process list",
   const task = assignment(); task.worker!.pid = process.pid;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-orphan-pid-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const call: Command = async argv => argv[0] === "ps" ? command(argv) : response(
-    argv[1] === "msg" ? { peers: [], observedAt: new Date().toISOString(), incomplete: false }
-      : argv[1] === "sessions" ? { sessions: [], totalMatches: 0 } : []);
+  const call: Command = async argv => argv[0] === "ps" ? command(argv) : absentHermod(argv);
   await assert.rejects(observeOrphan(task, path.join(dir, "fresh"), call), /PID/);
 });
 
@@ -95,9 +97,7 @@ test("takeover rejects a replacement checkout created during discovery", async t
   const replacement = path.join(dir, "fresh");
   const call: Command = async argv => {
     if (argv[1] === "tabs") fs.mkdirSync(replacement);
-    return argv[0] === "ps" ? { code: 1, stdout: "", stderr: "" } : response(
-      argv[1] === "msg" ? { peers: [], observedAt: new Date().toISOString(), incomplete: false }
-        : argv[1] === "sessions" ? { sessions: [], totalMatches: 0 } : []);
+    return absentHermod(argv);
   };
   await assert.rejects(observeOrphan(task, replacement, call), /absent worktree/);
 });
@@ -108,10 +108,7 @@ test("takeover refuses a dangling symlink at the replacement path", async t => {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const replacement = path.join(dir, "fresh");
   fs.symlinkSync(path.join(dir, "missing"), replacement);
-  const call: Command = async argv => argv[0] === "ps" ? { code: 1, stdout: "", stderr: "" } : response(
-    argv[1] === "msg" ? { peers: [], observedAt: new Date().toISOString(), incomplete: false }
-      : argv[1] === "sessions" ? { sessions: [], totalMatches: 0 } : []);
-  await assert.rejects(observeOrphan(task, replacement, call), /absent worktree/);
+  await assert.rejects(observeOrphan(task, replacement, absentHermod), /absent worktree/);
 });
 
 test("native worker discovery does not depend on an unrelated provider outage", async () => {

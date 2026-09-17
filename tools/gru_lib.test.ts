@@ -71,19 +71,36 @@ test("takeover refuses stale or mismatched authority and evidence without changi
   const { store, r } = await orphanedRun(t);
   const request = takeoverRequest(r);
   const evidence = await observeOrphan(r.tasks[0], request.worktree, absentHermod);
-  for (const changed of [ { ...request, run: "another" }, { ...request, task: "two" },
-    { ...request, token: "old" }, { ...request, revision: r.revision - 1 },
-    { ...request, operatorRequest: " " }, { ...request, maxAttempts: 99 },
-    { ...request, worktree: r.tasks[0].spec.worktree } ]) {
-    assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token, changed, evidence));
+  const binding = /does not match the current assignment revision/;
+  const requests: [Record<string, unknown>, RegExp][] = [
+    [{ ...request, run: "another" }, binding], [{ ...request, task: "two" }, binding],
+    [{ ...request, token: "old" }, binding], [{ ...request, revision: r.revision - 1 }, binding],
+    [{ ...request, operatorRequest: " " }, /operatorRequest is required/],
+    [{ ...request, maxAttempts: 99 }, /unknown takeover request field/],
+    [{ ...request, worktree: r.tasks[0].spec.worktree }, /evidence worktree mismatch/],
+  ];
+  for (const [changed, reason] of requests) {
+    assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token, changed, evidence), reason);
+    assert.equal(store.read("demo").revision, r.revision);
+  }
+  // Evidence gathered for the old checkout or the repo itself passes the mismatch guard
+  // above; the isolation guard must still refuse it.
+  for (const reused of [r.tasks[0].spec.worktree, r.tasks[0].spec.repo]) {
+    const reusedEvidence = await observeOrphan(r.tasks[0], reused, absentHermod);
+    assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token,
+      { ...request, worktree: reused }, reusedEvidence), /fresh isolated worktree/);
     assert.equal(store.read("demo").revision, r.revision);
   }
   assert.throws(() => store.takeover("demo", "not-leader", r.revision, "one", request.token, request, evidence), /stale leader/);
   assert.throws(() => store.takeover("demo", "leader-one", r.revision - 1, "one", request.token, request, evidence), /stale revision/);
-  for (const bad of [ { ...evidence, checks: [] }, { ...evidence, worker: { ...evidence.worker, session: "other" } },
-    { ...evidence, observedAt: new Date(Date.now() - 120_000).toISOString() },
-    { ...evidence, replacementWorktree: "/elsewhere" } ]) {
-    assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token, request, bad));
+  const proofs: [typeof evidence, RegExp][] = [
+    [{ ...evidence, checks: [] }, /incomplete orphan evidence/],
+    [{ ...evidence, worker: { ...evidence.worker, session: "other" } }, /evidence worker mismatch/],
+    [{ ...evidence, observedAt: new Date(Date.now() - 120_000).toISOString() }, /stale/],
+    [{ ...evidence, replacementWorktree: "/elsewhere" }, /evidence worktree mismatch/],
+  ];
+  for (const [bad, reason] of proofs) {
+    assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token, request, bad), reason);
     assert.equal(store.read("demo").revision, r.revision);
   }
   assert.throws(() => parseTakeover({ ...request, worktree: "relative" }), /absolute/);

@@ -102,6 +102,9 @@ export function verifyBlocker(task: Assignment): string {
   }
 }
 
+/** Canonical form of a path that need not exist yet: realpath the parent, keep the leaf. */
+const canonicalLeaf = (p: string): string => path.join(fs.realpathSync(path.dirname(p)), path.basename(p));
+
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   // Only a leading `help` verb or a real `--help`/`-h` flag: a bare "help" scanned
   // anywhere in argv turns a flag VALUE (--run help, --task help) into a silent exit-0 no-op.
@@ -161,7 +164,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         task.repo = fs.realpathSync(task.repo);
         task.repositoryKey = repositoryKeys.get(task.repo) ?? await canonicalRepository(task.repo);
         repositoryKeys.set(task.repo, task.repositoryKey);
-        task.worktree = fs.existsSync(task.worktree) ? fs.realpathSync(task.worktree) : path.join(fs.realpathSync(path.dirname(task.worktree)), path.basename(task.worktree));
+        task.worktree = fs.existsSync(task.worktree) ? fs.realpathSync(task.worktree) : canonicalLeaf(task.worktree);
       }
       emit(store.create(input)); return 0;
     }
@@ -217,7 +220,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         if (request.run !== id || request.task !== flag("task") || request.token !== flag("token") || request.revision !== revision) {
           throw new Error("takeover request does not match the current assignment revision");
         }
-        request.worktree = path.join(fs.realpathSync(path.dirname(request.worktree)), path.basename(request.worktree));
+        request.worktree = canonicalLeaf(request.worktree);
         const evidence = await observeOrphan(task(flag("token")), request.worktree);
         emit(store.takeover(id, identity, revision, flag("task"), flag("token"), request, evidence)); break;
       }

@@ -251,7 +251,12 @@ sessions, terminal surfaces across every workspace (`hermod tabs --all --json`),
 and the terminal process list. It also probes the recorded PID through OS `ps`:
 Hermod's process list can omit an orphan that is no longer attached to a terminal.
 Only an empty, error-free `ps -p PID -o pid=` result with exit 1 establishes PID
-absence; a live PID or an unavailable probe prevents takeover.
+absence; a live PID or an unavailable probe prevents takeover. A worker record
+with no PID (attached from a peer that reported none and never observed live since)
+cannot be taken over at all: the probe has nothing to check, and the CLI refuses
+before discovery. Path matching counts as matching: a live or uncertain peer or
+saved session whose cwd is the old worktree or the replacement path blocks takeover,
+so inspect the orphaned checkout from somewhere else first.
 A matching live or uncertain peer/session, an existing old surface/PID, incomplete
 or failed discovery, an existing replacement worktree, an unattached launch, or an
 unsettled reconnect prevents takeover. A stale discovery result cannot authorize it.

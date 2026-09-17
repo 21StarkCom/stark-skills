@@ -155,8 +155,8 @@ export async function observeOrphan(task: Assignment, replacementWorktree: strin
     sessions.sessions.some(s => !s.sessionId || !s.agent)) throw new Error("Hermod session observation incomplete");
   if (!Array.isArray(tabs) || tabs.some(t => typeof t.id !== "string") ||
     !Array.isArray(processes) || processes.some(p => !Number.isSafeInteger(p.pid) || p.pid <= 0)) throw new Error("Hermod surface/process observation unavailable");
-  const matchesPath = (cwd?: string) => typeof cwd === "string" &&
-    [canonicalWorktree(worker.worktree), canonicalWorktree(replacementWorktree)].includes(canonicalWorktree(cwd));
+  const anchors = [canonicalWorktree(worker.worktree), canonicalWorktree(replacementWorktree)];
+  const matchesPath = (cwd?: string) => typeof cwd === "string" && anchors.includes(canonicalWorktree(cwd));
   if (peers.peers.some(p => (p.id === worker.id || (p.threadId || p.sessionId) === worker.session ||
     p.surfaceId === worker.surface || p.pid === worker.pid || matchesPath(p.cwd)) && p.liveness !== "stale")) {
     throw new Error("matching live or uncertain peer prevents takeover");

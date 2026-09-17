@@ -256,7 +256,7 @@ export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[
     if (run.tasks.find(t => t.spec.id === id)?.phase !== "done") return `prerequisite ${id} is unverified`;
   }
   for (const other of run.tasks.filter(ownsFiles)) {
-    if (other === task) continue;
+    if (other.spec.id === task.spec.id) continue;
     if (repositoryKey(task.spec) === repositoryKey(other.spec) && task.spec.files.some(a => other.spec.files.some(b => overlap(a, b)))) {
       return `file ownership conflicts with ${other.spec.id}`;
     }
