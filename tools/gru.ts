@@ -4,9 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { GruStore, parseEngagement, verificationReady } from "./gru_lib.ts";
+import { GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
-import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, discoverWorker, interruptWorker, observeOrphan, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -25,6 +25,7 @@ Usage: node tools/gru.ts <command> [options]
   reconnect    --run ID --revision N --task ID --token TOKEN
   reconnected  --run ID --revision N --task ID --token TOKEN
   recover      --run ID --revision N --task ID --token TOKEN
+  takeover     --run ID --revision N --task ID --token TOKEN --file operator-request.json
   integrate    --run ID --revision N --task ID --token TOKEN --base SHA
   verify       --run ID --revision N --task ID --token TOKEN --pr N --review N
   stop         --run ID --revision N
@@ -54,6 +55,9 @@ Each check is bounded by the task's checkTimeoutMs (default 30 minutes).
 Verification removes its disposable checkout and retains its logs.
 When every task is verified the engagement completes; session ownership remains.
 No command publishes, changes authentication, or deletes worker/session worktrees.
+takeover requires explicit operator authorization bound to the run/task/token/revision.
+It checks complete Hermod absence, fences the old worker, preserves budgets and merge
+ownership, and permits an explicitly selected provider/new worktree. Unknown stays unknown.
 `;
 
 /** Explain why `verificationReady` refused, naming the command that actually repairs it.
@@ -98,6 +102,9 @@ export function verifyBlocker(task: Assignment): string {
   }
 }
 
+/** Canonical form of a path that need not exist yet: realpath the parent, keep the leaf. */
+const canonicalLeaf = (p: string): string => path.join(fs.realpathSync(path.dirname(p)), path.basename(p));
+
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   // Only a leading `help` verb or a real `--help`/`-h` flag: a bare "help" scanned
   // anywhere in argv turns a flag VALUE (--run help, --task help) into a silent exit-0 no-op.
@@ -119,6 +126,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (verb !== "resume" && values["limits-file"] !== undefined) {
       throw new Error(`--limits-file applies to resume, not ${verb}`);
     }
+    if (!["init", "takeover"].includes(verb) && values.file !== undefined) throw new Error(`--file applies to init or takeover, not ${verb}`);
     // Read a JSON file named by a flag, attributing any failure to the FLAG and the PATH.
     // A bare `JSON.parse` surfaces "Unexpected token } in JSON at position 41" — an offset
     // into an unnamed buffer. The operator is running several files through several flags;
@@ -156,7 +164,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         task.repo = fs.realpathSync(task.repo);
         task.repositoryKey = repositoryKeys.get(task.repo) ?? await canonicalRepository(task.repo);
         repositoryKeys.set(task.repo, task.repositoryKey);
-        task.worktree = fs.existsSync(task.worktree) ? fs.realpathSync(task.worktree) : path.join(fs.realpathSync(path.dirname(task.worktree)), path.basename(task.worktree));
+        task.worktree = fs.existsSync(task.worktree) ? fs.realpathSync(task.worktree) : canonicalLeaf(task.worktree);
       }
       emit(store.create(input)); return 0;
     }
@@ -207,6 +215,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         emit(store.resume(id, run.config.leader, revision, identity, limits)); break;
       }
       case "recover": emit(store.recover(id, identity, revision, flag("task"), flag("token"))); break;
+      case "takeover": {
+        const request = parseTakeover(readJsonFlag("file"));
+        if (request.run !== id || request.task !== flag("task") || request.token !== flag("token") || request.revision !== revision) {
+          throw new Error("takeover request does not match the current assignment revision");
+        }
+        request.worktree = canonicalLeaf(request.worktree);
+        const evidence = await observeOrphan(task(flag("token")), request.worktree);
+        emit(store.takeover(id, identity, revision, flag("task"), flag("token"), request, evidence)); break;
+      }
       case "continue": emit(store.continueWorker(id, identity, revision, flag("task"), flag("token"))); break;
       case "reconnect": {
         validateReconnect(task());

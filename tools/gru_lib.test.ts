@@ -3,8 +3,193 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
-import { observations, packet, type HermodPeer } from "./gru_runtime_lib.ts";
-import { GruStore, parseEngagement, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker } from "./gru_lib.ts";
+import { observations, observeOrphan, observeWorkers, packet, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { GruStore, parseEngagement, parseTakeover, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker } from "./gru_lib.ts";
+
+// Compose the production observation builders with the store: a handwritten "dead"
+// observation would miss the orphaned-record failure that prompted STARK-5021.
+const absentHermod: Command = async argv => argv[0] === "ps" ? { code: 1, stdout: "", stderr: "" } : ({ code: 0, stderr: "", stdout: JSON.stringify(
+  argv[1] === "msg" ? { peers: [], observedAt: new Date().toISOString(), incomplete: false }
+    : argv[1] === "sessions" ? { sessions: [], totalMatches: 0 } : []) });
+const takeoverRequest = (r: Run) => ({ run: r.config.id, task: "one", token: r.tasks[0].token!, revision: r.revision,
+  operatorRequest: "Replace the orphaned worker with a fresh Claude Minion; retain the launch budget.",
+  provider: "claude" as const, worktree: "/worktrees/fresh-takeover", limits: ["Fresh Claude Minion; preserve the existing scope and budgets"] });
+async function orphanedRun(t: TestContext, integrating = false) {
+  const { store, file } = fixture(t);
+  const c = config(); c.tasks = c.tasks.slice(0, 1);
+  let r = observe(store, store.create(c));
+  r = store.reserve(c.id, c.leader, r.revision, "one");
+  r = store.attach(c.id, c.leader, r.revision, "one", r.tasks[0].token!, { ...worker("one"), pid: 42 });
+  r = report(store, r, "one", "ack");
+  r = report(store, r, "one", "ready", "Existing draft PR 1075; inspect before editing");
+  if (integrating) r = store.integrate(c.id, c.leader, r.revision, "one", r.tasks[0].token!, "a".repeat(40));
+  r = store.reconcile(c.id, c.leader, r.revision, await observeWorkers(r, absentHermod));
+  return { store, file, r };
+}
+
+test("explicit orphan takeover preserves unknown evidence, PR, budget and merge ownership, and fences old reports", async t => {
+  const { store, file, r } = await orphanedRun(t, true);
+  assert.equal(r.tasks[0].observation!.liveness, "unknown");
+  assert.throws(() => store.recover("demo", "leader-one", r.revision, "one", r.tasks[0].token!), /unknown is not dead/);
+  const request = takeoverRequest(r);
+  const evidence = await observeOrphan(r.tasks[0], request.worktree, absentHermod);
+  let next = store.takeover("demo", "leader-one", r.revision, "one", request.token, request, evidence);
+  assert.equal(next.tasks[0].phase, "pending");
+  assert.equal(next.tasks[0].attempts, 1);
+  assert.equal(next.tasks[0].recoveries, 0);
+  assert.ok(next.tasks[0].token && next.tasks[0].token !== request.token);
+  assert.equal(next.tasks[0].worker, undefined);
+  assert.equal(next.tasks[0].integrationBase, "a".repeat(40));
+  assert.equal(next.tasks[0].report?.message, r.tasks[0].report?.message);
+  assert.deepEqual(next.tasks[0].takeovers![0].previousObservation, r.tasks[0].observation);
+  assert.equal(next.config.tasks[0].provider, "claude");
+  assert.equal(next.tasks[0].spec.provider, "claude");
+  assert.deepEqual(next.config.limits, request.limits);
+  assert.match(next.events.at(-1)!.detail, /Replace the orphaned worker/);
+  assert.throws(() => store.report("demo", "leader-one", next.revision, "one", request.token,
+    worker("one").session, "ready", "old report"), /stale assignment token/);
+  const reopened = new GruStore(file); t.after(() => reopened.close());
+  assert.deepEqual(reopened.read("demo").tasks[0].takeovers, next.tasks[0].takeovers);
+  next = store.reserve("demo", "leader-one", next.revision, "one");
+  assert.equal(next.tasks[0].attempts, 2);
+  assert.match(packet(next, next.tasks[0]), /Existing draft PR 1075/);
+  const freshWorker = { ...worker("new"), provider: "claude" as const, id: "claude:new", worktree: request.worktree };
+  assert.throws(() => store.attach("demo", "leader-one", next.revision, "one", next.tasks[0].token!,
+    { ...freshWorker, session: worker("one").session }), /fenced worker/);
+  next = store.attach("demo", "leader-one", next.revision, "one", next.tasks[0].token!, freshWorker);
+  assert.equal(next.tasks[0].phase, "intake");
+  assert.equal(verificationReady(next.tasks[0]), false);
+  assert.throws(() => store.complete("demo", "leader-one", next.revision, "one", next.tasks[0].token!, landedProof(next)), /integration/);
+  // A second run still cannot appropriate either the old tree or the merge lock.
+  const other = config(); other.id = "other"; other.tasks = [other.tasks[1]];
+  other.tasks[0].worktree = worker("one").worktree;
+  let second = observe(store, store.create(other));
+  assert.throws(() => store.reserve("other", "leader-one", second.revision, "two"), /resource already owned/);
+});
+
+test("takeover refuses stale or mismatched authority and evidence without changing state", async t => {
+  const { store, r } = await orphanedRun(t);
+  const request = takeoverRequest(r);
+  const evidence = await observeOrphan(r.tasks[0], request.worktree, absentHermod);
+  const binding = /does not match the current assignment revision/;
+  const requests: [Record<string, unknown>, RegExp][] = [
+    [{ ...request, run: "another" }, binding], [{ ...request, task: "two" }, binding],
+    [{ ...request, token: "old" }, binding], [{ ...request, revision: r.revision - 1 }, binding],
+    [{ ...request, operatorRequest: " " }, /operatorRequest is required/],
+    [{ ...request, maxAttempts: 99 }, /unknown takeover request field/],
+    [{ ...request, worktree: r.tasks[0].spec.worktree }, /evidence worktree mismatch/],
+  ];
+  for (const [changed, reason] of requests) {
+    assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token, changed, evidence), reason);
+    assert.equal(store.read("demo").revision, r.revision);
+  }
+  // Evidence gathered for the old checkout or the repo itself passes the mismatch guard
+  // above; the isolation guard must still refuse it.
+  for (const reused of [r.tasks[0].spec.worktree, r.tasks[0].spec.repo]) {
+    const reusedEvidence = await observeOrphan(r.tasks[0], reused, absentHermod);
+    assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token,
+      { ...request, worktree: reused }, reusedEvidence), /fresh isolated worktree/);
+    assert.equal(store.read("demo").revision, r.revision);
+  }
+  assert.throws(() => store.takeover("demo", "not-leader", r.revision, "one", request.token, request, evidence), /stale leader/);
+  assert.throws(() => store.takeover("demo", "leader-one", r.revision - 1, "one", request.token, request, evidence), /stale revision/);
+  const proofs: [typeof evidence, RegExp][] = [
+    [{ ...evidence, checks: [] }, /incomplete orphan evidence/],
+    [{ ...evidence, worker: { ...evidence.worker, session: "other" } }, /evidence worker mismatch/],
+    [{ ...evidence, observedAt: new Date(Date.now() - 120_000).toISOString() }, /stale/],
+    [{ ...evidence, replacementWorktree: "/elsewhere" }, /evidence worktree mismatch/],
+  ];
+  for (const [bad, reason] of proofs) {
+    assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token, request, bad), reason);
+    assert.equal(store.read("demo").revision, r.revision);
+  }
+  assert.throws(() => parseTakeover({ ...request, worktree: "relative" }), /absolute/);
+});
+
+test("pending takeover retains file ownership across engagements without blocking its own reserve", async t => {
+  const { store, r } = await orphanedRun(t);
+  const request = takeoverRequest(r);
+  const evidence = await observeOrphan(r.tasks[0], request.worktree, absentHermod);
+  const pending = store.takeover("demo", "leader-one", r.revision, "one", request.token, request, evidence);
+  const c = config(); c.id = "competitor"; c.tasks = [c.tasks[1]];
+  c.tasks[0].files = [...r.tasks[0].spec.files];
+  const other = observe(store, store.create(c));
+  assert.match(store.readyReason(other, other.tasks[0]) ?? "", /file ownership conflicts/);
+  assert.throws(() => store.reserve(c.id, c.leader, other.revision, "two"), /file ownership conflicts/);
+  assert.equal(store.readyReason(pending, pending.tasks[0]), null);
+  assert.equal(store.reserve("demo", "leader-one", pending.revision, "one").tasks[0].phase, "reserved");
+});
+
+test("pending takeover retains same-run scope until its inherited merge is verified", async t => {
+  const { store } = fixture(t);
+  const c = config(); c.tasks = c.tasks.slice(0, 2);
+  c.tasks[1].files = [...c.tasks[0].files];
+  let r = observe(store, store.create(c));
+  r = store.reserve(c.id, c.leader, r.revision, "one");
+  r = store.attach(c.id, c.leader, r.revision, "one", r.tasks[0].token!, { ...worker("one"), pid: 42 });
+  r = report(store, r, "one", "ack"); r = report(store, r, "one", "ready");
+  r = store.integrate(c.id, c.leader, r.revision, "one", r.tasks[0].token!, BASE);
+  r = store.reconcile(c.id, c.leader, r.revision, await observeWorkers(r, absentHermod));
+  const { limits: _limits, ...request } = takeoverRequest(r);
+  const evidence = await observeOrphan(r.tasks[0], request.worktree, absentHermod);
+  let next = store.takeover(c.id, c.leader, r.revision, "one", request.token, request, evidence);
+  assert.match(store.readyReason(next, next.tasks[1]) ?? "", /file ownership conflicts with one/);
+  assert.equal(store.readyReason(next, next.tasks[0]), null);
+  next = store.complete(c.id, c.leader, next.revision, "one", next.tasks[0].token!, landedProof(next));
+  assert.equal(store.readyReason(next, next.tasks[1]), null);
+  assert.equal(store.reserve(c.id, c.leader, next.revision, "two").tasks[1].phase, "reserved");
+});
+
+test("takeover transaction refuses a path occupied after the absence observation", async t => {
+  const { store, file, r } = await orphanedRun(t);
+  const request = { ...takeoverRequest(r), worktree: path.join(path.dirname(file), "replacement") };
+  const evidence = await observeOrphan(r.tasks[0], request.worktree, absentHermod);
+  fs.mkdirSync(request.worktree);
+  assert.throws(() => store.takeover("demo", "leader-one", r.revision, "one", request.token, request, evidence), /absent worktree/);
+  assert.deepEqual(store.read("demo"), r);
+});
+
+test("a previously stopped orphan can be taken over after resume and fresh reconciliation", async t => {
+  const { store, r } = await orphanedRun(t);
+  let next = store.stop("demo", "leader-one", r.revision);
+  next = observe(store, next, "live");
+  next = store.stopped("demo", "leader-one", next.revision, "one", next.tasks[0].token!);
+  next = store.resume("demo", "leader-one", next.revision, "leader-one");
+  next = store.reconcile("demo", "leader-one", next.revision, await observeWorkers(next, absentHermod));
+  const request = takeoverRequest(next);
+  const evidence = await observeOrphan(next.tasks[0], request.worktree, absentHermod);
+  const pending = store.takeover("demo", "leader-one", next.revision, "one", request.token, request, evidence);
+  assert.equal(pending.tasks[0].phase, "pending");
+  assert.equal(pending.tasks[0].takeovers![0].previousObservation!.liveness, "unknown");
+  assert.equal(pending.tasks[0].attempts, next.tasks[0].attempts);
+});
+
+test("takeover is not a budget reset, a retry of uncertain startup, or a limits rewrite for unrelated tasks", async t => {
+  const { store, r } = await orphanedRun(t);
+  const request = takeoverRequest(r);
+  const evidence = await observeOrphan(r.tasks[0], request.worktree, absentHermod);
+  let next = store.takeover("demo", "leader-one", r.revision, "one", request.token, request, evidence);
+  next = store.reserve("demo", "leader-one", next.revision, "one");
+  assert.throws(() => store.takeover("demo", "leader-one", next.revision, "one", next.tasks[0].token!,
+    takeoverRequest(next), evidence), /attached assignment/);
+  next = store.attach("demo", "leader-one", next.revision, "one", next.tasks[0].token!,
+    { ...worker("new"), id: "claude:new", provider: "claude", worktree: request.worktree, pid: 43 });
+  next = store.reconcile("demo", "leader-one", next.revision, await observeWorkers(next, absentHermod));
+  assert.throws(() => store.takeover("demo", "leader-one", next.revision, "one", next.tasks[0].token!,
+    { ...takeoverRequest(next), worktree: "/yet-another" }, evidence), /budget exhausted/);
+  const { store: another, r: old } = await orphanedRun(t);
+  let dead = observe(another, old, "dead");
+  dead = another.beginReconnect("demo", "leader-one", dead.revision, "one", dead.tasks[0].token!);
+  dead = another.reconcile("demo", "leader-one", dead.revision, await observeWorkers(dead, absentHermod));
+  assert.throws(() => another.takeover("demo", "leader-one", dead.revision, "one", dead.tasks[0].token!,
+    takeoverRequest(dead), evidence), /unsettled reconnect/);
+  const c = config(); c.id = "multi";
+  let multi = start(another, observe(another, another.create(c)), "two");
+  multi = observe(another, multi, "unknown");
+  const multiRequest = { ...takeoverRequest(multi), task: "two", token: multi.tasks[1].token! };
+  assert.throws(() => another.takeover("multi", "leader-one", multi.revision, "two", multiRequest.token,
+    multiRequest, { ...evidence, worker: multi.tasks[1].worker! }), /single-task/);
+});
 
 const config = (): Engagement => ({ id: "demo", objective: "Implement independent tasks, then integrate",
   leader: "leader-one", maxWorkers: 2, maxAttempts: 2, maxRecoveries: 2,

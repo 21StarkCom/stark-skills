@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { verifyBlocker } from "./gru.ts";
+import { GruStore } from "./gru_lib.ts";
 
 const CLI = path.join(import.meta.dirname, "gru.ts");
 
@@ -21,13 +22,57 @@ const CLI = path.join(import.meta.dirname, "gru.ts");
  * the harness's stdout untouched, exercises the real entrypoint including its exit code,
  * and needs no global env mutation. `CODEX_THREAD_ID` is cleared because it outranks
  * `CLAUDE_CODE_SESSION_ID`; a stray one would pick the identity for every case here. */
-async function run(argv: string[], leader: string): Promise<{ code: number; out: string; error: string }> {
+async function run(argv: string[], leader: string, extraEnv: Record<string, string> = {}): Promise<{ code: number; out: string; error: string }> {
   const { CODEX_THREAD_ID: _drop, ...env } = process.env;
   const child = spawnSync(process.execPath, [CLI, ...argv], {
-    encoding: "utf8", env: { ...env, CLAUDE_CODE_SESSION_ID: leader },
+    encoding: "utf8", env: { ...env, ...extraEnv, CLAUDE_CODE_SESSION_ID: leader },
   });
   return { code: child.status ?? -1, out: child.stdout, error: child.stderr };
 }
+
+test("gru CLI: takeover consumes a pinned operator request and real observation command outputs", async t => {
+  const { dir, state, file } = engagement(t);
+  const config = JSON.parse(fs.readFileSync(file, "utf8")); config.maxAttempts = 2;
+  const store = new GruStore(state); t.after(() => store.close());
+  // Observe an exited local process instead of assuming an arbitrary PID is absent.
+  const vanished = spawnSync(process.execPath, ["-p", "process.pid"], { encoding: "utf8" });
+  assert.equal(vanished.status, 0);
+  let current = store.create(config);
+  current = store.reconcile("cli", "leader-one", current.revision, {});
+  current = store.reserve("cli", "leader-one", current.revision, "t");
+  current = store.attach("cli", "leader-one", current.revision, "t", current.tasks[0].token!, {
+    id: "codex:old", session: "old", surface: "gone", workspace: "workspace", provider: "codex",
+    worktree: current.tasks[0].spec.worktree, pid: Number(vanished.stdout.trim()),
+  });
+  current = store.reconcile("cli", "leader-one", current.revision, { t: {
+    observedAt: new Date().toISOString(), liveness: "unknown", activity: "unknown", evidence: [],
+  } });
+  const bin = path.join(dir, "bin"); fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "hermod"), `#!/usr/bin/env node
+const verb = process.argv[2];
+console.log(JSON.stringify(verb === "msg" ? {peers: [], observedAt: new Date().toISOString(), incomplete: false} : verb === "sessions" ? {sessions: [], totalMatches: 0} : []));
+`, { mode: 0o755 });
+  const authorization = path.join(dir, "operator.json");
+  const request = { run: "cli", task: "t", token: current.tasks[0].token, revision: current.revision,
+    operatorRequest: "Use a fresh Claude Minion for this orphaned assignment", provider: "claude",
+    worktree: path.join(dir, "fresh"), limits: ["Fresh Claude Minion; preserve scope and budget"] };
+  fs.writeFileSync(authorization, JSON.stringify(request));
+  const args = ["takeover", "--run", "cli", "--revision", String(current.revision), "--task", "t",
+    "--token", current.tasks[0].token!, "--state", state, "--file", authorization];
+  const result = await run(args, "leader-one", { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  assert.equal(result.code, 0, result.error);
+  const adopted = JSON.parse(result.out);
+  assert.equal(adopted.tasks[0].phase, "pending");
+  assert.equal(adopted.tasks[0].spec.provider, "claude");
+  assert.equal(adopted.tasks[0].attempts, 1);
+  assert.equal(adopted.tasks[0].takeovers[0].previousObservation.liveness, "unknown");
+  assert.equal(adopted.tasks[0].takeovers[0].request.operatorRequest, request.operatorRequest);
+  assert.equal(fs.existsSync(request.worktree), false);
+  const replay = await run(args, "leader-one", { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  assert.equal(replay.code, 2);
+  assert.match(replay.error, /stale revision/);
+  assert.equal(store.read("cli").revision, adopted.revision);
+});
 
 function engagement(t: TestContext) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-cli-"));

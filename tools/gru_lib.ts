@@ -7,6 +7,10 @@ import { DatabaseSync } from "node:sqlite";
 export function canonicalWorktree(value: string): string {
   return fs.existsSync(value) ? fs.realpathSync(value) : path.resolve(value);
 }
+/** A dangling symlink is an occupied directory entry too. Fail closed on read errors. */
+export function assertAbsentWorktree(value: string): void {
+  if (fs.lstatSync(value, { throwIfNoEntry: false })) throw new Error("takeover requires a new, absent worktree; preserve existing checkouts");
+}
 
 export type Provider = "claude" | "codex";
 export type Phase = "pending" | "reserved" | "intake" | "working" | "blocked" |
@@ -67,6 +71,36 @@ export interface CompletionEvidence {
   verifiedAt: string;
   ticketState: string;
 }
+/** An operator attestation, not independently authenticated proof of human identity. */
+export interface TakeoverRequest {
+  run: string;
+  task: string;
+  token: string;
+  revision: number;
+  operatorRequest: string;
+  provider: Provider;
+  worktree: string;
+  model?: string;
+  effort?: string;
+  limits?: string[];
+}
+export interface OrphanEvidence {
+  observedAt: string;
+  worker: Worker;
+  replacementWorktree: string;
+  checks: string[];
+}
+export const ORPHAN_CHECKS = ["complete peer discovery", "complete saved-session discovery",
+  "no matching live peer or saved session", "recorded surface absent", "recorded PID absent",
+  "replacement worktree unoccupied"];
+export interface TakeoverRecord {
+  request: TakeoverRequest;
+  evidence: OrphanEvidence;
+  previousSpec: TaskSpec;
+  previousLimits: string[];
+  previousObservation?: Observation;
+  previousReport?: Assignment["report"];
+}
 export interface Assignment {
   spec: TaskSpec;
   phase: Phase;
@@ -82,6 +116,7 @@ export interface Assignment {
   stoppedFrom?: Phase;
   reconnect?: { id: string; startedAt: string; phase: Phase; pending: boolean };
   evidence?: CompletionEvidence;
+  takeovers?: TakeoverRecord[];
 }
 export interface Run {
   schema: 1;
@@ -117,8 +152,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isProvider(value: unknown): value is Provider {
   return value === "codex" || value === "claude";
 }
+export function parseTakeover(value: unknown): TakeoverRequest {
+  requireValue(isRecord(value), "takeover request must be an object");
+  const keys = ["run", "task", "token", "revision", "operatorRequest", "provider", "worktree", "model", "effort", "limits"];
+  requireValue(Object.keys(value).every(k => keys.includes(k)), "unknown takeover request field");
+  for (const key of ["run", "task", "token", "operatorRequest", "worktree"]) requireValue(nonempty(value[key]), `takeover ${key} is required`);
+  requireValue(Number.isSafeInteger(value.revision) && Number(value.revision) >= 0, "takeover revision is required");
+  requireValue(isProvider(value.provider), "takeover provider must be explicitly claude or codex");
+  requireValue(path.isAbsolute(value.worktree as string), "takeover worktree must be absolute");
+  for (const key of ["model", "effort"]) requireValue(value[key] === undefined || nonempty(value[key]), `takeover ${key} must be nonempty`);
+  if (value.limits !== undefined) requireLimits(value.limits, "takeover limits must be a non-empty list of strings");
+  return structuredClone(value) as unknown as TakeoverRequest;
+}
 const active = (t: Assignment) => !["pending", "done", "stopped"].includes(t.phase);
-const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped";
+const ownsFiles = (t: Assignment) => active(t) || t.phase === "stopped" ||
+  // Takeover retains the orphan's scope until its replacement reserves or the
+  // retained merge settles. Normal recover() keeps its worker and is unchanged.
+  (t.phase === "pending" && !t.worker && Boolean(t.takeovers?.length));
 // Completed workers release slots with fresh idle/dead or confirmed-retirement
 // evidence. Unconfirmed or still-busy workers count toward the concurrency limit.
 const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
@@ -206,6 +256,7 @@ export function readyReason(run: Run, task: Assignment, otherRuns: readonly Run[
     if (run.tasks.find(t => t.spec.id === id)?.phase !== "done") return `prerequisite ${id} is unverified`;
   }
   for (const other of run.tasks.filter(ownsFiles)) {
+    if (other.spec.id === task.spec.id) continue;
     if (repositoryKey(task.spec) === repositoryKey(other.spec) && task.spec.files.some(a => other.spec.files.some(b => overlap(a, b)))) {
       return `file ownership conflicts with ${other.spec.id}`;
     }
@@ -307,7 +358,7 @@ export class GruStore {
       task.worker = undefined; task.observation = undefined; task.acknowledged = undefined;
       // A replacement inherits any unsettled merge grant and its last report.
       // Keep the original base so an already-merged PR can still be verified.
-      if (!task.integrationBase) task.report = undefined;
+      if (!task.integrationBase && !task.takeovers?.length) task.report = undefined;
       task.evidence = undefined; task.retired = undefined;
       task.reconnect = undefined; task.stoppedFrom = undefined;
       this.event(run, "reserved", task.token, taskId);
@@ -322,6 +373,8 @@ export class GruStore {
       for (const key of ["id", "session", "surface", "workspace", "worktree"] as const) requireValue(nonempty(worker[key]), `worker ${key} is required`);
       requireValue(worker.provider === task.spec.provider, "provider substitution refused");
       requireValue(canonicalWorktree(worker.worktree) === canonicalWorktree(task.spec.worktree), "worker worktree mismatch");
+      requireValue(!task.takeovers?.some(t => t.evidence.worker.id === worker.id ||
+        t.evidence.worker.session === worker.session || t.evidence.worker.surface === worker.surface), "fenced worker cannot reattach after takeover");
       this.own(run, task, [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`]);
       task.worker = { ...structuredClone(worker), worktree: canonicalWorktree(worker.worktree) };
       if (stoppingLaunch) task.stoppedFrom = "intake";
@@ -426,6 +479,49 @@ export class GruStore {
       task.phase = "pending";
       this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND resource LIKE 'exclusive:%'").run(id, taskId);
       this.event(run, "recovery", "old worker observed terminal; existing worktree must be preserved", taskId);
+    });
+  }
+  /** Explicit operator disposition of missing runtime records; never a claim of death.
+   * The request is bound to this exact assignment revision and audited verbatim. */
+  takeover(id: string, leader: string, revision: number, taskId: string, token: string,
+    input: unknown, evidence: OrphanEvidence): Run {
+    const request = parseTakeover(input);
+    return this.transaction(id, leader, revision, run => {
+      const task = this.task(run, taskId, token);
+      requireValue(request.run === id && request.task === taskId && request.token === token && request.revision === revision,
+        "takeover request does not match the current assignment revision");
+      requireValue(run.mode === "running" && run.reconciled, "resume and reconcile before takeover");
+      requireValue(task.worker && (active(task) || task.phase === "stopped") && !["reserved", "stopping"].includes(task.phase), "takeover requires an attached assignment");
+      requireValue(!task.reconnect?.pending, "unsettled reconnect prevents takeover");
+      requireValue(task.attempts < run.config.maxAttempts, "attempt budget exhausted");
+      requireValue(task.observation?.liveness === "unknown", "takeover is for an unknown worker; use normal lifecycle for live or dead workers");
+      requireValue(fresh(task.observation) && fresh({ ...task.observation, observedAt: evidence.observedAt }), "takeover evidence is stale; reconcile again");
+      requireValue(JSON.stringify(evidence.worker) === JSON.stringify(task.worker), "takeover evidence worker mismatch");
+      requireValue(evidence.checks.length === ORPHAN_CHECKS.length && ORPHAN_CHECKS.every(c => evidence.checks.includes(c)), "incomplete orphan evidence");
+      // Discovery awaits external commands; recheck occupancy inside the transaction.
+      assertAbsentWorktree(request.worktree);
+      const worktree = canonicalWorktree(request.worktree);
+      requireValue(evidence.replacementWorktree === worktree, "takeover evidence worktree mismatch");
+      requireValue(worktree !== canonicalWorktree(task.spec.worktree) && worktree !== canonicalWorktree(task.spec.repo), "takeover requires a fresh isolated worktree");
+      requireValue(!run.tasks.some(t => t !== task && canonicalWorktree(t.spec.worktree) === worktree), "duplicate worktree ownership");
+      // Limits apply to the whole run: do not rewrite unrelated tasks' authority here.
+      requireValue(request.limits === undefined || run.tasks.length === 1, "takeover limits replacement requires a single-task engagement");
+      this.own(run, task, [`tree:${worktree}`]);
+      const record: TakeoverRecord = { request, evidence: structuredClone(evidence),
+        previousSpec: structuredClone(task.spec), previousLimits: [...run.config.limits],
+        previousObservation: structuredClone(task.observation), previousReport: structuredClone(task.report) };
+      task.takeovers = [...(task.takeovers ?? []), record];
+      task.spec = { ...task.spec, provider: request.provider, worktree, model: request.model, effort: request.effort };
+      run.config.tasks = run.config.tasks.map(t => t.id === taskId ? structuredClone(task.spec) : t);
+      if (request.limits) run.config.limits = [...request.limits];
+      // Keep all owner rows, PR reports, merge bases, budgets and saved identities.
+      // Only reserve() spends a new launch. The old token is invalid immediately.
+      // A fresh fence token also lets Gru settle an already-landed retained merge
+      // before reserving a replacement; there is no worker or launch attached to it.
+      task.token = randomUUID(); task.worker = undefined; task.observation = undefined;
+      task.acknowledged = undefined; task.reconnect = undefined; task.stoppedFrom = undefined;
+      task.phase = "pending";
+      this.event(run, "operator-takeover", JSON.stringify(record), taskId);
     });
   }
   beginReconnect(id: string, leader: string, revision: number, taskId: string, token: string): Run {
