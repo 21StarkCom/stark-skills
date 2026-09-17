@@ -93,7 +93,6 @@
       }
     }
   },
-  "outputStyle": "Blunt",
   "effortLevel": "low",
   "autoUpdatesChannel": "latest",
   "skipDangerousModePermissionPrompt": true,
