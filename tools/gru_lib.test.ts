@@ -246,6 +246,12 @@ const landedProof = (run: Run): CompletionEvidence => ({ base: BASE, head: "b".r
   verifiedAt: new Date().toISOString(), ticketState: "done",
   checks: run.tasks[0].spec.checks.map(argv => ({ argv, exitCode: 0, log: "/evidence/check.log" })) });
 
+/** Runtime evidence for a linked worktree of /repo, as `inspectAdoption` would record it. */
+const adoptionProof = (observed: string, declared: string, repositoryKey: string): WorktreeAdoption => ({
+  observedAt: new Date().toISOString(), declared, observed, toplevel: observed,
+  gitDir: `/repo/.git/worktrees/${path.basename(observed)}`, commonDir: "/repo/.git",
+  repositoryKey, branch: "worktree-STARK-100", checks: [...ADOPTION_CHECKS] });
+
 test("attachment recognizes a symlink alias of the reserved worktree", t => {
   const { store, file } = fixture(t);
   const target = path.join(path.dirname(file), "worktree");
@@ -266,18 +272,19 @@ test("attach adopts only fresh, complete evidence for an undeclared, unowned sam
   run = store.reserve("demo", "leader-one", run.revision, "one");
   const token = run.tasks[0].token!;
   const moved = { ...worker("one"), worktree: observed };
-  const proof = (): WorktreeAdoption => ({ observedAt: new Date().toISOString(), declared: "/worktrees/one", observed,
-    repositoryKey: "o/r", branch: "worktree-STARK-100", checks: [...ADOPTION_CHECKS] });
+  const proof = (at = observed) => adoptionProof(at, "/worktrees/one", "o/r");
   const refusals: [Worker, WorktreeAdoption | undefined, RegExp][] = [
     [moved, undefined, /worker worktree mismatch$/],
     [moved, { ...proof(), checks: ADOPTION_CHECKS.slice(1) }, /incomplete/],
     [moved, { ...proof(), observedAt: new Date(Date.now() - 120_000).toISOString() }, /stale/],
     [moved, { ...proof(), observed: "/repo/.claude/worktrees/other" }, /evidence mismatch/],
     [moved, { ...proof(), declared: "/worktrees/two" }, /evidence mismatch/],
+    [moved, { ...proof(), toplevel: "/repo/.claude" }, /not a worktree root/],
+    [moved, { ...proof(), gitDir: "/repo/.git" }, /not a linked worktree/],
     [moved, { ...proof(), repositoryKey: "o/other" }, /belongs to o\/other/],
-    [{ ...moved, worktree: "/repo/.claude/worktrees/STARK-1000" }, { ...proof(), observed: "/repo/.claude/worktrees/STARK-1000", branch: "STARK-1000" }, /does not name STARK-100/],
-    [{ ...moved, worktree: "/repo" }, { ...proof(), observed: "/repo" }, /isolated worktree/],
-    [{ ...moved, worktree: "/worktrees/two" }, { ...proof(), observed: "/worktrees/two", branch: "STARK-100" }, /declared by STARK-101/],
+    [{ ...moved, worktree: "/repo/.claude/worktrees/STARK-1000" }, { ...proof("/repo/.claude/worktrees/STARK-1000"), branch: "STARK-1000" }, /does not name STARK-100/],
+    [{ ...moved, worktree: "/repo" }, proof("/repo"), /isolated worktree/],
+    [{ ...moved, worktree: "/worktrees/two" }, { ...proof("/worktrees/two"), branch: "STARK-100" }, /declared by STARK-101/],
   ];
   for (const [candidate, evidence, reason] of refusals) {
     assert.throws(() => store.attach("demo", "leader-one", run.revision, "one", token, candidate, evidence), reason);
@@ -296,20 +303,46 @@ test("an adopted worktree replaces the declared one in the spec and is owned aga
   const c = config(); c.tasks.forEach(task => { task.repositoryKey = "o/r"; });
   let run = observe(store, store.create(c));
   run = store.reserve("demo", "leader-one", run.revision, "one");
-  const evidence: WorktreeAdoption = { observedAt: new Date().toISOString(), declared: "/worktrees/one", observed,
-    repositoryKey: "o/r", branch: "worktree-STARK-100", checks: [...ADOPTION_CHECKS] };
-  run = store.attach("demo", "leader-one", run.revision, "one", run.tasks[0].token!, { ...worker("one"), worktree: observed }, evidence);
+  const evidence = adoptionProof(observed, "/worktrees/one", "o/r");
+  const launched = run.tasks[0].token!;
+  run = store.attach("demo", "leader-one", run.revision, "one", launched, { ...worker("one"), worktree: observed }, evidence);
   assert.equal(run.tasks[0].phase, "intake");
   assert.equal(run.tasks[0].worker!.worktree, observed);
   assert.equal(run.tasks[0].spec.worktree, observed);
   assert.equal(run.config.tasks[0].worktree, observed);
-  assert.match(packet(run, run.tasks[0]), new RegExp(`Work only in ${observed}\\.`));
+  // The launch brief named the declared path under the old token; only the fresh packet works.
+  assert.ok(run.tasks[0].token && run.tasks[0].token !== launched);
+  assert.throws(() => store.report("demo", "leader-one", run.revision, "one", launched, worker("one").session, "ack", "one behaves as specified"), /stale assignment token/);
+  const brief = packet(run, run.tasks[0]);
+  assert.match(brief, new RegExp(`Work only in ${observed}\\.`));
+  assert.ok(brief.includes(`token: ${run.tasks[0].token}`));
   const audit = run.events.find(e => e.kind === "worktree-adopted")!;
-  assert.deepEqual(JSON.parse(audit.detail), evidence);
+  assert.deepEqual(JSON.parse(audit.detail), { ...evidence, token: run.tasks[0].token });
   // The adopted path is now reserved: a later engagement cannot claim it.
   const later = config(); later.id = "later"; later.tasks = [{ ...later.tasks[1], worktree: observed }];
   const next = observe(store, store.create(later));
   assert.throws(() => store.reserve("later", "leader-one", next.revision, "two"), new RegExp(`resource already owned: tree:${observed}`));
+});
+
+test("adoption never rebinds a takeover replacement into the fenced orphan's worktree, nor the leader as its own worker", async t => {
+  const { store, r } = await orphanedRun(t);
+  const request = takeoverRequest(r);
+  let next = store.takeover("demo", "leader-one", r.revision, "one", request.token, request,
+    await observeOrphan(r.tasks[0], request.worktree, absentHermod));
+  next = store.reserve("demo", "leader-one", next.revision, "one");
+  const token = next.tasks[0].token!;
+  // Claude's `--worktree=<ticket>` re-attaches to the orphan's existing checkout; its tree is
+  // still owned by this very task, so ownership alone would let the replacement bind there.
+  const orphanTree = worker("one").worktree;
+  const replacement: Worker = { ...worker("new"), provider: "claude", id: "claude:new", worktree: orphanTree };
+  const proof = (observed: string) => adoptionProof(observed, request.worktree, "/repo");
+  assert.throws(() => store.attach("demo", "leader-one", next.revision, "one", token, replacement, proof(orphanTree)), /fenced worker/);
+  const leaderTree = "/repo/.claude/worktrees/STARK-100";
+  assert.throws(() => store.attach("demo", "leader-one", next.revision, "one", token,
+    { ...replacement, session: "leader-one", worktree: leaderTree }, proof(leaderTree)), /leader cannot attach as its own worker/);
+  assert.equal(store.read("demo").revision, next.revision);
+  const adopted = store.attach("demo", "leader-one", next.revision, "one", token, { ...replacement, worktree: leaderTree }, proof(leaderTree));
+  assert.equal(adopted.tasks[0].spec.worktree, leaderTree);
 });
 
 test("DAG and authority validation reject missing limits, cycles, duplicated ownership, and provider fallback", () => {

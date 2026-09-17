@@ -98,6 +98,10 @@ export interface WorktreeAdoption {
   observedAt: string;
   declared: string;
   observed: string;
+  /** `git rev-parse --show-toplevel`, `--git-dir`, `--git-common-dir`, run in the observed path. */
+  toplevel: string;
+  gitDir: string;
+  commonDir: string;
   repositoryKey: string;
   branch?: string;
   checks: string[];
@@ -192,7 +196,10 @@ const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
     (t.phase === "done" && (t.observation?.retired ||
       (t.observation?.liveness === "live" && t.observation.activity === "idle"))))));
 const overlap = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
-const repositoryKey = (t: TaskSpec) => t.repositoryKey ?? t.repo;
+export const repositoryKey = (t: TaskSpec) => t.repositoryKey ?? t.repo;
+/** Evidence is complete only when it names exactly the required checks. */
+const completeChecks = (checks: string[], required: readonly string[]) =>
+  checks.length === required.length && required.every(c => checks.includes(c));
 const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
 const fresh = (o?: Pick<Observation, "observedAt">) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
@@ -259,6 +266,12 @@ export function parseEngagement(value: unknown): Engagement {
   }
   config.tasks.forEach(t => visit(t.id));
   return config;
+}
+
+/** A reservation whose launch is not yet bound to a worker, including one that surfaced after `stop`. */
+export function awaitingAttach(run: Run, task: Assignment): boolean {
+  return (run.mode === "running" && task.phase === "reserved") ||
+    (run.mode === "stopping" && task.phase === "stopping" && task.stoppedFrom === "reserved" && !task.worker);
 }
 
 /** Dependency, capacity, and file-ownership checks; GruStore also checks reserved resources. */
@@ -382,21 +395,22 @@ export class GruStore {
   }
   /** A worker outside the declared worktree binds only with `adoption` evidence: its checkout
    * must be a linked worktree of the same repository that names the ticket and that no other
-   * task declares or owns. Refusing every mismatch stranded the reservation — the launched
+   * task declares or owns. Adoption issues a new token; read it from the returned run. Refusing every mismatch stranded the reservation — the launched
    * worker was live, unbound, and so neither attachable, interruptible, nor recoverable. */
   attach(id: string, leader: string, revision: number, taskId: string, token: string, worker: Worker, adoption?: WorktreeAdoption): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
-      const stoppingLaunch = run.mode === "stopping" && task.phase === "stopping" &&
-        task.stoppedFrom === "reserved" && !task.worker;
-      requireValue((run.mode === "running" && task.phase === "reserved") || stoppingLaunch, "no pending launch to attach");
+      requireValue(awaitingAttach(run, task), "no pending launch to attach");
+      const stoppingLaunch = run.mode === "stopping";
       for (const key of ["id", "session", "surface", "workspace", "worktree"] as const) requireValue(nonempty(worker[key]), `worker ${key} is required`);
       requireValue(worker.provider === task.spec.provider, "provider substitution refused");
+      requireValue(worker.session !== run.config.leader, "the leader cannot attach as its own worker");
+      // Identity refusals first: a fenced worker must hear that, not a worktree-adoption verdict.
+      requireValue(!task.takeovers?.some(t => t.evidence.worker.id === worker.id ||
+        t.evidence.worker.session === worker.session || t.evidence.worker.surface === worker.surface), "fenced worker cannot reattach after takeover");
       const observed = canonicalWorktree(worker.worktree);
       const declared = canonicalWorktree(task.spec.worktree);
       if (observed !== declared) this.adopt(run, task, observed, declared, adoption);
-      requireValue(!task.takeovers?.some(t => t.evidence.worker.id === worker.id ||
-        t.evidence.worker.session === worker.session || t.evidence.worker.surface === worker.surface), "fenced worker cannot reattach after takeover");
       this.own(run, task, [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`]);
       task.worker = { ...structuredClone(worker), worktree: observed };
       if (stoppingLaunch) task.stoppedFrom = "intake";
@@ -408,19 +422,34 @@ export class GruStore {
    * The declared tree stays owned by this task: nothing observed that path unoccupied. */
   private adopt(run: Run, task: Assignment, observed: string, declared: string, adoption?: WorktreeAdoption): void {
     requireValue(adoption, "worker worktree mismatch");
-    requireValue(adoption.checks.length === ADOPTION_CHECKS.length && ADOPTION_CHECKS.every(c => adoption.checks.includes(c)), "incomplete worktree adoption evidence");
+    requireValue(completeChecks(adoption.checks, ADOPTION_CHECKS), "incomplete worktree adoption evidence");
     requireValue(fresh(adoption), "worktree adoption evidence is stale; attach again");
     requireValue(adoption.observed === observed && adoption.declared === declared, "worktree adoption evidence mismatch");
+    requireValue(adoption.toplevel === observed, `worker worktree mismatch: ${observed} is not a worktree root`);
+    requireValue(nonempty(adoption.gitDir) && nonempty(adoption.commonDir) && adoption.gitDir !== adoption.commonDir,
+      `worker worktree mismatch: ${observed} is not a linked worktree`);
     requireValue(adoption.repositoryKey === repositoryKey(task.spec), `worker worktree mismatch: ${observed} belongs to ${adoption.repositoryKey}`);
     requireValue(observed !== canonicalWorktree(task.spec.repo), "worker needs an isolated worktree");
+    // Takeover moved this task to a fresh, absent worktree to preserve the orphan's checkout.
+    // Its tree is still owned by this task, so `own` would admit it; Claude's
+    // `--worktree=<ticket>` re-attaching a relaunch there must not undo the takeover.
+    requireValue(!task.takeovers?.some(t => [t.previousSpec.worktree, t.evidence.worker.worktree].some(p => canonicalWorktree(p) === observed)),
+      `worker worktree mismatch: ${observed} belongs to a fenced worker; takeover requires a fresh worktree`);
     requireValue(namesTicket(task.spec.ticket, path.basename(observed), adoption.branch), `worker worktree mismatch: ${observed} does not name ${task.spec.ticket}`);
     const declaredBy = [run, ...this.others(run.config.id)].flatMap(r => r.tasks)
       .find(t => t !== task && canonicalWorktree(t.spec.worktree) === observed);
     requireValue(!declaredBy, `worker worktree mismatch: ${observed} is declared by ${declaredBy?.spec.ticket}`);
     this.own(run, task, [`tree:${observed}`]);
-    task.spec = { ...task.spec, worktree: observed };
-    run.config.tasks = run.config.tasks.map(t => t.id === task.spec.id ? structuredClone(task.spec) : t);
-    this.event(run, "worktree-adopted", JSON.stringify(adoption), task.spec.id);
+    this.respec(run, task, { ...task.spec, worktree: observed });
+    // The launch brief names the declared path under the old token. A new token refuses its
+    // reports until the worker holds the regenerated packet, as takeover does for its respec.
+    task.token = randomUUID();
+    this.event(run, "worktree-adopted", JSON.stringify({ ...adoption, token: task.token }), task.spec.id);
+  }
+  /** The spec lives in both the assignment and the engagement config; rewrite them together. */
+  private respec(run: Run, task: Assignment, spec: TaskSpec): void {
+    task.spec = spec;
+    run.config.tasks = run.config.tasks.map(t => t.id === spec.id ? structuredClone(spec) : t);
   }
   report(id: string, leader: string, revision: number, taskId: string, token: string,
     session: string, kind: "ack" | "progress" | "blocked" | "ready" | "complete", message: string, messageId?: string): Run {
@@ -537,7 +566,7 @@ export class GruStore {
       requireValue(task.observation?.liveness === "unknown", "takeover is for an unknown worker; use normal lifecycle for live or dead workers");
       requireValue(fresh(task.observation) && fresh(evidence), "takeover evidence is stale; reconcile again");
       requireValue(JSON.stringify(evidence.worker) === JSON.stringify(task.worker), "takeover evidence worker mismatch");
-      requireValue(evidence.checks.length === ORPHAN_CHECKS.length && ORPHAN_CHECKS.every(c => evidence.checks.includes(c)), "incomplete orphan evidence");
+      requireValue(completeChecks(evidence.checks, ORPHAN_CHECKS), "incomplete orphan evidence");
       // Discovery awaits external commands; recheck occupancy inside the transaction.
       assertAbsentWorktree(request.worktree);
       const worktree = canonicalWorktree(request.worktree);
@@ -551,8 +580,7 @@ export class GruStore {
         previousSpec: structuredClone(task.spec), previousLimits: [...run.config.limits],
         previousObservation: structuredClone(task.observation), previousReport: structuredClone(task.report) };
       task.takeovers = [...(task.takeovers ?? []), record];
-      task.spec = { ...task.spec, provider: request.provider, worktree, model: request.model, effort: request.effort };
-      run.config.tasks = run.config.tasks.map(t => t.id === taskId ? structuredClone(task.spec) : t);
+      this.respec(run, task, { ...task.spec, provider: request.provider, worktree, model: request.model, effort: request.effort });
       if (request.limits) run.config.limits = [...request.limits];
       // Keep all owner rows, PR reports, merge bases, budgets and saved identities.
       // Only reserve() spends a new launch. The old token is invalid immediately.

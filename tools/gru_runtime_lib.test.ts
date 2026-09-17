@@ -143,6 +143,7 @@ test("worktree adoption requires a linked worktree root of the same repository t
   const claude = linked(repo, ".claude/worktrees/STARK-100", "-b", "worktree-STARK-100");
   const proof = await at(claude);
   assert.deepEqual({ ...proof, observedAt: undefined }, { observedAt: undefined, declared: task.spec.worktree, observed: claude,
+    toplevel: claude, gitDir: path.join(repo, ".git", "worktrees", "STARK-100"), commonDir: path.join(repo, ".git"),
     repositoryKey: "o/r", branch: "worktree-STARK-100", checks: ADOPTION_CHECKS });
   // Either name identifies the ticket; a detached HEAD leaves only the directory.
   assert.equal((await at(linked(repo, "scratch", "-b", "fix/STARK-100-adopt"))).branch, "fix/STARK-100-adopt");
@@ -164,6 +165,12 @@ test("worktree adoption requires a linked worktree root of the same repository t
   for (const [worktree, reason] of refusals) await assert.rejects(at(worktree), (error: Error) => {
     assert.match(error.message, /^worker worktree mismatch: /, worktree);
     assert.match(error.message, reason, worktree);
+    return true;
+  });
+  // A timed-out probe is a failed observation, never a verdict that the checkout is not a worktree.
+  const timedOut: Command = async () => ({ code: 124, stdout: "", stderr: "timed out", timedOut: true });
+  await assert.rejects(inspectAdoption(task, { ...task.worker!, worktree: claude }, timedOut), (error: Error) => {
+    assert.match(error.message, /^git rev-parse failed \(124\): timed out$/);
     return true;
   });
 });

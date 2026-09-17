@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
+import { awaitingAttach, canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
 import { canonicalRepository, checkLeadershipTransfer, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
@@ -44,7 +44,9 @@ reserve records intent, not successful startup. Launch through Hermod only.
 attach requires a live Hermod peer; receive requires a confirmed worker message.
 A peer outside the declared worktree attaches only from a linked worktree root of the
 same repository whose directory or branch names the ticket, with no other task
-declaring or owning it; attach then adopts that path, audited. Anything else refuses.
+declaring or owning it and no takeover having fenced it; attach then adopts that path,
+audited, and issues a new token for the fresh packet. Anything else refuses, as does
+the leader's own session.
 reconcile never equates missing discovery with death. Keep uncertain reservations.
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
@@ -204,11 +206,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         const peer = peers.peers.find(p => p.id === flag("peer"));
         if (!peer) throw new Error(`Hermod peer ${peers.incomplete ? "discovery incomplete" : "missing"}; preserve launch reservation`);
         const worker = workerFromPeer(peer);
-        const adoption = canonicalWorktree(worker.worktree) === canonicalWorktree(assigned.spec.worktree)
+        // Inspect git only for a launch that can bind; the store names any other refusal.
+        const adoption = canonicalWorktree(worker.worktree) === canonicalWorktree(assigned.spec.worktree) || !awaitingAttach(run, assigned)
           ? undefined : await inspectAdoption(assigned, worker);
         emit(store.attach(id, identity, revision, flag("task"), flag("token"), worker, adoption));
         // The worker's brief named the declared path; it needs the regenerated packet before intake.
-        if (adoption) process.stderr.write(`gru: adopted observed worktree ${adoption.observed} (declared ${adoption.declared}); send the worker a fresh packet\n`);
+        if (adoption) process.stderr.write(`gru: adopted observed worktree ${adoption.observed} (declared ${adoption.declared}); the token changed; send the worker a fresh packet\n`);
         break;
       }
       case "receive": {

@@ -76,8 +76,9 @@ Derive exact done-whens, verification commands, and completion milestones.
 Identify overlapping files, fixed ports, databases, and release files.
 Capture these facts and authorized limits in the engagement input.
 Declare each `worktree` where Hermod places that provider's worker: Claude at
-`<repo>/.claude/worktrees/<ticket>`, Codex at `<repo>/.worktrees/<ticket>`
+`<repo>/.claude/worktrees/<ticket>`, Codex at `<main checkout>/.worktrees/<ticket>`
 (observed with Hermod v0.17.4; see [worktree placement](references/operations.md#worktree-placement)).
+`init` refuses a worktree whose parent directory is missing; create that parent first.
 
 Validate Hermod's actual capabilities before reserving launch capacity.
 Require the selected provider, isolated worktree, complete initial brief,
@@ -101,9 +102,11 @@ Then follow the autonomous loop below.
 8. Integrate one authorized change at a time across shared resources.
 9. Reconcile, verify, update tickets, and repeat while work remains.
 
-If `attach` adopts the worker's actual worktree, send it a fresh `packet` before
-requiring intake: the brief it holds names the declared path. `attach` adopts only a
-linked worktree of the same repository that names the ticket and no other task holds.
+If `attach` adopts the worker's actual worktree, it issues a new token. Send the worker
+a fresh `packet` before requiring intake: its launch brief names the declared path,
+and reports under that brief's token are refused. `attach` adopts only a
+linked worktree of the same repository that names the ticket, that no other task holds,
+and that no takeover fenced.
 Any other mismatch refuses and keeps the reservation; escalate with the observed path.
 Never edit the engagement or database to escape it.
 

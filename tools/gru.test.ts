@@ -163,8 +163,28 @@ test("gru CLI: attach adopts Hermod's actual worktree for the same repository an
   assert.equal(audit.observed, observed);
   assert.equal(audit.repositoryKey, "o/r");
   assert.equal(audit.branch, "worktree-STARK-5030");
-  assert.match(result.error, /adopted/);
+  assert.equal(audit.toplevel, observed);
+  assert.notEqual(audit.gitDir, audit.commonDir);
+  // The launch brief carried the reserved token; adoption replaces it so only a fresh packet reports.
+  assert.notEqual(adopted.tasks[0].token, current.tasks[0].token);
+  assert.equal(audit.token, adopted.tasks[0].token);
+  assert.match(result.error, /adopted .*token changed; send the worker a fresh packet/);
   assert.equal(store.read("cli").revision, current.revision + 1);
+});
+
+test("gru CLI: attach names a refused launch state before inspecting a mismatched worktree", async t => {
+  const { store, current, attach, declared } = await strandedLaunch(t, "git@github.com:o/r.git");
+  // Bind a worker at the declared path first, so the task is no longer a launch awaiting attach.
+  fs.mkdirSync(declared);
+  const dir = path.dirname(path.dirname(declared));
+  const bound = await run(attach, "leader-one", hermodPeerAt(path.dirname(dir), declared));
+  assert.equal(bound.code, 0, bound.error);
+  const after = store.read("cli");
+  const again = attach.map(a => a === String(current.revision) ? String(after.revision) : a);
+  const late = await run(again, "leader-one", hermodPeerAt(path.dirname(dir), path.join(dir, "missing", "STARK-5030")));
+  assert.equal(late.code, 2);
+  assert.match(late.error, /no pending launch to attach/);
+  assert.equal(store.read("cli").revision, after.revision);
 });
 
 test("gru CLI: attach still refuses a peer whose worktree belongs to another repository", async t => {
