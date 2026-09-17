@@ -104,7 +104,8 @@ Then follow the autonomous loop below.
 
 If `attach` adopts the worker's actual worktree, it issues a new token. Send the worker
 a fresh `packet` before requiring intake: its launch brief names the declared path,
-and reports under that brief's token are refused. `attach` adopts only a
+and reports under that brief's token are refused. A launch bound while stopping is
+interrupted with the new token instead, never re-briefed. `attach` adopts only a
 linked worktree of the same repository that names the ticket, that no other task holds,
 and that no takeover fenced.
 Any other mismatch refuses and keeps the reservation; escalate with the observed path.

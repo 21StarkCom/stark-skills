@@ -167,6 +167,24 @@ test("worktree adoption requires a linked worktree root of the same repository t
     assert.match(error.message, reason, worktree);
     return true;
   });
+  // Git's own env outranks cwd discovery. An inherited GIT_DIR made a plain folder report the
+  // linked worktree's facts, so linkage must come from the on-disk pointers, not rev-parse alone.
+  const saved = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(repo, ".git", "worktrees", "STARK-100");
+  try {
+    await assert.rejects(at(plain), /not a linked worktree/);
+  } finally {
+    if (saved === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = saved;
+  }
+  // A copied `.git` file points at a real worktree whose back-pointer names a different checkout.
+  const copy = path.join(dir, "copy", "STARK-100"); fs.mkdirSync(copy, { recursive: true });
+  fs.copyFileSync(path.join(claude, ".git"), path.join(copy, ".git"));
+  await assert.rejects(at(copy), /not a linked worktree/);
+  // Relative pointers (worktree.useRelativePaths) are the same linkage.
+  const relative = path.join(repo, "relative", "STARK-100");
+  git(repo, "-c", "worktree.useRelativePaths=true", "worktree", "add", "-q", "-b", "relative-STARK-100", relative);
+  assert.match(fs.readFileSync(path.join(relative, ".git"), "utf8"), /gitdir: \.\./);
+  assert.equal((await at(relative)).observed, relative);
   // A timed-out probe is a failed observation, never a verdict that the checkout is not a worktree.
   const timedOut: Command = async () => ({ code: 124, stdout: "", stderr: "timed out", timedOut: true });
   await assert.rejects(inspectAdoption(task, { ...task.worker!, worktree: claude }, timedOut), (error: Error) => {

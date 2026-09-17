@@ -109,9 +109,9 @@ function originRepo(dir: string, origin: string): string {
   return fs.realpathSync(dir);
 }
 /** A fake `hermod` on PATH whose only Claude peer is live in `cwd`. */
-function hermodPeerAt(dir: string, cwd: string): Record<string, string> {
+function hermodPeerAt(dir: string, cwd: string, sessionId = "7b0c1c9e-0000-4000-8000-000000000001"): Record<string, string> {
   const bin = path.join(dir, "bin"); fs.mkdirSync(bin, { recursive: true });
-  const peer = { id: "claude:minion", agent: "claude", sessionId: "7b0c1c9e-0000-4000-8000-000000000001", surfaceId: "surface-minion",
+  const peer = { id: "claude:minion", agent: "claude", sessionId, surfaceId: "surface-minion",
     workspaceId: "workspace", cwd, liveness: "live", activity: "busy", evidence: ["live-process"], messaging: { available: true } };
   fs.writeFileSync(path.join(bin, "hermod"), `#!/usr/bin/env node
 console.log(JSON.stringify({ peers: [${JSON.stringify(peer)}], observedAt: new Date().toISOString(), incomplete: false }));
@@ -185,6 +185,28 @@ test("gru CLI: attach names a refused launch state before inspecting a mismatche
   assert.equal(late.code, 2);
   assert.match(late.error, /no pending launch to attach/);
   assert.equal(store.read("cli").revision, after.revision);
+});
+
+test("gru CLI: attach names identity refusals before inspecting a mismatched worktree", async t => {
+  const { store, current, attach, declared } = await strandedLaunch(t, "git@github.com:o/r.git");
+  const dir = path.dirname(path.dirname(path.dirname(declared)));
+  // The leader's own peer, in a checkout that would also fail adoption.
+  const self = await run(attach, "leader-one", hermodPeerAt(dir, path.join(dir, "nowhere"), "leader-one"));
+  assert.equal(self.code, 2);
+  assert.match(self.error, /leader cannot attach as its own worker/);
+  assert.equal(store.read("cli").revision, current.revision);
+});
+
+test("gru CLI: adopting a late launch during stop points at interruption, not a fresh packet", async t => {
+  const { store, current, attach, env } = await strandedLaunch(t, "git@github.com:o/r.git");
+  const stopped = store.stop("cli", "leader-one", current.revision);
+  const late = await run(attach.map(a => a === String(current.revision) ? String(stopped.revision) : a), "leader-one", env);
+  assert.equal(late.code, 0, late.error);
+  const bound = JSON.parse(late.out).tasks[0];
+  assert.equal(bound.phase, "stopping");
+  assert.equal(bound.stoppedFrom, "intake");
+  assert.match(late.error, /token changed; interrupt the worker/);
+  assert.doesNotMatch(late.error, /fresh packet/);
 });
 
 test("gru CLI: attach still refuses a peer whose worktree belongs to another repository", async t => {

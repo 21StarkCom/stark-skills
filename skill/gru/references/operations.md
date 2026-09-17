@@ -162,23 +162,41 @@ refused the mismatch, and the launched worker stayed live but unbound, so nothin
 could attach, interrupt, or recover it. `attach` now adopts the observed worktree
 when all of these hold, and otherwise still refuses:
 
-- the peer's cwd is the root of a linked git worktree, not a primary checkout or subdirectory;
+- the peer's cwd is the root of a linked git worktree, not a primary checkout or subdirectory,
+  confirmed from git's on-disk pointers (`<cwd>/.git` names `<common>/worktrees/<name>`, whose
+  `gitdir` names it back), so an inherited `GIT_DIR` cannot make a plain folder qualify;
 - its origin yields the task's repository identity, so a peer in another repository never binds;
 - its directory name or branch names the ticket as a whole segment (`STARK-50` never matches `STARK-501`);
 - no task in this or any other engagement declares that path, and no other assignment owns it;
 - no takeover of this task fenced that path: a relaunch Claude re-attaches to the orphan's
   checkout must not undo the fresh worktree the takeover required.
 
-`attach` also refuses the leader's own session as its worker, and checks fenced
-worker identities before any worktree adoption.
+`attach` also refuses the leader's own session as its worker. Launch state, provider,
+leader and fenced-identity refusals all come before any git inspection, so an ineligible
+peer hears its real refusal rather than an adoption verdict.
+
+Adoption widens which paths bind, not which peers may. Attach only the peer identity your
+own `hermod ticket --json` launch returned for this reservation. A live session that
+merely sits in a ticket-named worktree, found by browsing peers, is not this launch.
+
+A Claude takeover replacement cannot get a fresh worktree through `hermod ticket`.
+Claude's `--worktree=<ticket>` reuses the orphan's `<repo>/.claude/worktrees/<ticket>`,
+and `attach` refuses a path a takeover fenced, so that launch would strand exactly as
+this section describes. Before reserving the replacement, confirm Hermod will create the
+takeover's declared worktree: for example, a Codex replacement lands in an absent
+`<main checkout>/.worktrees/<ticket>`. If no launch path yields it, escalate to the
+operator before spending the attempt.
 
 Adoption rewrites the task's `worktree` in its assignment and the engagement config,
 reserves the observed path, keeps the declared path reserved to the same task, and
 records a `worktree-adopted` event carrying the evidence: the worktree root, git dir and
 common dir `git rev-parse` reported, the origin's repository identity, the branch, and the
-new token. The store rechecks root and linked-worktree from those fields. Adoption issues
+new token. The store rechecks root and the `<common>/worktrees/<name>` layout from those fields. Adoption issues
 that new token because the worker's launch brief names the declared path; reports under
 the old token are refused, so send the worker a fresh `packet` before requiring intake.
+The Minion contract treats that later packet as superseding its launch brief. A launch
+bound while the engagement is stopping is interrupted with the new token instead,
+never re-briefed; the CLI's stderr hint names which applies.
 A refused mismatch names the observed path and the reason and leaves the launch
 reserved. Escalate it; never edit the engagement or database to release it.
 
