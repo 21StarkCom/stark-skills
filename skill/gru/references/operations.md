@@ -205,7 +205,15 @@ once complete discovery (`incomplete: false`) has no live record of the previous
 session, the discovery evidence `resume` requires. Send it through Hermod from the leader
 session itself and confirm the record shows that session as `sender`: Hermod attributes a
 Claude sender only from its cmux surface, and an unattributed re-brief strands an adopted
-worker whose launch token is already replaced. A mismatched
+worker whose launch token is already replaced. If the record shows no sender, resend from a
+session Hermod attributes, or escalate to the operator. The Minion also requires the record
+not failed, cancelled, or expired, and newer than the packet it follows, and after session
+resumption rereads the latest accepted packet. These are screens, not proof: Hermod derives
+sender identity from the sending session's environment, so the store's token fence remains
+the authority, and a wrongly accepted packet only gets a worker's reports refused. A worker
+that cannot confirm a transfer because discovery stays incomplete sends a plain note;
+escalate it. `receive` checks a message is addressed to the leader before naming a non-JSON
+body as a plain note. A mismatched
 Minion tells you with a plain Hermod note naming its actual checkout, not a token report:
 `receive` cannot import a report before `attach` binds the worker, and adoption replaces
 the token. A launch

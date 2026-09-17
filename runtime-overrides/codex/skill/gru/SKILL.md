@@ -107,7 +107,10 @@ a fresh `packet` before requiring intake: its launch brief names the declared pa
 and reports under that brief's token are refused. Send it through Hermod from your own
 session, as the packet names you, then confirm `hermod msg status <id> --json` shows your
 session as `sender`: a Minion refuses an unattributed re-brief, and Hermod attributes a
-Claude sender only from its cmux surface. A launch bound while stopping is
+Claude sender only from its cmux surface. If it shows no sender, resend from a session
+Hermod attributes, or escalate to the operator: the adopted worker cannot report until
+it accepts a re-brief. A worker that cannot confirm a transfer tells you in a plain
+note; escalate rather than resend. A launch bound while stopping is
 interrupted with the new token instead, and gets that packet only if the engagement
 resumes. `attach` adopts only a linked worktree of the same repository that names
 the ticket, that no other task holds,
