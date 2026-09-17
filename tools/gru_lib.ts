@@ -194,6 +194,27 @@ export interface Assignment {
   takeovers?: TakeoverRecord[];
   swept?: SweepRecord;
 }
+export interface LeadershipEvidence {
+  observedAt: string;
+  incomplete: boolean;
+  peers: { sessionId?: string; threadId?: string; liveness: string }[];
+}
+export interface LeadershipTransfer {
+  previous: string;
+  current: string;
+  epoch: number;
+  at: string;
+  discovery: LeadershipEvidence;
+}
+/** Shared by resume and the worker's portable transfer receipt check. */
+export function assertLeadershipTransfer(previous: string, evidence: LeadershipEvidence): void {
+  requireValue(evidence?.incomplete === false && Array.isArray(evidence.peers),
+    "Hermod discovery incomplete; cannot transfer leadership");
+  requireValue(Number.isFinite(Date.parse(evidence.observedAt)), "invalid leadership observation time");
+  requireValue(evidence.peers.every(p => p && typeof p.liveness === "string"), "invalid leadership peer evidence");
+  requireValue(!evidence.peers.some(p => (p.threadId || p.sessionId) === previous && p.liveness === "live"),
+    "previous leader is still live; interrupt it before transferring leadership");
+}
 export interface Run {
   schema: 1;
   config: Engagement;
@@ -202,6 +223,7 @@ export interface Run {
   mode: "running" | "stopping" | "stopped" | "complete" | "swept";
   reconciled: boolean;
   received: string[];
+  transfers?: LeadershipTransfer[];
   tasks: Assignment[];
   events: { at: string; task?: string; kind: string; detail: string }[];
 }
@@ -655,7 +677,7 @@ export class GruStore {
    * therefore allowed at exactly this boundary — leadership transfer is already the
    * authority-changing operation, and it re-validates like `init` and is recorded as an event.
    * Omitting `limits` keeps the existing array, so an ordinary resume is unchanged. */
-  resume(id: string, oldLeader: string, revision: number, newLeader: string, limits?: unknown): Run {
+  resume(id: string, oldLeader: string, revision: number, newLeader: string, limits?: unknown, discovery?: LeadershipEvidence): Run {
     return this.transaction(id, oldLeader, revision, run => {
       requireValue(nonempty(newLeader), "leader identity is required");
       requireValue(run.mode !== "complete", "engagement already complete");
@@ -671,6 +693,12 @@ export class GruStore {
         requireLimits(limits, "replacement limits must be a non-empty list of strings");
         replaced = run.config.limits;
         run.config.limits = structuredClone(limits);
+      }
+      if (newLeader !== oldLeader && discovery) {
+        assertLeadershipTransfer(oldLeader, discovery);
+        requireValue(fresh(discovery), "leadership discovery stale");
+        (run.transfers ??= []).push({ previous: oldLeader, current: newLeader, epoch: run.epoch + 1,
+          at: new Date().toISOString(), discovery: structuredClone(discovery) });
       }
       run.config.leader = newLeader; run.epoch++; run.reconciled = false;
       if (run.mode === "stopped") run.mode = "running";

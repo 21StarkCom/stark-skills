@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { canonicalRepository, checkLeadershipTransfer, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, inspectAdoption, interruptWorker, observations, observeOrphan, observeSweep, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, checkRebrief, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, inspectAdoption, interruptWorker, observations, observeOrphan, observeSweep, observeWorkers, packet, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
 import { ADOPTION_CHECKS, type Assignment, type Engagement, type Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
@@ -474,6 +474,98 @@ test("completed idle workers retire through Hermod without deleting session work
   assert.equal(await canonicalRepository("/repo", async () => ({ code: 0, stdout: "git@github.com:Owner/Repo.git\n", stderr: "" })), "owner/repo");
 });
 
+const briefMessage = "12345678-1234-1234-1234-123456789012";
+const earlierMessage = "12345678-1234-1234-1234-123456789013";
+const rebriefInput = () => ({ message: briefMessage, run: "run", task: "task", currentLeader: "leader", worker: "session" });
+const rebriefRecord = (r = run()) => ({ id: briefMessage, state: "submitted", kind: "note", delivery: "unconfirmed",
+  createdAt: new Date().toISOString(), sender: { sessionId: r.config.leader }, destination: { threadId: "session" }, body: packet(r, r.tasks[0]) });
+
+test("rebrief screen reads the ledger body and refuses wrong identity, terminal records, and ambiguous packets", async () => {
+  const record = rebriefRecord();
+  const result = await checkRebrief(rebriefInput(), async argv => {
+    assert.deepEqual(argv, ["hermod", "msg", "status", briefMessage, "--json"]);
+    return response(record);
+  });
+  assert.equal(result.body, record.body);
+  assert.equal(result.token, "token");
+  assert.equal(result.transfer, "same-leader");
+  for (const changed of [
+    { ...record, id: earlierMessage }, { ...record, state: "failed" }, { ...record, cancelled: true },
+    { ...record, expired: true }, { ...record, supersededBy: earlierMessage }, { ...record, kind: "request" },
+    { ...record, destination: { threadId: "other" } }, { ...record, sender: undefined },
+    { ...record, sender: { sessionId: "other" } }, { ...record, createdAt: "invalid" },
+    { ...record, body: record.body.replace("Assignment: run/task", "Assignment: other/task") },
+    { ...record, body: record.body + "\nLeader session: relayed. Provider: codex." },
+    { ...record, body: record.body.replace('"token":"token"', '"token":"other"') },
+  ]) await assert.rejects(checkRebrief(rebriefInput(), async () => response(changed)));
+  for (const code of [2, 4, null]) await assert.rejects(checkRebrief(rebriefInput(), async () => ({ ...response(record), code })));
+  // Reading one's own addressed record is intake; native delivery need not already be confirmed.
+  for (const code of [3, 5]) assert.equal((await checkRebrief(rebriefInput(), async () => ({ ...response(record), code }))).accepted, true);
+});
+
+test("rebrief ordering and rereading use the latest accepted ledger packet, including a legacy baseline", async () => {
+  const current = { ...rebriefRecord(), id: earlierMessage, createdAt: "2026-09-17T10:00:00Z" };
+  current.body = current.body.replace(/^Gru rebrief: .*\n/m, "");
+  const record = { ...rebriefRecord(), createdAt: "2026-09-17T10:31:00Z" };
+  const input = { ...rebriefInput(), currentMessage: earlierMessage };
+  const call: Command = async argv => response(argv[3] === earlierMessage ? current : record);
+  assert.equal((await checkRebrief(input, call)).accepted, true);
+  record.createdAt = current.createdAt;
+  await assert.rejects(checkRebrief(input, call), /not newer/);
+  record.createdAt = "2026-09-17T09:59:59Z";
+  await assert.rejects(checkRebrief(input, call), /not newer/);
+  assert.equal((await checkRebrief({ ...input, currentMessage: briefMessage }, call)).accepted, true);
+  await assert.rejects(checkRebrief({ ...input, currentLeader: "other" }, call), /current packet/);
+});
+
+test("sandboxed transfer uses resume evidence, including missed transfers, but never overrides a live old leader", async () => {
+  const r = run(); r.config.leader = "next"; r.epoch = 3;
+  const observedAt = "2026-09-17T10:00:00Z";
+  const discovery = { observedAt, incomplete: false, peers: [{ sessionId: "leader", liveness: "stale" }] };
+  r.transfers = [
+    { previous: "leader", current: "middle", epoch: 2, at: observedAt, discovery },
+    { previous: "middle", current: "next", epoch: 3, at: observedAt, discovery: { ...discovery, peers: [] } },
+  ];
+  let local = { observedAt: new Date().toISOString(), incomplete: true, peers: [] as HermodPeer[] };
+  const call: Command = async argv => argv[2] === "status" ? response(rebriefRecord(r)) : response(local);
+  assert.equal((await checkRebrief(rebriefInput(), call)).transfer, "resume-receipt");
+  const denied: Command = async argv => argv[2] === "status" ? call(argv) : { code: 1, stdout: "", stderr: "ps denied" };
+  assert.equal((await checkRebrief(rebriefInput(), denied)).transfer, "resume-receipt");
+  local.peers = [{ ...peer(), threadId: "leader", liveness: "live" }];
+  await assert.rejects(checkRebrief(rebriefInput(), call), /still live/);
+  local.peers = [];
+  const receipts = structuredClone(r.transfers);
+  for (const mutate of [
+    () => { r.transfers = []; },
+    () => { r.transfers![0].discovery.incomplete = true; },
+    () => { r.transfers![0].discovery.peers[0].liveness = "live"; },
+    () => { r.transfers![0].discovery.observedAt = "2026-09-17T09:00:00Z"; },
+    () => { r.transfers![1].epoch = 1; },
+    () => { r.transfers![1].current = "other"; },
+    () => { r.transfers![1].at = "2999-01-01T00:00:00Z"; },
+  ]) {
+    r.transfers = structuredClone(receipts); mutate();
+    await assert.rejects(checkRebrief(rebriefInput(), call));
+  }
+  r.transfers = [];
+  local = { ...local, incomplete: false };
+  assert.equal((await checkRebrief(rebriefInput(), call)).transfer, "local-discovery");
+  local.observedAt = "2000-01-01T00:00:00Z";
+  await assert.rejects(checkRebrief(rebriefInput(), call), /cannot confirm transfer/);
+});
+
+test("a note acknowledged after 30 minutes and its late-imported progress ack pass without expiry exceptions", async () => {
+  const record = { ...rebriefRecord(), createdAt: "2026-09-17T10:00:00Z", deadline: "2026-09-17T10:30:00Z" };
+  assert.equal((await checkRebrief(rebriefInput(), async () => response(record))).accepted, true);
+  // Hermod's submitted note/progress kinds are expiry-exempt. A fresh send has no replyTo
+  // and no inherited request deadline; receive still requires the leader's confirmed receipt.
+  const ack = { kind: "progress", state: "submitted", delivery: "confirmed", from: peer().id, sender: peer(),
+    destination: { sessionId: "leader" }, createdAt: "2026-09-17T10:31:00Z", deadline: "2026-09-17T11:01:00Z",
+    body: JSON.stringify({ run: "run", task: "task", token: "token", kind: "ack", message: assignment().spec.doneWhen }) };
+  assert.equal((await receive(run(), earlierMessage, async () => response(ack))).kind, "ack");
+  await assert.rejects(receive(run(), earlierMessage, async () => response({ ...ack, expired: true })), /not confirmed/);
+});
+
 test("only a delivered message from the assigned session reaches the leader", async () => {
   const messageId = "12345678-1234-1234-1234-123456789012";
   const record = { state: "submitted", delivery: "confirmed", from: peer().id, sender: peer(),
@@ -493,6 +585,7 @@ test("only a delivered message from the assigned session reaches the leader", as
     /does not match the current assignment identity/);
   // Hermod exits 4/5 for failed/uncertain records while still printing them: a verdict, not a transport error.
   await assert.rejects(receive(run(), messageId, async () => ({ ...response({ ...record, state: "uncertain" }), code: 5 })), /not confirmed/);
+  await assert.rejects(receive(run(), messageId, async () => ({ ...response({ ...record, delivery: "unconfirmed" }), code: 3 })), /not confirmed/);
   await assert.rejects(receive(run(), messageId, async () => ({ code: 2, stdout: "", stderr: "socket closed" })), /hermod failed \(2\)/);
 });
 

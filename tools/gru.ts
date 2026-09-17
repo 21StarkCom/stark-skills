@@ -6,7 +6,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
-import { canonicalRepository, checkLeadershipTransfer, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, checkRebrief, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -18,6 +18,7 @@ Usage: node tools/gru.ts <command> [options]
   reconcile    --run ID --revision N
   reserve      --run ID --revision N --task ID
   packet       --run ID --task ID
+  rebrief-check --message ID --run ID --task ID --current-leader SESSION [--current-message ID]
   attach       --run ID --revision N --task ID --token TOKEN --peer PEER_ID
   receive      --run ID --revision N --message HERMOD_MESSAGE_ID
   resume       --run ID --revision N [--limits-file limits.json]
@@ -40,6 +41,10 @@ the one maintenance write that needs no leader.
 The leader identity is CODEX_THREAD_ID or CLAUDE_CODE_SESSION_ID from the
 environment (legacy CLAUDE_SESSION_ID is accepted); --leader is the fallback.
 State defaults to ~/.stark/gru/state.sqlite, shared across runtimes.
+rebrief-check reads only Hermod, never that database. Its session identity is the worker.
+Pass the current accepted leader and latest accepted message id, if any. To reread that
+packet after resumption, use its id for both --message and --current-message.
+Only exit 0 accepts the returned body; retain messageId for the next check.
 --state PATH overrides the database. --help, -h, help exit without side effects.
 
 reserve records intent, not successful startup. Launch through Hermod only.
@@ -174,7 +179,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     const verb = argv[0];
     const options: Record<string, { type: "string" | "boolean" }> = { apply: { type: "boolean" }, ...Object.fromEntries(
-      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader", "limits-file"].map(key => [key, { type: "string" }])) };
+      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader", "limits-file", "current-leader", "current-message"].map(key => [key, { type: "string" }])) };
     const { values } = parseArgs({ args: argv.slice(1), strict: true, options });
     const flag = (name: string): string => {
       const value = values[name];
@@ -193,6 +198,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // sweep evaluates whole engagements: a --task it ignored would read as a narrowed sweep.
     const unused = verb === "sweep" && Object.keys(values).find(key => !["run", "apply", "state", "leader"].includes(key));
     if (unused) throw new Error(`--${unused} does not apply to sweep`);
+    for (const key of ["current-leader", "current-message"]) {
+      if (verb !== "rebrief-check" && values[key] !== undefined) throw new Error(`--${key} applies to rebrief-check, not ${verb}`);
+    }
     // Read a JSON file named by a flag, attributing any failure to the FLAG and the PATH.
     // A bare `JSON.parse` surfaces "Unexpected token } in JSON at position 41" — an offset
     // into an unnamed buffer. The operator is running several files through several flags;
@@ -214,6 +222,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // Claude Code exports CLAUDE_CODE_SESSION_ID to its shells; CLAUDE_SESSION_ID is the older name.
     const identity = process.env.CODEX_THREAD_ID || process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID || values.leader;
     if (values.leader && values.leader !== identity) throw new Error("--leader differs from the runtime session identity");
+    if (verb === "rebrief-check") {
+      const extra = Object.keys(values).find(key => !["message", "run", "task", "current-leader", "current-message"].includes(key));
+      if (extra) throw new Error(`--${extra} does not apply to rebrief-check`);
+      if (typeof identity !== "string" || !identity) throw new Error("worker runtime session identity unavailable");
+      const result = await checkRebrief({ message: flag("message"), run: flag("run"), task: flag("task"),
+        currentLeader: flag("current-leader"), worker: identity,
+        ...(values["current-message"] === undefined ? {} : { currentMessage: flag("current-message") }) });
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n"); return 0;
+    }
     const statePath = typeof values.state === "string" ? path.resolve(values.state) : path.join(os.homedir(), ".stark", "gru", "state.sqlite");
     // sweep is maintenance, not leadership: it runs from any shell and records the invoker it has.
     if (verb === "sweep") {
@@ -297,8 +314,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         // `readJsonFlag` attributes any failure to the flag AND the path, which is precisely
         // the early-read's stated purpose; `init --file` shares it for the same reason.
         const limits = values["limits-file"] === undefined ? undefined : readJsonFlag("limits-file");
-        await checkLeadershipTransfer(run.config.leader, identity);
-        emit(store.resume(id, run.config.leader, revision, identity, limits)); break;
+        const discovery = await checkLeadershipTransfer(run.config.leader, identity);
+        emit(store.resume(id, run.config.leader, revision, identity, limits, discovery)); break;
       }
       case "recover": emit(store.recover(id, identity, revision, flag("task"), flag("token"))); break;
       case "takeover": {
