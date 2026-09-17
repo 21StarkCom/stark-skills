@@ -109,5 +109,70 @@
       "Pushing branches and opening/merging PRs in repos under /Users/aryeh/Code/21Stark/ is permitted — trusted repos in Aryeh’s workspace covered by the same review workflow. (stark-data-core/stark-night-watch note retired 2026-07-11: archived, clones deleted in the Code reorg.)"
     ]
   },
-  "enableWorkflows": true
+  "enableWorkflows": true,
+  "deniedMcpServers": [
+    {
+      "serverName": "claude.ai Atlassian"
+    },
+    {
+      "serverName": "claude.ai Atlassian Rovo"
+    },
+    {
+      "serverName": "claude.ai ChEMBL"
+    },
+    {
+      "serverName": "claude.ai ClickUp"
+    },
+    {
+      "serverName": "claude.ai Clinical Trials"
+    },
+    {
+      "serverName": "claude.ai Context7"
+    },
+    {
+      "serverName": "claude.ai Figma"
+    },
+    {
+      "serverName": "claude.ai Gamma"
+    },
+    {
+      "serverName": "claude.ai Gmail"
+    },
+    {
+      "serverName": "claude.ai Google Calendar"
+    },
+    {
+      "serverName": "claude.ai Google Drive"
+    },
+    {
+      "serverName": "claude.ai Hugging Face"
+    },
+    {
+      "serverName": "claude.ai Manual Auditor"
+    },
+    {
+      "serverName": "claude.ai Miro"
+    },
+    {
+      "serverName": "claude.ai Notion"
+    },
+    {
+      "serverName": "claude.ai PubMed"
+    },
+    {
+      "serverName": "claude.ai Slack"
+    },
+    {
+      "serverName": "claude.ai Stark Images"
+    },
+    {
+      "serverName": "claude.ai Zapier"
+    },
+    {
+      "serverName": "claude.ai bioRxiv"
+    },
+    {
+      "serverName": "claude.ai tldraw"
+    }
+  ]
 }
