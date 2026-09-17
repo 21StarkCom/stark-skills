@@ -22,7 +22,7 @@
 //      the lenient parser accepts but bifrost's Go importer rejects).
 //
 // Discovery covers EVERY `skill/<name>/SKILL.md`, not just `stark-*` — the old
-// prefix filter left the non-`stark-` skills (`gru`, `simple-gate`, `minion`)
+// prefix filter left the non-`stark-` skills (`gru`, `minion`)
 // unvalidated, which is how a strict-YAML frontmatter bug reached bifrost.
 //
 // Plus, ONCE across the whole skill set:
@@ -234,7 +234,7 @@ function extractReferenceLinks(text: string): string[] {
 function listSkills(): string[] {
   // Discover every skill dir that carries a SKILL.md — NOT just `stark-*`.
   // The old `startsWith("stark-")` filter silently skipped the non-`stark-`
-  // skills (`gru`, `simple-gate`, `minion`), so nothing validated their
+  // skills (`gru`, `minion`), so nothing validated their
   // frontmatter, refs, or --help contract — that is how the `minion`
   // colon-space frontmatter bug (it shipped under its old name,
   // `team-minion-agent`; see the strict-YAML check ABOVE) reached bifrost.

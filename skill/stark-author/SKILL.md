@@ -250,7 +250,10 @@ sidecar, walked through). Before any question, say plainly:
   Don't soften them and don't drown them. This honest short list is the point.
 
 **Step B — ask only the operator-oracle questions.** These are things only they
-know; there is no answer you could have pre-filled:
+know; there is no answer you could have pre-filled. Ask them through
+`AskUserQuestion` — real choices, honestly labelled, plus a free-text "Other" — so
+the operator picks rather than composes; fall back to one plain question per turn
+only when the tool is unavailable:
 
 1. **Did I understand you?** You already played the dead-simple three-layer intent
    read-back at the end of Phase 3 and they confirmed it — carry that confirmation
@@ -268,10 +271,6 @@ lecture them.** But if you're not sure they heard the same thing you meant, take
 the risk onto yourself: "Let me make sure I built the right thing — in your own
 words, what are you trying to get?" Framed as you double-checking your own
 understanding, never as them failing to review.
-
-**Offer the plain-language walk.** If they'd rather have this walked even more
-simply — multiple-choice, zero jargon — offer the **`simple-gate`** skill. Same
-sign-off, gentler surface, no trick answers.
 
 Verdicts: **go** → Phase 6 · **change something** → back to Phase 2 with their
 correction (their call, not a review loop) · **drop it** → stop.

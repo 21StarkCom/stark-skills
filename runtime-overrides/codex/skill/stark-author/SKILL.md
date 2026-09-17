@@ -343,10 +343,6 @@ onto yourself: "Let me make sure I built the right thing — in your own words, 
 are you trying to get?" Framed as you double-checking your own understanding,
 never as them failing to review.
 
-**Offer the plain-language walk.** If they'd rather have this walked even more
-simply — structured choices, zero jargon — offer the **`simple-gate`** skill. Same
-sign-off, gentler surface, no trick answers.
-
 Verdicts: **go** → Phase 6 · **change something** → back to Phase 2 with their
 correction (their call, not a review loop) · **drop it** → stop.
 

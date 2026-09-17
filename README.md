@@ -12,7 +12,7 @@ AI-powered development workflow system for Claude Code and Codex, covering the f
 # Or install the same bundles in Codex
 codex plugin marketplace add 21StarkCom/bifrost
 codex plugin add stark-plan@bifrost
-# Start a new Codex thread, then invoke: $simple-gate --help
+# Start a new Codex thread, then invoke: $stark-author --help
 
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
@@ -177,7 +177,7 @@ This repo is the **source of truth** for the skills + tools; they ship as separa
 
 codex plugin marketplace add 21StarkCom/bifrost
 codex plugin add stark-plan@bifrost
-# Open a new thread after install/update; invoke with: $simple-gate --help
+# Open a new thread after install/update; invoke with: $stark-author --help
 ```
 
 Immutable assets (tools/prompts/config) resolve from the installed plugin root (`${CLAUDE_PLUGIN_ROOT}`) via `tools/asset_root_lib.ts`; mutable state (`history/`, `sessions/`, `locks/`, …) lives under `~/.claude/code-review/` (`stateRoot()`).
