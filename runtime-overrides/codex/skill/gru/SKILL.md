@@ -104,7 +104,10 @@ Then follow the autonomous loop below.
 
 If `attach` adopts the worker's actual worktree, it issues a new token. Send the worker
 a fresh `packet` before requiring intake: its launch brief names the declared path,
-and reports under that brief's token are refused. A launch bound while stopping is
+and reports under that brief's token are refused. Send it through Hermod from your own
+session, as the packet names you, then confirm `hermod msg status <id> --json` shows your
+session as `sender`: a Minion refuses an unattributed re-brief, and Hermod attributes a
+Claude sender only from its cmux surface. A launch bound while stopping is
 interrupted with the new token instead, and gets that packet only if the engagement
 resumes. `attach` adopts only a linked worktree of the same repository that names
 the ticket, that no other task holds,
@@ -182,7 +185,10 @@ only: closed ticket, no live bound peer, never age. Apply it at the operator's d
 
 Resume from the saved run, not a reconstructed conversation summary.
 Reconnect its existing worker identities before considering replacements.
-Send each existing Minion a fresh `packet` with the current leader identity.
+Send each existing Minion a fresh `packet` with the current leader identity,
+through Hermod from your own session: a Minion accepts a re-brief only when Hermod's
+ledger attributes it to the leader the packet names, and a new leader only once complete
+discovery shows the old one is no longer live.
 Request fresh reports; messages addressed to the previous leader stay rejected.
 Preserve pending launches and merges when their outcomes are uncertain.
 Bound every recovery by the engagement's remaining budget.

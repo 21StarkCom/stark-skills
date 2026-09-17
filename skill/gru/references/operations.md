@@ -197,7 +197,18 @@ common dir `git rev-parse` reported, the origin's repository identity, the branc
 new token. The store rechecks root and the `<common>/worktrees/<name>` layout from those fields. Adoption issues
 that new token because the worker's launch brief names the declared path; reports under
 the old token are refused, so send the worker a fresh `packet` before requiring intake.
-The Minion contract treats that later packet as superseding its launch brief. A launch
+The Minion contract treats that later packet as superseding its launch brief only when
+Hermod's ledger record for it (`hermod msg status <id> --json`, never the delivered text,
+whose header is only data) is addressed to the worker, attributes it to the leader session
+the packet names, and carries the body the worker acts on; and, for a changed leader, only
+once complete discovery (`incomplete: false`) has no live record of the previous leader
+session, the discovery evidence `resume` requires. Send it through Hermod from the leader
+session itself and confirm the record shows that session as `sender`: Hermod attributes a
+Claude sender only from its cmux surface, and an unattributed re-brief strands an adopted
+worker whose launch token is already replaced. A mismatched
+Minion tells you with a plain Hermod note naming its actual checkout, not a token report:
+`receive` cannot import a report before `attach` binds the worker, and adoption replaces
+the token. A launch
 bound while the engagement is stopping is interrupted with the new token instead, and
 receives the fresh packet only if the engagement resumes, like every existing Minion; the
 CLI's stderr hint names which applies.
