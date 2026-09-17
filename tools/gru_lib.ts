@@ -694,11 +694,18 @@ export class GruStore {
         replaced = run.config.limits;
         run.config.limits = structuredClone(limits);
       }
-      if (newLeader !== oldLeader && discovery) {
+      if (newLeader !== oldLeader) {
+        requireValue(discovery, "leadership transfer requires complete discovery evidence");
         assertLeadershipTransfer(oldLeader, discovery);
-        requireValue(fresh(discovery), "leadership discovery stale");
+        // Apply the exact window the worker's receipt check applies, against the timestamp this
+        // record will actually carry: `fresh` tolerates an observation up to 5s in the FUTURE and
+        // is evaluated before `at` is stamped, so at the boundary the store can persist a receipt
+        // its only reader ("observed ≤ transferred ≤ observed + 60s") must refuse forever.
+        const at = new Date();
+        const observed = Date.parse(discovery.observedAt);
+        requireValue(observed <= at.getTime() && at.getTime() - observed <= 60_000, "leadership discovery stale");
         (run.transfers ??= []).push({ previous: oldLeader, current: newLeader, epoch: run.epoch + 1,
-          at: new Date().toISOString(), discovery: structuredClone(discovery) });
+          at: at.toISOString(), discovery: structuredClone(discovery) });
       }
       run.config.leader = newLeader; run.epoch++; run.reconciled = false;
       if (run.mode === "stopped") run.mode = "running";

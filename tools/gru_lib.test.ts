@@ -502,7 +502,7 @@ test("only an incoming leader can replace limits, and never the sitting one", t 
   // A same-session resume WITHOUT limits stays legal, and keeps the frozen array.
   run = store.resume("demo", "leader-one", run.revision, "leader-one");
   assert.deepEqual(run.config.limits, original);
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   assert.deepEqual(run.config.limits, original);
   // Validated exactly like `init`, so a transfer cannot install junk either.
   for (const bad of [[], "not a list", [""], ["ok", 7], null]) {
@@ -512,7 +512,7 @@ test("only an incoming leader can replace limits, and never the sitting one", t 
   // The refusals above are thrown inside the transaction, so nothing advanced.
   assert.deepEqual(store.read("demo").config.limits, original);
   assert.equal(store.read("demo").config.leader, "leader-two");
-  run = store.resume("demo", "leader-two", run.revision, "leader-three", replacement);
+  run = store.resume("demo", "leader-two", run.revision, "leader-three", replacement, leadershipAbsence());
   assert.deepEqual(run.config.limits, replacement);
   assert.equal(run.config.leader, "leader-three");
   // The event records BOTH arrays; "limits replaced" alone leaves no auditable trail of
@@ -528,10 +528,14 @@ test("only an incoming leader can replace limits, and never the sitting one", t 
   assert.match(packet(store.read("demo"), store.read("demo").tasks[0]), /the previous leader is gone/);
 });
 
+const leadershipAbsence = () => ({ observedAt: new Date().toISOString(), incomplete: false, peers: [] });
+
 test("resume persists checked transfer receipts atomically and packet carries them across same-leader resumes", async t => {
   const { store } = fixture(t);
   let current = store.create(config());
   const discovery = { observedAt: new Date().toISOString(), incomplete: false, peers: [] };
+  assert.throws(() => store.resume("demo", "leader-one", current.revision, "leader-two"), /requires complete discovery evidence/);
+  assert.equal(store.read("demo").revision, current.revision);
   for (const invalid of [{ ...discovery, incomplete: true }, { ...discovery, observedAt: "2000-01-01T00:00:00Z" },
     { ...discovery, peers: [{ sessionId: "leader-one", liveness: "live" }] }]) {
     assert.throws(() => store.resume("demo", "leader-one", current.revision, "leader-two", undefined, invalid));
@@ -556,7 +560,7 @@ test("resume fences stale leaders and uncertain workers cannot consume another r
   const { store } = fixture(t);
   let run = start(store, observe(store, store.create(config())), "one");
   const token = run.tasks[0].token!;
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   assert.equal(run.tasks[0].token, token);
   assert.throws(() => store.reserve("demo", "leader-two", run.revision, "two"), /reconcile/);
   assert.throws(() => store.reconcile("demo", "leader-one", run.revision, {}), /stale leader/);
@@ -646,7 +650,7 @@ test("cancelling a working replacement leaves it resumable, not verifiable", t =
   run = store.stop("demo", "leader-one", run.revision);
   run = observe(store, run, "live");
   run = store.stopped("demo", "leader-one", run.revision, "one", replacement);
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   run = observe(store, run, "live");
   assert.equal(run.tasks[0].phase, "stopped");
   assert.equal(run.tasks[0].integrationBase, BASE);
@@ -835,7 +839,7 @@ test("a stopping task always forces the run out of running mode", t => {
   assert.equal(run.mode, "stopping");
   // `resume` only maps `stopped` back to `running`, and `stopped` needs no active task —
   // which `stopping` is. So no transfer can restore `running` over a stopping task.
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   assert.equal(run.mode, "stopping");
   assert.equal(run.tasks[0].phase, "stopping");
   run = reconcileLive(store, run, "leader-two");
@@ -870,7 +874,7 @@ test("an interrupted idle worker resumes without a new launch or assignment", t 
   run = store.stop("demo", "leader-one", run.revision);
   run = observe(store, run, "live");
   run = store.stopped("demo", "leader-one", run.revision, "one", token);
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   run = observe(store, run, "live");
   run = store.continueWorker("demo", "leader-two", run.revision, "one", token);
   assert.equal(run.tasks[0].phase, "working");
@@ -893,7 +897,7 @@ test("a late launch can attach during cancellation without restarting dispatch",
   run = observe(store, run, "live");
   run = store.stopped("demo", "leader-one", run.revision, "one", token);
   assert.equal(run.mode, "stopped");
-  run = store.resume("demo", "leader-one", run.revision, "leader-two");
+  run = store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence());
   run = observe(store, run, "live");
   run = store.continueWorker("demo", "leader-two", run.revision, "one", token);
   assert.equal(run.tasks[0].phase, "intake");
@@ -1201,7 +1205,7 @@ test("a partially swept running engagement frees the released task's slot", asyn
   // Verifying the last unswept task settles the run terminal: sweep has no candidate left to do it.
   run = finish(store, store.attach("demo", "leader-one", run.revision, "two", run.tasks[1].token!, worker("two")), "two");
   assert.deepEqual([run.mode, run.events.at(-1)!.kind], ["swept", "swept"]);
-  assert.throws(() => store.resume("demo", "leader-one", run.revision, "leader-two"), /terminal/);
+  assert.throws(() => store.resume("demo", "leader-one", run.revision, "leader-two", undefined, leadershipAbsence()), /terminal/);
 
   // Releasing a stopping run's last active task settles it to resumable `stopped`, not terminal.
   const { store: halted } = fixture(t);
@@ -1215,7 +1219,7 @@ test("a partially swept running engagement frees the released task's slot", asyn
   const settled = halted.sweep("demo", stopping.revision, await sweepEvidence(stopping, { tickets: { "STARK-100": "Closed" } }), null).run;
   assert.deepEqual(settled.tasks.map(task => task.phase), ["swept", "stopped"]);
   assert.equal(settled.mode, "stopped");
-  assert.equal(halted.resume("demo", "leader-one", settled.revision, "leader-two").mode, "running");
+  assert.equal(halted.resume("demo", "leader-one", settled.revision, "leader-two", undefined, leadershipAbsence()).mode, "running");
 });
 
 test("sweep checks occupancy of the worktree a takeover retired, since it releases that tree too", async t => {

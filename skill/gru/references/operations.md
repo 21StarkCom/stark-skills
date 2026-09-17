@@ -167,14 +167,30 @@ node tools/gru.ts rebrief-check --message ID --run RUN --task TASK --current-lea
 The arguments describe the worker's currently accepted assignment, not the new packet.
 Add `--current-message LAST_ACCEPTED_ID` after accepting a ledger packet. The worker
 identity comes from its runtime environment. The command never opens Gru's database.
-Exit 0 returns the accepted ledger `body`, `messageId`, token and leader. Preserve that
+Exit 0 returns the accepted ledger `body`, `messageId`, token and leader. New packets
+also return the exact decoded `doneWhen` for the acknowledgement: continuation-line
+indentation in the display must not alter its bytes. Preserve that
 id; after resumption check it again with the same id in both message flags and the
-accepted leader. Other exits retain the assignment and require a plain note to Gru.
+accepted leader. Message ids are case-insensitive. `ordering` reports which replay check
+ran: `newer`, `reread`, or `unchecked` when no current message was supplied — an
+`unchecked` accept is exit 0 over an arbitrarily old packet, so recover the id rather
+than dropping the flag. Other exits retain the assignment and require a plain note to the
+current leader, and to the packet's named leader when it differs.
+
+If the retained baseline is unreadable (for example, Hermod pruned an old note), the
+checker fails closed with a recovery message. Keep `--current-message`: first ask Gru
+to restore access or locate the original record. If it is gone, escalate to the operator
+to establish a fresh intake baseline; a peer's resent packet or dropping the flag does
+not authorize abandoning the replay check. This is a recovery block, not a verdict
+that the new packet is invalid.
 
 The checker shares `receive`'s record reader and terminal-state checks. It requires a
 `note` addressed to the worker, an unambiguous assignment matching run/task, attribution
 to the packet's leader, and a newer creation time than the current packet (except when
-rereading that same accepted id). It does not require confirmed delivery: reading the
+rereading that same accepted id). When both packets carry metadata it also requires an
+authority `epoch` that is not older, and strictly newer across a leader change: creation
+time is send time, so a revived leader resending a pre-transfer packet would otherwise
+win on it alone. It does not require confirmed delivery: reading the
 addressed ledger record is the worker's intake. Failed, cancelled, expired and superseded
 records are refused; there is no expiry exception. Packet headers and optional versioned
 metadata must agree. Delivered envelope text is never the source of the accepted body.
@@ -188,8 +204,12 @@ the intake path. A leader still reads and acknowledges the report before `gru re
 For changed leadership, complete fresh worker discovery can establish old-leader absence.
 If process inspection is denied or incomplete, the checker uses the packet's portable
 `resume` receipt instead. `resume` records the complete discovery check transactionally
-with the leadership change; packets carry the chain, including each displaced session's
-records, observation time, transfer time and epoch. The receipt omits unrelated peers.
+with the leadership change; the store refuses a changed leader without that evidence.
+Packets carry the most recent 16 transfers of that chain,
+including each displaced session's records, observation time, transfer time and epoch —
+a bounded window, because Hermod refuses a message body over 32 KiB. The receipt omits
+unrelated peers. A worker displaced further back than the window takes the same path as
+a receipt-less legacy transfer below.
 The checker applies the same absence predicate and verifies receipt ordering and that
 the observation was fresh at transfer time. A receipt does not expire while a worker
 sleeps. Any locally visible live old leader still refuses it, even with incomplete discovery.

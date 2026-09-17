@@ -62,6 +62,35 @@ test("both skill runtimes route re-brief decisions to the command and avoid repl
   assert.doesNotMatch(codex, /Claude sender only from its cmux surface/);
 });
 
+test("gru receive CLI imports a fresh progress-kind intake ack after the rebrief deadline", async t => {
+  const { dir, state, file } = engagement(t);
+  const config = JSON.parse(fs.readFileSync(file, "utf8"));
+  const store = new GruStore(state); t.after(() => store.close());
+  let current = store.create(config);
+  current = store.reconcile("cli", "leader-one", current.revision, {});
+  current = store.reserve("cli", "leader-one", current.revision, "t");
+  current = store.attach("cli", "leader-one", current.revision, "t", current.tasks[0].token!, {
+    id: "codex:worker", session: "worker", surface: "surface", workspace: "workspace", provider: "codex",
+    worktree: current.tasks[0].spec.worktree,
+  });
+  const rebriefCreated = Date.now() - 31 * 60_000;
+  const message = "abcdef12-1234-1234-1234-123456789012";
+  const ack = { id: message, kind: "progress", state: "submitted", delivery: "confirmed",
+    from: "codex:worker", sender: { threadId: "worker" }, destination: { sessionId: "leader-one" },
+    createdAt: new Date().toISOString(), deadline: new Date(Date.now() + 30 * 60_000).toISOString(),
+    body: JSON.stringify({ run: "cli", task: "t", token: current.tasks[0].token, kind: "ack", message: current.tasks[0].spec.doneWhen }) };
+  assert.ok(Date.parse(ack.createdAt) > rebriefCreated + 30 * 60_000);
+  const bin = path.join(dir, "bin"); fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "hermod"), `#!/usr/bin/env node\nconsole.log(${JSON.stringify(JSON.stringify(ack))});\n`, { mode: 0o755 });
+  const result = await run(["receive", "--run", "cli", "--revision", String(current.revision), "--message", message, "--state", state],
+    "leader-one", { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  assert.equal(result.code, 0, result.error);
+  const received = store.read("cli");
+  assert.equal(received.tasks[0].phase, "working");
+  assert.equal(received.tasks[0].report?.kind, "ack");
+  assert.deepEqual(received.received, [message]);
+});
+
 /** Run the CLI as its own process.
  *
  * Calling `main()` in-process and swapping `process.stdout.write` to capture its JSON
