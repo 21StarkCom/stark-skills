@@ -127,13 +127,13 @@ test("Codex runtime override inventory is exact", () => {
   // make it a tautology.
   assert.equal(
     expected.length,
-    58,
+    57,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });
 
 test("required Codex parity skills remain model-discoverable", () => {
-  for (const name of ["stark-bury", "simple-gate", "gru", "minion"]) {
+  for (const name of ["stark-bury", "gru", "minion"]) {
     const body = fs.readFileSync(
       path.join(CODEX_ROOT, "skill", name, "SKILL.md"),
       "utf8",

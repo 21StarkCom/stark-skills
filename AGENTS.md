@@ -34,7 +34,7 @@ This is a **personal playground**, not production. No customers depend on it; th
 ## Repo Layout
 
 - `tools/` — **all** TypeScript tooling: dispatchers, agent utilities, session/state, GitHub transport, skill meta-tooling. The only executable surface.
-- `skill/` — all skills (`skill/*/SKILL.md`, **27** skills: 24 `stark-*` plus `gru`, `simple-gate`, `minion`), packaged as marketplace plugins
+- `skill/` — all skills (`skill/*/SKILL.md`, **26** skills: 24 `stark-*` plus `gru`, `minion`), packaged as marketplace plugins
 - `global/` — global config + prompts, vendored into each plugin
 - `scripts/` — shell helpers + JSON only (`healer_patterns.json`). **No Python lives here any more.**
 - `runtime-overrides/codex/` — **your tree.** Complete Codex-only skill/command variants plus changed support files; mirrors source-relative paths. Bifrost imports it as runtime overrides into a separate `dist/codex-plugins/` surface. **Never** make a canonical Claude file "portable" to satisfy Codex, and **never** layer a Codex override into `dist/claude/`.
@@ -63,7 +63,6 @@ All skills live in `skill/*/SKILL.md`. Full per-skill detail — arguments, fail
 | Skill | What it does |
 |---|---|
 | `idun gh pr-open` · `pr-merge` · `cleanup` · `watch` | The PR lifecycle — **moved to idun** (STARK-2211). Open draft → un-draft + squash-merge on green → sweep branches/worktrees. Not a stark-skills skill any more. |
-| `/simple-gate [spec-path]` | Walk the human sign-off gate in short, jargon-free language; Codex uses structured choices when available and a one-question conversational fallback otherwise. |
 | `/stark-session [start\|end]` | Briefing on start, cleanup on end. |
 | `/stark-handover [save\|resume\|status]` | Cross-`/clear` continuity under `~/Code/Handovers/`. |
 | `/gru start\|status\|resume\|stop` | **Gru**, the active Minion leader. Explicit concurrency/recovery limits, durable ownership, Hermod transport, Alfred tickets, verified integration. Codex uses `$gru` from its native override. |
@@ -93,7 +92,7 @@ Skills + tools ship as separate self-contained **Claude Code** and native **Code
 # Codex
 codex plugin marketplace add 21StarkCom/bifrost
 codex plugin add stark-plan@bifrost
-# Start a new thread, then invoke: $simple-gate --help
+# Start a new thread, then invoke: $stark-author --help
 
 # Claude Code
 /plugin marketplace add 21StarkCom/bifrost

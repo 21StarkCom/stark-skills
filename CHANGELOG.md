@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- The `simple-gate` skill (Claude and Codex variants) is retired (STARK-5016). It duplicated the human sign-off gate that `/stark-author` already runs, and every install paid for it in session context. `/stark-author` no longer offers it at Phase 5; the `stark-plan` bundle drops it on the next bifrost sync.
+
 ### Added
 - Gru leadership transfer can replace operating limits that named the previous leader or held an already-finished phase (`resume --limits-file`), revalidated like `init`. Only an incoming leader may replace them — a sitting leader cannot rewrite the limits binding itself — and the event records both the removed and the installed array. The flag is refused on every other verb rather than ignored.
 
