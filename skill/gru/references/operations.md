@@ -385,7 +385,7 @@ and receive its own integration grant. Never resume a fenced old session.
 ### Proof-based sweep of dead reservations
 
 A launch that never attaches, followed by `stop`, holds its ticket, worktree, and
-files with no command left to release them, even after the ticket is finished
+exclusive resources with no command left to release them, even after the ticket is finished
 outside the store. `sweep [--run ID] [--apply]` releases a held task only when both hold:
 
 1. Alfred reports its ticket `done` or `Closed`. An open ticket is never released,
@@ -431,7 +431,7 @@ transaction, fenced on the engagement and exact revision the evidence was read a
 and on one-minute freshness. No leader identity is needed, because the leader may be gone.
 Each release records a `swept` event stating it was a proof-based sweep, not a leader
 action, with the invoking session, leader of record, proof, and released resources.
-A swept task owns no resources, files, or capacity, cannot be verified, and leaves
+A swept task owns no resources or capacity, cannot be verified, and leaves
 dependents blocked. A run with every task verified or swept becomes terminal `swept`,
 whether a sweep or a later `verify` settles its last task, which `resume` and `stop`
 refuse; a stopping run with no active task becomes `stopped`.

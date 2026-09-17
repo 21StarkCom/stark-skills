@@ -143,7 +143,10 @@ test("a same-run task with overlapping files dispatches at once; only its integr
   // The retained grant still holds the repository's merge lock, so overlap is serialized where it lands.
   assert.throws(() => store.integrate(c.id, c.leader, next.revision, "two", next.tasks[1].token!, BASE), /resource already owned: merge:/);
   next = store.complete(c.id, c.leader, next.revision, "one", next.tasks[0].token!, landedProof(next));
-  assert.equal(store.integrate(c.id, c.leader, next.revision, "two", next.tasks[1].token!, BASE).tasks[1].phase, "integrating");
+  // Grant two at the base one's merge produced: the store cannot see ancestry, so the leader's
+  // current-base grant is what makes two rebase over one's changes.
+  const merged = landedProof(next).merge;
+  assert.equal(store.integrate(c.id, c.leader, next.revision, "two", next.tasks[1].token!, merged).tasks[1].integrationBase, merged);
 });
 
 test("takeover transaction refuses a path occupied after the absence observation", async t => {
@@ -731,6 +734,22 @@ test("status sees exclusive resources held by another engagement", t => {
   assert.throws(() => store.reserve("second", "leader-one", run.revision, "two"), /exclusive:port:4310/);
 });
 
+test("status sees exclusive resources held within the same engagement, through the store's owner rows", t => {
+  const { store } = fixture(t);
+  const c = config(); c.tasks[0].exclusiveResources = ["port:4310"]; c.tasks[1].exclusiveResources = ["port:4310"];
+  let run = start(store, observe(store, store.create(c)), "one");
+  // The pure check carries no ownership; the `exclusive:` row `reserve` inserted is the only authority.
+  assert.equal(readyReason(run, run.tasks[1]), null);
+  assert.match(store.readyReason(run, run.tasks[1])!, /resource already owned: exclusive:port:4310/);
+  run = store.stop("demo", "leader-one", run.revision);
+  run = observe(store, run, "dead");
+  run = store.stopped("demo", "leader-one", run.revision, "one", run.tasks[0].token!);
+  // A stopped, resumable task keeps it.
+  run = store.resume("demo", "leader-one", run.revision, "leader-one");
+  run = observe(store, run, "dead");
+  assert.match(store.readyReason(run, run.tasks[1])!, /resource already owned: exclusive:port:4310/);
+});
+
 test("shared integration resources serialize independently implemented tasks", t => {
   const { store } = fixture(t);
   let run = start(store, observe(store, store.create(config())), "one");
@@ -989,7 +1008,7 @@ test("sweep releases a stopped run's never-attached launches only once each tick
   assert.deepEqual(swept.tasks[0].swept, record);
   assert.deepEqual(store.owned("demo", "one"), []);
   assert.deepEqual(store.owned("demo", "two"), ["ticket:STARK-101", "tree:/worktrees/two"]);
-  // The same ticket, worktree, and files are reservable again.
+  // The same ticket and worktree are reservable again.
   assert.equal(store.reserve("retry", "leader-one", corrected.revision, "one").tasks[0].phase, "reserved");
 
   const closed = await sweepEvidence(swept, { tickets: { "STARK-101": "done" } });
@@ -1144,10 +1163,9 @@ test("sweep fails closed: unreachable Alfred or Hermod, stale evidence, and a mo
   assert.deepEqual(store.owned("demo", "one"), ["ticket:STARK-100", "tree:/worktrees/one"]);
 });
 
-test("a partially swept running engagement frees the released task's slot and files", async t => {
+test("a partially swept running engagement frees the released task's slot", async t => {
   const { store } = fixture(t);
   const c = config(); c.maxWorkers = 1; c.tasks = c.tasks.slice(0, 2);
-  c.tasks[1].files = [...c.tasks[0].files];
   let run = start(store, observe(store, store.create(c)), "one");
   run = store.sweep("demo", run.revision, await sweepEvidence(run, { tickets: { "STARK-100": "Closed" }, sessions: [terminated("one")] }), null).run;
   assert.equal(run.mode, "running");

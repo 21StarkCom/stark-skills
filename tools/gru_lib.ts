@@ -242,13 +242,6 @@ export function parseTakeover(value: unknown): TakeoverRequest {
   return structuredClone(value) as unknown as TakeoverRequest;
 }
 const active = (t: Assignment) => !["pending", "done", "stopped", "swept"].includes(t.phase);
-// Declared exclusive resources stay held by active, stopped, and taken-over pending tasks.
-// Takeover retains the orphan's resources until its replacement reserves or the retained
-// merge settles. Normal recover() keeps its worker and is unchanged. Declared `files` are
-// NOT held: parallel workers edit separate worktrees, and overlap reconciles at the rebase
-// before merge, serialized by the merge lock.
-const holdsResources = (t: Assignment) => active(t) || t.phase === "stopped" ||
-  (t.phase === "pending" && !t.worker && Boolean(t.takeovers?.length));
 // Completed workers release slots with fresh idle/dead or confirmed-retirement
 // evidence. Unconfirmed or still-busy workers count toward the concurrency limit.
 const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
@@ -407,7 +400,12 @@ function attachRefusal(run: Run, task: Assignment, worker: Worker): string | nul
   return null;
 }
 
-/** Dependency, capacity, and exclusive-resource checks; GruStore also checks reserved resources. */
+/** Mode, phase, budget, capacity, and dependency checks. Ownership lives only in the store's
+ * owner rows (ticket, worktree, `exclusive:`), which `GruStore.readyReason` adds: `reserve`
+ * inserts them, and only `recover`, `complete`, and `sweep` delete `exclusive:` rows, so a
+ * stopped or taken-over task keeps its exclusive resources without a second in-memory copy.
+ * Declared `files` are never ownership: parallel workers edit separate worktrees, and overlap
+ * reconciles at the rebase before merge, serialized by the repository merge lock. */
 export function readyReason(run: Run, task: Assignment): string | null {
   if (run.mode !== "running") return `engagement is ${run.mode}`;
   if (!run.reconciled) return "reconcile existing workers first";
@@ -416,10 +414,6 @@ export function readyReason(run: Run, task: Assignment): string | null {
   if (run.tasks.filter(occupiesSlot).length >= run.config.maxWorkers) return "worker limit reached";
   for (const id of task.spec.dependsOn) {
     if (run.tasks.find(t => t.spec.id === id)?.phase !== "done") return `prerequisite ${id} is unverified`;
-  }
-  for (const other of run.tasks.filter(holdsResources)) {
-    if (other.spec.id === task.spec.id) continue;
-    if (task.spec.exclusiveResources.some(r => other.spec.exclusiveResources.includes(r))) return `resource owned by ${other.spec.id}`;
   }
   return null;
 }

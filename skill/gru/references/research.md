@@ -47,7 +47,9 @@ It reports regressions for sequential planning and tool-heavy coordination.
 Architectures without centralized verification propagated more errors.[^3]
 
 **Decision:** dependencies determine readiness; spare capacity does not.
-File ownership and exclusive resources constrain implementation concurrency.
+Exclusive resources constrain implementation concurrency; overlapping files do not,
+because each worker edits its own worktree and overlap reconciles at the rebase before merge
+(revised by STARK-5049, after a dead engagement's file hold stranded unrelated dispatch).
 Shared release files require serialized integration, even across independent tasks.
 Gru independently verifies results before releasing dependent work.
 These studies do not establish Gru's optimal worker count.
