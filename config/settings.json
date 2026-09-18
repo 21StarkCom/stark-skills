@@ -33,6 +33,15 @@
             "command": "bash \"$HOME/.config/cmux/cmux-autoname.sh\""
           }
         ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"$PWD\" in */.claude/worktrees/*) _r=${PWD#*/.claude/worktrees/}; _w=${PWD%%/.claude/worktrees/*}/.claude/worktrees/${_r%%/*}; if [ -f \"$_w/.git\" ] && [ -f \"$_w/.envrc\" ] && command -v direnv >/dev/null 2>&1; then direnv allow \"$_w\" >/dev/null || true; fi ;; esac"
+          }
+        ]
       }
     ]
   },
