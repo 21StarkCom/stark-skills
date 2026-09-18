@@ -40,11 +40,13 @@ This is a **personal playground**, not production. No customers depend on it; th
 - `global/` — global config + prompts, vendored into each plugin
 - `scripts/` — shell helpers + JSON only (`healer_patterns.json`). **No Python lives here any more.**
 - `runtime-overrides/codex/` — **your tree.** Complete Codex-only skill/command variants plus changed support files; mirrors source-relative paths. Bifrost imports it as runtime overrides into a separate `dist/codex-plugins/` surface. **Never** make a canonical Claude file "portable" to satisfy Codex, and **never** layer a Codex override into `dist/claude/`.
-- `org/evinced/` — Evinced org config overrides
-- `data/` — persona roster, review coverage HTML, generated showcase pages
+- `data/persona/` — persona roster
 - `standards/` — org-wide doc templates and workflows
-- `docs/` — specs, ADRs, retrospectives, generated skill docs
 - `.github/workflows/` — tests, project sync, stale detection, `marketplace-sync`
+
+There is no `docs/` tree and no `org/` tree here: the doc layout below is what
+`/stark-init-docs` scaffolds into a *target* repo, and `org/evinced/` went with
+`/stark-review`, the only reader of its overrides (STARK-6098).
 
 ## Skills
 
@@ -108,7 +110,7 @@ Canonical `skill/` and shared assets are the Claude-authored source. Host-specif
 - **Docs live with the code** under `docs/`, folder per type — `adr/` (`NNNN-<topic>.md`, immutable: supersede, don't edit), `specs/` (`YYYY-MM-DD-<topic>-spec.md`), `retros/` (`YYYY-MM-DD-<topic>-retro.md`). **That is what `/stark-init-docs` scaffolds into a target repo, guarded by `tools/doc_convention.test.ts` — it is not a layout this repo keeps.** stark-skills carries no `docs/` tree; each skill is documented by its own `SKILL.md` and its `--help`.
 - **There is never a `docs/plans/`.** Since `/stark-author` (2026-08-01) the spec carries the plan — task DAG, done-whens, closing verification command.
 - Tier by blast radius: trivial → PR only · feature → spec · architectural → ADR + spec.
-- Prompts are per-agent, one version of each domain per LLM. Domain IDs are slugs from filenames (`01-architecture.md` → `architecture`). Config is JSON, prompts are markdown. Agent preambles in `agent.md`, domain prompts in `NN-domain.md`.
+- Config is JSON, prompts are markdown. **The per-agent × per-domain review prompt corpus is gone** — it belonged to `/stark-review` and was buried with it (STARK-6098). `global/prompts/` now holds one rubric dir per dispatcher (`iac-review/`, `refactor-planner/`), shared by every agent that runs it.
 
 ## GitHub authentication
 

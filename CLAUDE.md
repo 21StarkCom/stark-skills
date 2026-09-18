@@ -151,10 +151,10 @@ All skills live in `skill/*/SKILL.md` and are packaged into marketplace plugins 
 ## Conventions
 
 - **Docs live with the code** under `docs/`, folder per type — `adr/` (`NNNN-<topic>.md`, immutable: supersede, don't edit), `specs/` (`YYYY-MM-DD-<topic>-spec.md`), `retros/` (`YYYY-MM-DD-<topic>-retro.md`). **This is the layout `/stark-init-docs` scaffolds into a target repo, and `tools/doc_convention.test.ts` guards that scaffolding — it is not a layout this repo keeps.** stark-skills itself carries no `docs/` tree: every skill is documented by its own `SKILL.md` and its `--help`. **There is never a `docs/plans/`** — the spec carries the plan (task DAG, per-task done-whens, closing verification command), which `/stark-build` consumes. Tier by blast radius: trivial → PR only · feature → spec · architectural → ADR + spec.
-- Prompts are per-agent: each LLM gets its own version of each domain
-- Domain IDs are slugs derived from filenames: `01-architecture.md` → `architecture`
-- Config uses JSON, prompts use markdown
-- Agent preambles in `agent.md`, domain prompts in `NN-domain.md`
+- Config uses JSON, prompts use markdown. **The per-agent × per-domain review
+  prompt corpus is gone** — it was `/stark-review`'s and was buried with it
+  (STARK-6098). `global/prompts/` now holds one rubric dir per dispatcher
+  (`iac-review/`, `refactor-planner/`), shared by every agent that runs it.
 - **Every skill honors `--help`.** Each `skill/*/SKILL.md` opens with a `## Help` block right after its frontmatter that points at the shared `standards/help.md` protocol: a standalone `--help`/`-h`/`help` token in `$ARGUMENTS` prints the skill's purpose + usage + `## Arguments` and stops (no preflight, no phases, side-effect-free). The `skill_smoke_test.test.ts` guard asserts every skill references `standards/help.md`.
 
 ## GitHub authentication

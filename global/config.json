@@ -47,9 +47,7 @@
       "USER",
       "SHELL",
       "LANG",
-      "TERM",
-      "TEST_DATABASE_URL",
-      "DATABASE_URL"
+      "TERM"
     ],
     "max_concurrent_agents": 3,
     "max_concurrent_per_agent": {

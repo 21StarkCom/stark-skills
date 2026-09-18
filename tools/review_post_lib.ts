@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * review_post_lib.ts — the REST `gh` transport and the single-anchored-review
  * poster.
@@ -529,7 +528,14 @@ export interface PostReviewOpts {
 
 export interface PostReviewResult {
   posted: boolean;
-  attempts: Array<{ inline: number; status: "ok" | "fallback" | "body_only"; httpStatus?: number }>;
+  /** Attempt trail. `ok` means that POST landed; `failed` means it did not and
+   * no further fallback was available — never conflate the two, since the only
+   * consumer (`findings_review_post.ts`) prints this trail verbatim. */
+  attempts: Array<{
+    inline: number;
+    status: "ok" | "fallback" | "body_only" | "failed";
+    httpStatus?: number;
+  }>;
   fallbacksApplied: number;
   payloadSummary: { inlineCount: number; bodyFindingsCount: number; bodyChars: number };
   reviewId?: number;
@@ -633,7 +639,7 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
       // Retry exhaustion on rate-limit / 5xx — surface as unposted, not throw.
       result.unposted = true;
       result.unpostedReason = `http_${err.status}: ${err.body.slice(0, 200)}`;
-      result.attempts.push({ inline: inline.length, status: "ok", httpStatus: err.status });
+      result.attempts.push({ inline: inline.length, status: "failed", httpStatus: err.status });
       return result;
     }
     const indices = extract422Indices(err.body);
@@ -655,6 +661,13 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
       });
       result.fallbacksApplied++;
       result.attempts.push({ inline: inline.length + offenders.size, status: "fallback", httpStatus: 422 });
+      // Keep the summary describing what is actually being sent — a caller that
+      // size-checks or logs it would otherwise read the pre-demotion payload.
+      result.payloadSummary = {
+        inlineCount: inline.length,
+        bodyFindingsCount: part.bodyFindings.length + demote.length,
+        bodyChars: body.length,
+      };
       try {
         await post();
         return result;
@@ -663,6 +676,7 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
         if (err2.status !== 422) {
           result.unposted = true;
           result.unpostedReason = `http_${err2.status}: ${err2.body.slice(0, 200)}`;
+          result.attempts.push({ inline: inline.length, status: "failed", httpStatus: err2.status });
           return result;
         }
       }
@@ -678,12 +692,18 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     });
     result.fallbacksApplied++;
     result.attempts.push({ inline: 0, status: "body_only", httpStatus: 422 });
+    result.payloadSummary = {
+      inlineCount: 0,
+      bodyFindingsCount: allBody.length,
+      bodyChars: body.length,
+    };
     try {
       await post();
     } catch (err3) {
       if (!(err3 instanceof GhError)) throw err3;
       result.unposted = true;
       result.unpostedReason = `http_${err3.status}: ${err3.body.slice(0, 200)}`;
+      result.attempts.push({ inline: 0, status: "failed", httpStatus: err3.status });
     }
     return result;
   }

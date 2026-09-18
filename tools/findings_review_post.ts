@@ -83,7 +83,7 @@ export function bodyFor(f: ReportFinding): string {
  * Map ONE `ReportFindings` entry into the `Finding` `postReview` consumes.
  *
  * `classification: "fix"` is set on every finding deliberately and is
- * load-bearing: `partitionInlineVsBody` (`review_post_lib.ts:364`) requires it
+ * load-bearing: `partitionInlineVsBody` (`review_post_lib.ts`) requires it
  * for inline eligibility, so without it every finding lands in the review body
  * and nothing is ever anchored. `ReportFindings` only emits findings that
  * survived verification, so "fix" is the honest classification for all of them.

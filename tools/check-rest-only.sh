@@ -16,8 +16,20 @@ cd "$(dirname "$0")"
 
 # Collect candidate sources (skip .test.ts so test fixtures with example
 # strings don't false-positive).
+#
+# The named files are REQUIRED, not best-effort: silently skipping one that has
+# been renamed would drop it from the guard while CI stayed green — the
+# guard-reports-pass-over-nothing failure this repo keeps re-learning. Only the
+# `agent_*.ts` glob is allowed to expand to whatever is there.
 files=""
-for f in review_post_lib.ts findings_review_post.ts finding_lib.ts agent_*.ts; do
+for f in review_post_lib.ts findings_review_post.ts finding_lib.ts; do
+  if [ ! -f "$f" ]; then
+    echo "check-rest-only: required file $f is missing — update this script's list" >&2
+    exit 1
+  fi
+  files="$files $f"
+done
+for f in agent_*.ts; do
   case "$f" in
     *.test.ts) continue ;;
   esac

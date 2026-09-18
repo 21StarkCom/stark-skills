@@ -196,32 +196,16 @@ Immutable assets (tools/prompts/config) resolve from the installed plugin root (
 Same merge pattern as CLAUDE.md — most specific wins:
 
 ```
-~/.claude/code-review/config.json          ← global (from this repo)
-~/Code/.code-review/config.json     ← org override (from this repo)
-~/Code/some-repo/.code-review/      ← repo override (in each repo)
-  ├── config.json
-  ├── prompts/                             ← per-agent prompt overrides
-  └── domains/                             ← repo-specific domains (shared)
+~/.claude/code-review/config.json   ← global (from this repo)
+~/Code/.code-review/config.json     ← org override
+~/Code/some-repo/.code-review/config.json   ← repo override
 ```
 
-Repos can override: agents, domains, severity calibration, test/build commands, and individual prompts.
-
-## Adding a Domain
-
-Add a numbered markdown file to each agent's prompts directory:
-
-```bash
-# Global domain (all repos)
-touch global/prompts/claude/07-performance.md
-touch global/prompts/codex/07-performance.md
-touch global/prompts/gemini/07-performance.md
-
-# Repo-specific domain (shared across agents)
-mkdir -p ~/Code/some-repo/.code-review/domains
-touch ~/Code/some-repo/.code-review/domains/07-db-migrations.md
-```
-
-Domains are auto-discovered at startup.
+Repos can override the enabled agents and the per-dispatcher sections
+(`iac_review`, `runtime`, `models`, …). The per-agent prompt and per-domain
+override layers are gone: they belonged to `/stark-review`, which was buried in
+STARK-6098. Dispatcher rubrics now live once under
+`global/prompts/<dispatcher>/` and are shared by every agent that runs them.
 
 ## Prerequisites
 

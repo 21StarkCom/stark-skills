@@ -17,8 +17,6 @@
 import { createHash } from "node:crypto";
 
 export type AgentName = "claude" | "codex" | "gemini";
-/** @deprecated alias for AgentName; kept for backwards compatibility */
-export type Agent = AgentName;
 
 export type Severity = "critical" | "high" | "medium" | "low";
 
@@ -58,10 +56,6 @@ const SEVERITY_RANK: Readonly<Record<Severity, number>> = Object.freeze({
 
 export function severityMeetsThreshold(severity: Severity, threshold: Severity): boolean {
   return SEVERITY_RANK[severity] >= SEVERITY_RANK[threshold];
-}
-
-export function severityRank(severity: Severity): number {
-  return SEVERITY_RANK[severity];
 }
 
 /** Compare two findings so the higher-severity one sorts first. Ties break by

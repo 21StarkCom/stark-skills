@@ -111,11 +111,20 @@ export const AGENT_ENV_ALLOWLIST: readonly string[] = [
  * PAT or App private key is one prompt injection away from leaving the host.
  *
  * Deliberately NOT here: `DATABASE_URL` / `TEST_DATABASE_URL`. They are
- * credentials, but a dispatch path that implements against a real database is
- * their declared consumer — blocking them globally would be a capability
- * removal, not a hardening. The prompt-injectable paths block them locally
- * instead (`isForbiddenReviewerEnvKey` below), which is the per-consumer split
- * the leak actually calls for.
+ * credentials, but the exclusion was a per-consumer split, not a blessing —
+ * they were kept out of this shared denylist only because a dispatch path that
+ * implements against a real database declared them, and blocked locally
+ * (`isForbiddenReviewerEnvKey` below) on the prompt-injectable paths.
+ *
+ * **That consumer is gone** (STARK-6098 buried the last one), so neither list
+ * ships them any more: `runtime.subagent_env_allowlist` no longer names them,
+ * which is what the live builders (`runtime_env_lib`, `agent_dispatch_lib`)
+ * actually read — they filter with `isCredentialEnvKey` alone, so an entry
+ * added back there would reach a subprocess whose input is untrusted text.
+ * `isForbiddenReviewerEnvKey` stays as the code-level backstop for callers that
+ * project an allowlist through {@link pickAllowlistedEnv}; it is NOT a control
+ * over the two builders above. Re-declare the capability explicitly before
+ * putting a DSN back in the shipped allowlist.
  */
 const CREDENTIAL_ENV_EXACT: ReadonlySet<string> = new Set([
   "GH_TOKEN",
@@ -170,13 +179,13 @@ const FORBIDDEN_ENV_KEYS = ["GH_TOKEN", "GITHUB_TOKEN", "STARK_PUSH_TOKEN"] as c
  * Database DSNs, blocked HERE rather than in the shared credential denylist
  * (`CREDENTIAL_ENV_EXACT`) so the block stays per-consumer.
  *
- * They sit in `runtime.subagent_env_allowlist` for dispatch paths that
- * legitimately implement against a real database. An agent subprocess reviewing
- * or judging text is not such a path: its entire input is untrusted content,
- * and its output is posted through the operator's existing gh login, so a
- * prompt-injected input that dumps the env publishes a live DSN on a public
- * thread. A trusted runner that genuinely needs DB access asks for it
- * explicitly rather than inheriting it through this path.
+ * An agent subprocess reviewing or judging text must never see one: its entire
+ * input is untrusted content, and its output is posted through the operator's
+ * existing gh login, so a prompt-injected input that dumps the env publishes a
+ * live DSN on a public thread. A trusted runner that genuinely needs DB access
+ * asks for it explicitly rather than inheriting it through this path — which is
+ * now the only way to get one, since the shipped
+ * `runtime.subagent_env_allowlist` no longer carries either name.
  */
 const FORBIDDEN_REVIEWER_ENV_KEYS = ["DATABASE_URL", "TEST_DATABASE_URL"] as const;
 
@@ -214,9 +223,6 @@ export function pickAllowlistedEnv(
     if (isForbiddenReviewerEnvKey(k)) continue;
     const v = source[k];
     if (typeof v === "string") out[k] = v;
-  }
-  for (const k of Object.keys(out)) {
-    if (isForbiddenReviewerEnvKey(k)) delete out[k];
   }
   return out;
 }

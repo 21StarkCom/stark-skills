@@ -23,6 +23,7 @@ import {
   GhError,
   partitionInlineVsBody,
   postReview,
+  renderAgentsResolvedSummary,
   selectPostingAgent,
   withRetry,
 } from "./review_post_lib.ts";
@@ -86,6 +87,16 @@ test("buildReviewBody: marker is the first line", () => {
   assert.match(body, /^<!-- stark-review:round=2:agent=codex:run=abc -->\n\nsummary/);
 });
 
+test("renderAgentsResolvedSummary: emits per-domain agent list", () => {
+  const out = renderAgentsResolvedSummary({
+    security: "claude", "test-coverage": "codex", architecture: "gemini",
+  });
+  assert.match(out, /## agents_resolved/);
+  assert.match(out, /`security` → `claude`/);
+  assert.match(out, /`test-coverage` → `codex`/);
+  assert.match(out, /`architecture` → `gemini`/);
+});
+
 test("buildReviewBody: includes agents_resolved summary for mixed resolved-agent runs", () => {
   const body = buildReviewBody("MARKER", "summary", [], {
     agentsResolved: { security: "claude", "test-coverage": "codex" },
@@ -93,6 +104,16 @@ test("buildReviewBody: includes agents_resolved summary for mixed resolved-agent
   assert.match(body, /## agents_resolved/);
   assert.match(body, /security.*claude/s);
   assert.match(body, /test-coverage.*codex/s);
+});
+
+test("buildReviewBody: includes agents_resolved when one agent yields zero findings", () => {
+  // Mixed agents but an empty body-findings list — the per-domain summary is
+  // what makes a mixed run debuggable from the posted review alone, so it must
+  // not be conditioned on any agent having produced findings.
+  const body = buildReviewBody("MARKER", "summary", [], {
+    agentsResolved: { security: "claude", "test-coverage": "codex" },
+  });
+  assert.match(body, /## agents_resolved/, "must show even when no findings span agents");
 });
 
 test("buildReviewBody: omits agents_resolved for single-agent runs", () => {
