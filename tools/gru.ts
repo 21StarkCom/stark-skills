@@ -6,7 +6,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { canonicalWorktree, GruStore, integrationReady, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
-import { canonicalRepository, checkLeadershipTransfer, checkRebrief, discoverWorker, inspectAdoption, interruptWorker, observeBase, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, checkRebrief, defaultBaseRef, discoverWorker, inspectAdoption, interruptWorker, observeBase, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -269,10 +269,28 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       parseEngagement(input);
       // Canonical paths prevent aliases hiding duplicate ownership.
       const repositoryKeys = new Map<string, string>();
+      const baseRefs = new Map<string, string>();
       for (const task of input.tasks) {
         task.repo = fs.realpathSync(task.repo);
         task.repositoryKey = repositoryKeys.get(task.repo) ?? await canonicalRepository(task.repo);
         repositoryKeys.set(task.repo, task.repositoryKey);
+        // Resolve the base branch ONCE, here, so every later reader — the first packet the
+        // worker gets, `integrate`'s default, `verify`'s comparison — sees the same concrete
+        // value. Leaving it unset until grant time is what let a worker open its PR against a
+        // branch nobody had told it about, and `verify` refuse that merge terminally.
+        // Refuse rather than leave it unset: an engagement whose tasks carry no base branch
+        // cannot brief its workers about one, and the terminal grant/PR mismatch this field
+        // exists to remove comes straight back. The escape hatch is the field itself —
+        // declare `baseRef` in the input and no network read happens at all.
+        if (task.baseRef === undefined) {
+          const known = baseRefs.get(task.repo);
+          try {
+            task.baseRef = known ?? await defaultBaseRef(task.repo);
+          } catch (error) {
+            throw new Error(`cannot resolve the base branch for ${task.id} in ${task.repo}: ${(error as Error).message}. Declare "baseRef" on that task to skip this lookup.`);
+          }
+        }
+        baseRefs.set(task.repo, task.baseRef);
         task.worktree = fs.existsSync(task.worktree) ? fs.realpathSync(task.worktree) : canonicalLeaf(task.worktree);
       }
       emit(store.create(input)); return 0;

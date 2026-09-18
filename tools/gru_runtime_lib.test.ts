@@ -1008,18 +1008,37 @@ test("the integration base is read from the real base branch, and every gap fail
   await assert.rejects(observeBase(task, tree, undefined, call), /is not a commit in owner\/repo/);
   const foreign = { ...task, spec: { ...task.spec, repositoryKey: "other/repo" } };
   await assert.rejects(observeBase(foreign, first, undefined, call), /repository mismatch: .* is owner\/repo, not other\/repo/);
+  // A record written before `init` resolved origin identity has no repositoryKey, and
+  // `repositoryKey()` falls back to the filesystem path for ownership. That fallback must NOT
+  // reach this comparison: a path can never equal a canonical owner/repo, so using it would
+  // refuse every grant in such a run forever, with no in-band repair. Absent means unknown.
+  const { repositoryKey: _unset, ...legacySpec } = task.spec;
+  assert.equal((await observeBase({ ...task, spec: legacySpec }, first, undefined, call)).repositoryKey, "owner/repo");
 
   // Another task's merge lands on origin while this one is in review: the grant's base is now stale.
   const second = path.join(dir, "second-worker");
   must(["git", "clone", origin, second]);
   for (const [key, value] of [["user.name", "Gru Test"], ["user.email", "gru@example.invalid"]]) must(["git", "config", key, value], second);
   const landed = land("second task merged", second);
+  // Snapshot the shared ref state the observation must not touch. `--no-write-fetch-head`
+  // alone does NOT achieve that: with an explicit refspec git still applies the remote's
+  // configured refmap opportunistically, so the fetch also advances origin/<branch> and
+  // follows new tags. A linked worktree shares this ref store with its main checkout, so a
+  // grant — including this refused one — would move origin/main under a Minion mid-rebase.
+  must(["git", "fetch", "-q", "origin"], repoDir);
+  must(["git", "tag", "-f", "v-probe", first], repoDir);
+  must(["git", "push", "-q", "origin", "refs/tags/v-probe"], repoDir);
+  const beforeRemote = must(["git", "rev-parse", "refs/remotes/origin/main"], repoDir);
+  must(["git", "tag", "-d", "v-probe"], repoDir);
   const stale = await observeBase(task, first, undefined, call);
   assert.equal(stale.tip, landed);
   assert.equal(stale.base, first);
   assert.notEqual(stale.tip, stale.base);
   // The observation fetched the new tip without the worker's checkout ever fetching it.
   assert.equal(must(["git", "rev-parse", "HEAD"], repoDir), first);
+  assert.equal(must(["git", "rev-parse", "refs/remotes/origin/main"], repoDir), beforeRemote,
+    "the grant fetch must not advance origin/<branch> in a ref store shared with live worktrees");
+  assert.equal(must(["git", "tag", "-l"], repoDir), "", "the grant fetch must not auto-follow tags");
 
   // An explicitly named branch is fetched instead of the default one.
   must(["git", "push", "origin", `${first}:refs/heads/release`], repoDir);

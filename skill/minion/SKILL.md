@@ -118,6 +118,8 @@ changed files, exact test commands, and actual output.
 Never invent passing output or claim unavailable live verification.
 Missing vendor access is a blocker, not a passing result.
 
+Open your PR against the base branch your packet names, and merge into that branch only.
+Gru cannot verify a merge into any other one, and that refusal comes after the merge.
 Wait for Gru's assignment-specific integration grant before merging.
 The grant identifies your token and the base SHA Gru observed for it.
 After another merge, fetch and rebase onto the base branch's current tip, not the

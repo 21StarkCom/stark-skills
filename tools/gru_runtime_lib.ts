@@ -4,7 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { ADOPTION_CHECKS, assertAbsentWorktree, assertLeadershipTransfer, BASE_CHECKS, canonicalWorktree, fresh, isRevision, namesTicket, OBSERVATION_FRESHNESS_MS, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, sweepCandidates, verificationReady } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, assertAbsentWorktree, assertLeadershipTransfer, canonicalWorktree, fresh, integrationRepositoryKey, isRevision, namesTicket, OBSERVATION_FRESHNESS_MS, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, sweepCandidates, verificationReady } from "./gru_lib.ts";
 import type { Assignment, BaseEvidence, CompletionEvidence, LeadershipEvidence, LeadershipTransfer, Observation, OrphanEvidence, Provider, Run, SweepEvidence, Worker, WorktreeAdoption } from "./gru_lib.ts";
 
 export interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut?: boolean }
@@ -390,6 +390,12 @@ export function packet(run: Run, task: Assignment): string {
     // The exclusive list below is data; without this the packet never says what to do about one it omits,
     // and `/minion`'s rule (report anything not in your packet) reaches only workers that ran the skill.
     "Report any exclusive resource not listed in this packet to Gru before touching it.",
+    // Unconditional, not inside the grant arm below: `verify` refuses a PR whose base branch
+    // is not the one the grant was read from, and that refusal is terminal. The worker opens
+    // its PR long before any grant exists, so naming the branch only afterwards names it
+    // after the decision it governs — four review passes traced the terminal mismatch here.
+    ...(task.spec.baseRef ? [`Open your PR against base branch ${task.spec.baseRef}, and rebase onto its current tip. Gru cannot verify a merge into any other branch.`] : []),
+
     ...(task.integrationBase ? [
       // Name the branch, not just the SHA: `verify` now refuses a PR whose base branch is not
       // the one the grant was read from, and that refusal is terminal. A worker resuming an
@@ -614,7 +620,26 @@ export async function receive(run: Run, messageId: string, call: Command = comma
  * last few hundred milliseconds is reported as a slow observation rather than a slow fetch.
  * Shrink this budget (a third of the window, say) before adding any further work after the
  * stamp, or the misattribution stops being a rounding error. */
-const NETWORK_BUDGET_MS = Math.floor(OBSERVATION_FRESHNESS_MS / 2);
+const NETWORK_BUDGET_MS = 30_000;
+/** The observation must still land inside the store's freshness window, with a whole network
+ * budget of headroom so evidence squeaking under the limit cannot trip `fresh()` a moment
+ * later. Asserted rather than derived: NETWORK_BUDGET_MS is a git-transport bound and
+ * OBSERVATION_FRESHNESS_MS is Hermod's worker-liveness window, two unrelated timing domains
+ * that were briefly the same knob — raising the git budget for a slow remote would have
+ * silently widened the window in which a stale peer observation still counts as live evidence
+ * for reconcile, sweep and takeover. */
+const OBSERVATION_DEADLINE_MS = OBSERVATION_FRESHNESS_MS - NETWORK_BUDGET_MS;
+if (OBSERVATION_DEADLINE_MS <= 0) throw new Error("gru: the git network budget must leave room inside the observation freshness window");
+/** Flags that make a fetch into an invocation-owned ref touch NOTHING else in the ref store.
+ * `--no-write-fetch-head` alone is not enough, and the gap is not theoretical: with an explicit
+ * refspec git STILL applies the remote's configured refmap opportunistically, so
+ * `git fetch --no-write-fetch-head origin refs/heads/main:refs/gru/.../base` also reports
+ * `abc..def main -> origin/main`, and auto-follows any new tags. A linked worktree shares the
+ * ref store with its main checkout, so a grant observation — including a REFUSED one, which is
+ * the common case — would move `origin/main` under a Minion in the middle of
+ * `git rebase origin/main`. `--refmap=` empties the map; `--no-tags` stops the tag follow. */
+const PRIVATE_FETCH = ["--no-write-fetch-head", "--refmap=", "--no-tags"] as const;
+
 /** The base branch to read the tip from when the leader names none: origin's default branch,
  * asked of ORIGIN. Not the local `refs/remotes/origin/HEAD`: git writes that pointer once at
  * clone and then only on an explicit `git remote set-head`, so a checkout made before a
@@ -627,7 +652,7 @@ const NETWORK_BUDGET_MS = Math.floor(OBSERVATION_FRESHNESS_MS / 2);
  * enough to budget. It runs BEFORE `observedAt` is stamped, so its cost is deliberately
  * outside the window the store measures: the tip is read after the stamp, so a stamp taken
  * later would only ever make slow evidence look fresher than it is. */
-async function defaultBaseRef(repoDir: string, call: Command): Promise<string> {
+export async function defaultBaseRef(repoDir: string, call: Command = command): Promise<string> {
   const head = await call(["git", "ls-remote", "--symref", "origin", "HEAD"], repoDir, NETWORK_BUDGET_MS);
   if (head.code !== 0) {
     // This round trip is bounded like the fetch below, so it fails like the fetch below:
@@ -659,8 +684,15 @@ export async function observeBase(task: Assignment, base: string, ref?: string,
   if (!isRevision(base)) throw new Error("integration requires an observed base SHA");
   const repoDir = task.spec.repo;
   const repositoryKey = await canonicalRepository(repoDir, call);
-  const expected = taskRepositoryKey(task.spec);
-  if (repositoryKey !== expected) throw new Error(`integration base repository mismatch: ${repoDir} is ${repositoryKey}, not ${expected}`);
+  // `integrationRepositoryKey`, not `repositoryKey`: the latter falls back to the filesystem
+  // path for a record written before `init` resolved origin identity, and a path can never
+  // equal a canonical `owner/repo`, so the fallback would refuse every grant in such a run
+  // forever with no in-band repair. Absent means unknown — take what the checkout reports.
+  const expected = integrationRepositoryKey(task.spec);
+  if (expected !== undefined && repositoryKey !== expected) throw new Error(`integration base repository mismatch: ${repoDir} is ${repositoryKey}, not ${expected}`);
+  // Each fact is recorded as it is established, so dropping a guard drops its entry and the
+  // store's completeness gate refuses the evidence instead of waving it through.
+  const checks: string[] = ["task repository identity confirmed"];
   // This observation needs no history — the tip check is a SHA equality — but `verifyCompletion`
   // does, in this same checkout, AFTER the PR has merged: `git merge-base --is-ancestor
   // <integrationBase> <head>` on a commit outside the graft exits 128 ("Not a valid commit
@@ -671,27 +703,33 @@ export async function observeBase(task: Assignment, base: string, ref?: string,
   if (await checked(call, ["git", "rev-parse", "--is-shallow-repository"], repoDir) === "true") {
     throw new Error(`integration base cannot be granted in ${repoDir}: it is a shallow clone, and verification there cannot answer ancestry after the merge; run git fetch --unshallow there first`);
   }
-  const branch = ref ?? await defaultBaseRef(repoDir, call);
+  checks.push("checkout can answer ancestry after the merge");
+  // Declared beats resolved: the task spec carries the branch its PR targets, so an
+  // omitted flag can no longer silently grant against origin's default. `ref` remains an
+  // override for a one-off, and `init` fills `baseRef` when the engagement named none.
+  const branch = ref ?? task.spec.baseRef ?? await defaultBaseRef(repoDir, call);
   // check-ref-format exits 1 silently on a malformed name, so say what was rejected.
   if ((await call(["git", "check-ref-format", `refs/heads/${branch}`], repoDir)).code !== 0) {
     throw new Error(`invalid base branch name ${JSON.stringify(branch)}`);
   }
   // Each invocation owns its ref, so concurrent grants in one repository cannot overwrite
-  // each other's fetch, and none of them writes the shared FETCH_HEAD.
+  // each other's fetch, and PRIVATE_FETCH keeps the rest of the ref store out of it.
   const temp = `refs/gru/integration/${randomUUID()}/base`;
   try {
     const observedAt = new Date().toISOString();
-    const fetched = await call(["git", "fetch", "--no-write-fetch-head", "origin", `refs/heads/${branch}:${temp}`], repoDir, NETWORK_BUDGET_MS);
+    const fetched = await call(["git", "fetch", ...PRIVATE_FETCH, "origin", `refs/heads/${branch}:${temp}`], repoDir, NETWORK_BUDGET_MS);
     if (fetched.code !== 0) {
       throw new Error(`cannot fetch refs/heads/${branch} from origin in ${repoDir}: ${fetched.timedOut
         ? `timed out after ${NETWORK_BUDGET_MS / 1000}s, the freshness budget this evidence has to fit in`
         : (fetched.stderr || fetched.stdout).trim() || `git exited ${fetched.code}`}`);
     }
+    checks.push("base branch fetched from origin");
     const tip = await checked(call, ["git", "rev-parse", "--verify", `${temp}^{commit}`], repoDir);
     // `--verify --quiet` exits 1 on an unknown object instead of printing git's fatal; a base
     // from another repository, or a typo, lands here rather than passing the shape check alone.
     const resolved = await call(["git", "rev-parse", "--verify", "--quiet", `${base}^{commit}`], repoDir);
     if (resolved.code !== 0 || resolved.stdout.trim() !== base) throw new Error(`integration base ${base} is not a commit in ${repositoryKey}`);
+    checks.push("base resolves to a commit in the task repository");
     // The fetch carries NETWORK_BUDGET_MS but the rev-parses after it run on the default command
     // timeout, so the observation can still outlive the store's window. Evidence that has would
     // come back as "integration base evidence is stale; fetch the base branch again" — the loop
@@ -699,10 +737,10 @@ export async function observeBase(task: Assignment, base: string, ref?: string,
     // headroom: returning at 59.9s only hands `fresh()` a 60s ceiling to trip on ms later, so the
     // guard fires a whole budget short of the store's limit rather than at it.
     const age = Date.now() - Date.parse(observedAt);
-    if (age > OBSERVATION_FRESHNESS_MS - NETWORK_BUDGET_MS) {
+    if (age > OBSERVATION_DEADLINE_MS) {
       throw new Error(`integration base observation of ${branch} in ${repoDir} took ${Math.round(age / 1000)}s, leaving under ${NETWORK_BUDGET_MS / 1000}s of the ${OBSERVATION_FRESHNESS_MS / 1000}s window the store accepts; the repository or its origin is too slow to grant against right now`);
     }
-    return { observedAt, repositoryKey, ref: branch, tip, base, checks: [...BASE_CHECKS] };
+    return { observedAt, repositoryKey, ref: branch, tip, base, checks };
   } finally {
     // The grant's verdict is already decided; a leftover private ref is noise, not a failure.
     // A cleanup that THROWS is the same noise, so catch it here: an unguarded `await` in a
@@ -736,17 +774,24 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   const sameRepo = (r: { full_name?: string } | null | undefined) => r?.full_name?.toLowerCase() === repo.toLowerCase();
   if (!sameRepo(pr.head.repo) || !sameRepo(pr.base.repo)) throw new Error("PR repository mismatch");
   // `observeBase` validated the grant against ONE base branch's tip. Settling it with a PR
-  // merged into a different branch would reopen the exact window it closes: `--base-ref` is
-  // operator-supplied, so a grant taken at a quiet branch's tip — current by definition, and
-  // saying nothing about any other branch — could otherwise be discharged by a merge into
-  // `main` that skipped every other task's changes.
-  if (task.baseEvidence && task.baseEvidence.ref !== pr.base.ref) {
-    // Name the repair, as every other refusal here does — and be honest that there is no
-    // in-band one: `integrate` only grants from `review` and refuses a second call once the
-    // phase is `integrating`, so a grant taken on the wrong branch cannot be retaken. The
-    // task needs `recover` (an observed-dead worker) or operator takeover; what prevents it
-    // next time is naming the PR's own base branch at grant time.
-    throw new Error(`integration base was granted on ${task.baseEvidence.ref}, but PR ${prNumber} merged into ${pr.base.ref}; grant with --base-ref ${pr.base.ref} for a PR targeting it. A grant cannot be retaken once the task is integrating, so this one needs recovery or operator takeover`);
+  // merged into a different branch would reopen the exact window it closes: a grant taken at
+  // a quiet branch's tip — current by definition, and saying nothing about any other branch —
+  // could otherwise be discharged by a merge that skipped every other task's changes.
+  //
+  // Compare against the DECLARED branch when the task has one. That is the value the worker
+  // was briefed with in its first packet, so a mismatch here now means the worker targeted
+  // something other than its brief, not that the leader mistyped a flag after the PR already
+  // existed. The `baseEvidence.ref` reading stays for a task that declared nothing.
+  const declared = task.spec.baseRef ?? task.baseEvidence?.ref;
+  if (declared !== undefined && declared !== pr.base.ref) {
+    // Name the repair, as every other refusal here does — and be honest about its shape:
+    // `integrate` only grants from `review` and refuses a second call once the phase is
+    // `integrating`, so a grant already taken cannot be retaken. The task needs `recover`
+    // (an observed-dead worker) or operator takeover. Retarget the PR when it is still the
+    // PR that is wrong; that is the repair available without touching the store.
+    throw new Error(`integration base was granted on ${declared}, but PR ${prNumber} merged into ${pr.base.ref}${
+      task.spec.baseRef ? ` (the task declares baseRef ${task.spec.baseRef}, which its PR had to target)` : ""
+    }. A grant cannot be retaken once the task is integrating, so this one needs recovery or operator takeover`);
   }
   const review = await api(`pulls/${prNumber}/reviews/${reviewId}`);
   if (review.commit_id !== pr.head.sha || !review.submitted_at || !["COMMENTED", "APPROVED"].includes(review.state)) throw new Error("posted review does not cover the merged PR head");
@@ -758,7 +803,7 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   let primary: unknown;
   try {
     // Squash merges do not make the reviewed head reachable from the base.
-    await git(["fetch", "--no-write-fetch-head", "origin", `refs/heads/${pr.base.ref}:${refs.base}`, `refs/pull/${prNumber}/head:${refs.head}`]);
+    await git(["fetch", ...PRIVATE_FETCH, "origin", `refs/heads/${pr.base.ref}:${refs.base}`, `refs/pull/${prNumber}/head:${refs.head}`]);
     const baseTip = await git(["rev-parse", "--verify", `${refs.base}^{commit}`]);
     if (await git(["rev-parse", "--verify", `${refs.head}^{commit}`]) !== pr.head.sha) throw new Error("fetched PR head differs from the reviewed head");
     await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);

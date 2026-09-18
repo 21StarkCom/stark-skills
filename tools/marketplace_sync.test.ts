@@ -139,3 +139,33 @@ test("release notes emit exactly one version section, whatever the heading order
   assert.equal(misordered.split(REFRESH).length - 1, 1);
   assert.ok(misordered.includes("- stray"), "the Unreleased body survives");
 });
+
+test("release notes keep Keep a Changelog section order, which the file's own header declares", () => {
+  // The generated "### Changed" used to be appended after everything, so a body carrying
+  // "### Fixed" produced Added -> Fixed -> Changed — against the order the CHANGELOG header
+  // says it follows, on every publish, in the generator's own output.
+  const rank = (out: string) => ["### Added", "### Changed", "### Fixed"]
+    .map(h => out.indexOf(h)).filter(i => i >= 0);
+  const ordered = (out: string) => rank(out).every((v, i, a) => i === 0 || a[i - 1] < v);
+
+  const afterFixed = generate(["# C", "", "## [Unreleased]", "", "### Added", "- a", "",
+    "### Fixed", "- f", "", "## [1.2.2] - 2026-01-01", ""].join("\n"));
+  const released = afterFixed.slice(afterFixed.indexOf("## [1.2.3]"), afterFixed.indexOf("## [1.2.2]"));
+  assert.ok(ordered(released), `sections out of order:\n${released}`);
+  assert.match(released, /### Added[\s\S]*### Changed[\s\S]*### Fixed/);
+  assert.equal(released.split(REFRESH).length - 1, 1);
+
+  // An existing "### Changed" still absorbs the bullet in place rather than gaining a sibling.
+  const existing = generate(["# C", "", "## [Unreleased]", "", "### Changed", "- c", "",
+    "### Fixed", "- f", "", "## [1.2.2] - 2026-01-01", ""].join("\n"));
+  const inPlace = existing.slice(existing.indexOf("## [1.2.3]"), existing.indexOf("## [1.2.2]"));
+  assert.equal(inPlace.split("### Changed").length - 1, 1);
+  assert.ok(ordered(inPlace), `sections out of order:\n${inPlace}`);
+
+  // A body with only earlier-ranked sections appends, which is also in order.
+  const onlyAdded = generate(["# C", "", "## [Unreleased]", "", "### Added", "- a", "",
+    "## [1.2.2] - 2026-01-01", ""].join("\n"));
+  const appended = onlyAdded.slice(onlyAdded.indexOf("## [1.2.3]"), onlyAdded.indexOf("## [1.2.2]"));
+  assert.match(appended, /### Added[\s\S]*### Changed/);
+  assert.equal(appended.split(REFRESH).length - 1, 1);
+});

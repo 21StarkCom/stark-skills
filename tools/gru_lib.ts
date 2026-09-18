@@ -21,6 +21,13 @@ export interface TaskSpec {
   objective: string;
   repo: string;
   repositoryKey?: string;
+  /** The branch this task's PR targets, resolved at `init` from origin's default when the
+   * engagement does not name one. Declared rather than retyped per grant: `integrate`
+   * defaults its base branch to this, `packet` names it to the worker in the FIRST brief,
+   * and `verify` refuses a PR that merged into anything else. Four review passes named the
+   * per-invocation `--base-ref` flag as the root of that terminal mismatch — the worker
+   * opened its PR long before the flag was ever typed. */
+  baseRef?: string;
   worktree: string;
   provider: Provider;
   model?: string;
@@ -123,7 +130,14 @@ export interface BaseEvidence {
   base: string;
   checks: string[];
 }
-export const BASE_CHECKS = ["base branch fetched from origin", "base resolves to a commit in the task repository"];
+/** Every fact `observeBase` establishes, each pushed onto the evidence AS it is established —
+ * never as one unconditional array. `observeBase` throws on failure rather than omitting an
+ * entry, so a wholesale `[...BASE_CHECKS]` made `completeChecks` true by construction: a gate
+ * that reads like an attestation of the guarantee while attesting nothing, and one a future
+ * refactor could empty without any test noticing. The tip comparison is deliberately absent —
+ * that is data the store judges (`evidence.tip === base`), not a fact the observation asserts. */
+export const BASE_CHECKS = ["task repository identity confirmed", "checkout can answer ancestry after the merge",
+  "base branch fetched from origin", "base resolves to a commit in the task repository"];
 /** The ticket as a whole name segment, so STARK-50 never matches STARK-501 or a longer word. */
 export function namesTicket(ticket: string, ...names: (string | undefined)[]): boolean {
   const literal = ticket.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -288,7 +302,14 @@ const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
   !(fresh(t.observation) && (t.observation?.liveness === "dead" ||
     (t.phase === "done" && (t.observation?.retired ||
       (t.observation?.liveness === "live" && t.observation.activity === "idle"))))));
+/** The ownership key for a task's repository. The `?? t.repo` fallback is for a record
+ * written before `init` resolved origin identity; `observeBase` cannot use it, because it
+ * compares against `canonicalRepository` (always `owner/repo`) and a filesystem path can
+ * never match — so a grant would refuse forever with no in-band repair. `integrationRepositoryKey`
+ * is the comparison-safe reading: absent means "unknown, accept what the checkout reports". */
 export const repositoryKey = (t: TaskSpec) => t.repositoryKey ?? t.repo;
+/** `repositoryKey` for the one caller that compares it against a canonical origin identity. */
+export const integrationRepositoryKey = (t: TaskSpec) => t.repositoryKey;
 /** Evidence is complete only when it names exactly the required checks. */
 const completeChecks = (checks: string[], required: readonly string[]) =>
   checks.length === required.length && required.every(c => checks.includes(c));
@@ -414,6 +435,7 @@ export function parseEngagement(value: unknown): Engagement {
     requireValue(/^STARK-\d+$/.test(t.ticket as string), "task must reference an existing STARK ticket");
     requireValue(isProvider(t.provider), "provider must be explicitly claude or codex");
     requireValue(t.repositoryKey === undefined || nonempty(t.repositoryKey), "invalid repository identity");
+    requireValue(t.baseRef === undefined || (nonempty(t.baseRef) && !/[\s~^:?*\[\\]/.test(t.baseRef as string) && !(t.baseRef as string).startsWith("-")), "baseRef must be a plain branch name");
     for (const key of ["model", "effort"]) requireValue(t[key] === undefined || nonempty(t[key]), `${key} must be nonempty when selected`);
     requireValue(path.isAbsolute(t.repo as string) && path.isAbsolute(t.worktree as string), "repo and worktree must be absolute paths");
     requireValue(path.resolve(t.repo as string) !== path.resolve(t.worktree as string), "worker needs an isolated worktree");

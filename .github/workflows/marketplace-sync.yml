@@ -157,6 +157,17 @@ jobs:
                 print "- Refresh marketplace packages from [stark-skills@" short "](https://github.com/21StarkCom/stark-skills/commit/" source ")."
               }
               # The Refresh bullet joins an existing "### Changed" rather than adding a second one.
+              # Keep a Changelog section order, so the Refresh bullet lands in position
+              # rather than after whatever the body already had.
+              function rank(h) {
+                if (h ~ /^### Added/) return 1
+                if (h ~ /^### Changed/) return 2
+                if (h ~ /^### Deprecated/) return 3
+                if (h ~ /^### Removed/) return 4
+                if (h ~ /^### Fixed/) return 5
+                if (h ~ /^### Security/) return 6
+                return 99
+              }
               function flush_notes(   i, start, seen) {
                 print "## [" version "] - " date "\n"
                 # Drop the blank that followed "## [Unreleased]"; the heading above supplied one.
@@ -165,8 +176,11 @@ jobs:
                   # Only the FIRST one: a body carrying two "### Changed" headings would
                   # otherwise get the Refresh bullet under each.
                   if (!seen && body[i] ~ /^### Changed[[:space:]]*$/) { print body[i]; refresh(); seen = 1; continue }
+                  # A later-ranked heading means "### Changed" belongs here, before it.
+                  if (!seen && rank(body[i]) > 2 && rank(body[i]) < 99) { print "### Changed"; refresh(); print ""; seen = 1 }
                   print body[i]
                 }
+                # Nothing ranked after Changed in the body: append, which is also in order.
                 if (!seen) { print "### Changed"; refresh(); print "" }
                 else if (body[n - 1] !~ /^[[:space:]]*$/) print ""   # seen implies n > 0
                 inserted = 1

@@ -74,6 +74,8 @@ Read repository instructions, ticket descriptions, and every ticket comment.
 Check dependencies against the accepted spec and current repository state.
 Derive exact done-whens, verification commands, and completion milestones.
 Identify fixed ports, databases, and release files as exclusive or integration resources.
+Declare each task's `baseRef` — the branch its PR targets — or let `init` record origin's
+default; either way the worker is briefed with it before it opens anything.
 Overlapping files do not block dispatch; they reconcile at rebase under the merge lock,
 which is sound only while each grant names the base branch tip you fetch and read
 immediately before `integrate`; the command enforces that, and refuses anything else.
@@ -161,8 +163,10 @@ mid-merge — wait for it, fetch again, and read the tip again.
 fetches the base branch from origin and refuses unless the SHA is a commit that
 repository holds and is that branch's current tip — which already implies every merge
 landed on that branch, so nothing walks history. The refusal names the current tip. Pass
-`--base-ref BRANCH` when the PR does not target origin's default branch, which is asked
-of origin rather than read from this checkout's `refs/remotes/origin/HEAD`. An unreachable
+`--base-ref BRANCH` only to override a task's declared `baseRef` for a one-off; declare that
+branch in the engagement input instead, so the worker is briefed with it in its FIRST packet
+rather than after it has already opened a PR. With neither, the default is asked of origin,
+never read from this checkout's `refs/remotes/origin/HEAD`. An unreachable
 origin, a branch origin does not have, and an origin reporting no default branch each
 refuse and say which; none ever falls back to a local ref that reads exactly like a
 current one. A shallow checkout refuses too, naming `git fetch --unshallow`: the tip
