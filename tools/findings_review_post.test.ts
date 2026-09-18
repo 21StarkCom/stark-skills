@@ -2,21 +2,26 @@ import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 
 import {
+  DEFAULT_GENERATED_PATHS,
   GH_MAX_BUFFER,
   anchorableLinesFromPatch,
   bodyFor,
+  compileGeneratedMatchers,
   defaultRun,
   buildHumanSummary,
   flattenSlurped,
+  globToRegExp,
   isAnchorable,
+  matchGeneratedPath,
   parseArgs,
   parsePrContext,
+  planReview,
   severityFromVerdict,
   titleFor,
   toFindings,
   type ReportFindingsPayload,
 } from "./findings_review_post.ts";
-import { partitionInlineVsBody } from "./stark_review.ts";
+import { partitionInlineVsBody, postReview, buildReviewBody } from "./stark_review.ts";
 
 // --- mapping -----------------------------------------------------------------
 
@@ -285,7 +290,14 @@ describe("toFindings anchor validation", () => {
 describe("parseArgs", () => {
   test("parses the full flag set", () => {
     const a = parseArgs(["--repo", "o/r", "--pr", "7", "--findings", "f.json", "--agent", "codex", "--dry-run"]);
-    assert.deepEqual(a, { repo: "o/r", pr: 7, findingsPath: "f.json", agent: "codex", dryRun: true });
+    assert.deepEqual(a, {
+      repo: "o/r",
+      pr: 7,
+      findingsPath: "f.json",
+      agent: "codex",
+      dryRun: true,
+      generatedPaths: [...DEFAULT_GENERATED_PATHS],
+    });
   });
 
   test("defaults the model attribution to claude", () => {
@@ -356,5 +368,239 @@ describe("defaultRun", () => {
     assert.equal(r.status, null, "expected a signal kill, not a normal exit");
     assert.notEqual(r.stderr, "", "a killed child must not report empty stderr");
     assert.match(r.stderr, /terminated/);
+  });
+});
+
+// --- generated-path routing --------------------------------------------------
+
+/**
+ * A bifrost-shaped sync PR: a regenerated snapshot of code already merged
+ * upstream, plus two hand-written files that must keep their inline threads.
+ * `web/src/__fixtures__/index.json` is the trap — a real source fixture whose
+ * BASENAME matches the `index.json` default glob.
+ */
+const SYNC_PR_FILES = JSON.stringify([
+  { filename: "vendor/stark-skills/tools/gru.ts", patch: "@@ -10,2 +10,3 @@\n keep\n+regenerated\n ctx" },
+  { filename: "dist/claude/stark-ops/skills/gru/SKILL.md", patch: "@@ -1,1 +1,2 @@\n a\n+b" },
+  { filename: "index.json", patch: "@@ -3,1 +3,2 @@\n x\n+y" },
+  { filename: "web/src/__fixtures__/index.json", patch: "@@ -1,1 +1,2 @@\n a\n+b" },
+  { filename: "engine/internal/install/install.go", patch: "@@ -40,2 +40,3 @@\n ctx\n+added\n tail" },
+]);
+
+const SYNC_PAYLOAD: ReportFindingsPayload = {
+  level: "xhigh",
+  findings: [
+    { file: "vendor/stark-skills/tools/gru.ts", line: 11, short_summary: "vendor snapshot", summary: "s", verdict: "CONFIRMED" },
+    { file: "dist/claude/stark-ops/skills/gru/SKILL.md", line: 2, short_summary: "dist copy", summary: "s" },
+    { file: "index.json", line: 4, short_summary: "root index", summary: "s" },
+    { file: "web/src/__fixtures__/index.json", line: 2, short_summary: "hand-written fixture", summary: "s" },
+    { file: "engine/internal/install/install.go", line: 41, short_summary: "real source bug", summary: "s", verdict: "CONFIRMED" },
+  ],
+};
+
+const GENERATED_PATHS = ["vendor/**", "dist/**", "index.json"] as const;
+
+function syncPlan(generatedPaths: readonly string[] = GENERATED_PATHS) {
+  const ctx = parsePrContext("headsha", SYNC_PR_FILES);
+  return { ctx, plan: planReview(SYNC_PAYLOAD, ctx, { agent: "claude", generatedPaths }) };
+}
+
+describe("generated-path routing", () => {
+  test("a sync PR leaves zero inline threads on generated paths", () => {
+    const { plan } = syncPlan();
+    const { inline, bodyFindings } = partitionInlineVsBody(plan.findings, plan.inlineEligibleFiles, "low");
+    assert.deepEqual(
+      inline.map((c) => c.path).sort(),
+      ["engine/internal/install/install.go", "web/src/__fixtures__/index.json"],
+    );
+    for (const c of inline) {
+      assert.doesNotMatch(c.path, /^(vendor|dist)\//, `${c.path} must not open an inline thread`);
+    }
+    // No finding is lost on the way: 3 demoted + 2 still anchored.
+    assert.equal(inline.length + bodyFindings.length, SYNC_PAYLOAD.findings.length);
+  });
+
+  test("every generated-path finding reaches the review body with its file and line", () => {
+    const { plan } = syncPlan();
+    const { bodyFindings } = partitionInlineVsBody(plan.findings, plan.inlineEligibleFiles, "low");
+    const body = buildReviewBody("<!-- marker -->", plan.humanSummary, bodyFindings);
+    assert.match(body, /`vendor\/stark-skills\/tools\/gru\.ts:11`/);
+    assert.match(body, /`dist\/claude\/stark-ops\/skills\/gru\/SKILL\.md:2`/);
+    assert.match(body, /`index\.json:4`/);
+  });
+
+  test("a finding on an ordinary source path is unchanged", () => {
+    const { plan } = syncPlan();
+    const src = plan.findings.find((f) => f.file === "engine/internal/install/install.go");
+    assert.ok(src);
+    assert.equal(src.line, 41, "a source anchor survives untouched");
+    assert.equal(src.severity, "high");
+    assert.equal(src.classification, "fix");
+    assert.doesNotMatch(src.body, /Generated output/);
+  });
+
+  test("demotion changes the thread, never the severity or the disposition", () => {
+    const { plan } = syncPlan();
+    const vendor = plan.findings.find((f) => f.file === "vendor/stark-skills/tools/gru.ts");
+    assert.ok(vendor);
+    assert.equal(vendor.severity, "high", "severity is inferred from verdict, not from the path");
+    assert.equal(vendor.classification, "fix", "the split must not re-classify a finding");
+    assert.equal(vendor.line, 11, "the finding keeps the line it would have anchored to");
+    assert.match(vendor.body, /matched `vendor\/\*\*`/);
+  });
+
+  test("the preamble states generated, upstream, and the shared-branch block", () => {
+    const { plan } = syncPlan();
+    assert.match(plan.humanSummary, /3 findings on generated paths/);
+    assert.match(plan.humanSummary, /\*\*generated output\*\*/i);
+    assert.match(plan.humanSummary, /\*\*upstream\*\*/i);
+    assert.match(plan.humanSummary, /\*\*shared\*\*/i);
+    assert.match(plan.humanSummary, /required_conversation_resolution/);
+    assert.match(plan.humanSummary, /Nothing is dropped, downgraded, or auto-resolved/);
+  });
+
+  test("the split is reported in the JSON summary: generated under body, source under inline", async () => {
+    const { ctx, plan } = syncPlan();
+    const result = await postReview({
+      repo: "21StarkCom/bifrost",
+      pr: 264,
+      round: 1,
+      agent: "claude",
+      runHash: "test",
+      findings: plan.findings,
+      changedFiles: plan.inlineEligibleFiles,
+      fixThreshold: "low",
+      humanSummary: plan.humanSummary,
+      prHeadSha: ctx.headSha,
+      dryRun: true,
+    });
+    assert.equal(result.payloadSummary.inlineCount, 2);
+    assert.equal(result.payloadSummary.bodyFindingsCount, 3);
+    assert.equal(plan.generated.enabled, true);
+    assert.deepEqual(
+      plan.generated.entries.map((e) => [e.file, e.line, e.pattern]),
+      [
+        ["vendor/stark-skills/tools/gru.ts", 11, "vendor/**"],
+        ["dist/claude/stark-ops/skills/gru/SKILL.md", 2, "dist/**"],
+        ["index.json", 4, "index.json"],
+      ],
+    );
+  });
+
+  test("a hand-written fixture whose basename matches a glob keeps its inline thread", () => {
+    // Globs are anchored against the whole path. Under gitignore's basename
+    // rule, `index.json` would also swallow bifrost's source fixtures — whose
+    // findings ARE fixable where they are posted.
+    const matchers = compileGeneratedMatchers(DEFAULT_GENERATED_PATHS);
+    assert.equal(matchGeneratedPath("index.json", matchers), "index.json");
+    assert.equal(matchGeneratedPath("web/src/__fixtures__/index.json", matchers), null);
+    assert.equal(matchGeneratedPath("engine/internal/install/testdata/index.json", matchers), null);
+  });
+
+  test("a generated finding outside every hunk still carries its declared line", () => {
+    const ctx = parsePrContext("sha", SYNC_PR_FILES);
+    const plan = planReview(
+      { findings: [{ file: "vendor/stark-skills/tools/gru.ts", line: 999, summary: "s" }] },
+      ctx,
+      { agent: "claude", generatedPaths: GENERATED_PATHS },
+    );
+    assert.equal(plan.findings[0].line, null, "an out-of-hunk anchor is still dropped");
+    assert.match(plan.findings[0].body, /`vendor\/stark-skills\/tools\/gru\.ts:999`/);
+    assert.equal(plan.generated.entries[0].line, 999);
+  });
+
+  test("an empty glob list anchors generated paths inline like any other file", () => {
+    const { plan } = syncPlan([]);
+    const { inline } = partitionInlineVsBody(plan.findings, plan.inlineEligibleFiles, "low");
+    assert.equal(inline.length, SYNC_PAYLOAD.findings.length);
+    assert.equal(plan.generated.enabled, false);
+    assert.equal(plan.generated.entries.length, 0);
+    assert.doesNotMatch(plan.humanSummary, /generated paths/);
+  });
+
+  test("the inline-eligible set drops every generated file, finding or not", () => {
+    const { plan } = syncPlan();
+    assert.deepEqual(
+      [...plan.inlineEligibleFiles].sort(),
+      ["engine/internal/install/install.go", "web/src/__fixtures__/index.json"],
+    );
+  });
+
+  test("a finding with no file is never treated as generated", () => {
+    const matchers = compileGeneratedMatchers(DEFAULT_GENERATED_PATHS);
+    assert.equal(matchGeneratedPath(null, matchers), null);
+    assert.equal(matchGeneratedPath(undefined, matchers), null);
+    assert.equal(matchGeneratedPath("", matchers), null);
+  });
+
+  test("a leading ./ is normalized before matching", () => {
+    const matchers = compileGeneratedMatchers(DEFAULT_GENERATED_PATHS);
+    assert.equal(matchGeneratedPath("./index.json", matchers), "index.json");
+    assert.equal(matchGeneratedPath("./vendor/a.ts", matchers), "vendor/**");
+  });
+});
+
+describe("globToRegExp", () => {
+  test("a single star stays inside one path segment", () => {
+    assert.equal(globToRegExp("dist/*.js").test("dist/a.js"), true);
+    assert.equal(globToRegExp("dist/*.js").test("dist/nested/a.js"), false);
+  });
+
+  test("a doubled star crosses path separators but needs at least one segment", () => {
+    assert.equal(globToRegExp("vendor/**").test("vendor/a/b/c.ts"), true);
+    assert.equal(globToRegExp("vendor/**").test("vendor/a.ts"), true);
+    assert.equal(globToRegExp("vendor/**").test("vendor"), false);
+    assert.equal(globToRegExp("vendor/**").test("my-vendor/a.ts"), false);
+  });
+
+  test("a leading doubled star plus slash also matches zero segments", () => {
+    assert.equal(globToRegExp("**/index.json").test("index.json"), true);
+    assert.equal(globToRegExp("**/index.json").test("a/b/index.json"), true);
+  });
+
+  test("regex metacharacters in a pattern are literal", () => {
+    assert.equal(globToRegExp("index.json").test("indexXjson"), false);
+    assert.equal(globToRegExp("a+b.json").test("a+b.json"), true);
+    assert.equal(globToRegExp("a+b.json").test("aab.json"), false);
+  });
+
+  test("a pattern is anchored at both ends", () => {
+    assert.equal(globToRegExp("dist/**").test("x/dist/a.js"), false);
+    assert.equal(globToRegExp("index.json").test("index.json.bak"), false);
+  });
+});
+
+describe("parseArgs generated-path flags", () => {
+  const base = ["--repo", "o/r", "--pr", "1", "--findings", "-"];
+
+  test("the default glob list is the shipped one", () => {
+    assert.deepEqual(parseArgs(base).generatedPaths, [...DEFAULT_GENERATED_PATHS]);
+  });
+
+  test("--generated-paths replaces the default list and trims each glob", () => {
+    const a = parseArgs([...base, "--generated-paths", "build/**, out/*.json ,"]);
+    assert.deepEqual(a.generatedPaths, ["build/**", "out/*.json"]);
+  });
+
+  test("--generated-paths with an empty value is refused, never a silent disable", () => {
+    // A typo that quietly turned the split off would reintroduce exactly the
+    // shared-branch block this routing exists to prevent.
+    assert.throws(() => parseArgs([...base, "--generated-paths", ""]), /at least one glob/);
+    assert.throws(() => parseArgs([...base, "--generated-paths", " , "]), /at least one glob/);
+  });
+
+  test("--no-generated-split is the only way to disable the split", () => {
+    assert.deepEqual(parseArgs([...base, "--no-generated-split"]).generatedPaths, []);
+  });
+
+  test("the last of the two flags wins", () => {
+    assert.deepEqual(
+      parseArgs([...base, "--no-generated-split", "--generated-paths", "x/**"]).generatedPaths,
+      ["x/**"],
+    );
+    assert.deepEqual(
+      parseArgs([...base, "--generated-paths", "x/**", "--no-generated-split"]).generatedPaths,
+      [],
+    );
   });
 });
