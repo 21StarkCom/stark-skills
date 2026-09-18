@@ -21,8 +21,8 @@ import {
   toFindings,
   type ReportFindingsPayload,
 } from "./findings_review_post.ts";
-import { partitionInlineVsBody, postReview, buildReviewBody } from "./stark_review.ts";
-import { buildMarker } from "./stark_review_lib.ts";
+import { partitionInlineVsBody, postReview, buildReviewBody } from "./review_post_lib.ts";
+import { buildMarker } from "./finding_lib.ts";
 
 // --- mapping -----------------------------------------------------------------
 

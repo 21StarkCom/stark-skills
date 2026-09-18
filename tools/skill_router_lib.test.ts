@@ -32,9 +32,8 @@ function isoZ(d: Date): string {
 // Static surface — context → skill map, valid context set
 // ---------------------------------------------------------------------------
 
-test("VALID_CONTEXTS lists the four documented contexts", () => {
+test("VALID_CONTEXTS lists the three documented contexts", () => {
   assert.deepEqual([...VALID_CONTEXTS].sort(), [
-    "debug",
     "implementation",
     "review",
     "session",
@@ -97,7 +96,7 @@ test("loadSkillUsage: returns {} when file missing", () => {
 test("loadSkillUsage: returns parsed dict when valid JSON object", () => {
   const dir = tmp();
   const p = path.join(dir, "usage.json");
-  const data = { by_skill: { "stark-review": 5 }, generated_at: "2026-01-01T00:00:00Z" };
+  const data = { by_skill: { "stark-fresh-eyes": 5 }, generated_at: "2026-01-01T00:00:00Z" };
   fs.writeFileSync(p, JSON.stringify(data));
   assert.deepEqual(loadSkillUsage(p), data);
 });

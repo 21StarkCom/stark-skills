@@ -90,8 +90,6 @@ const SUPPORT_FILES = [
   "tools/session_id_lib.ts",
   "tools/session_state_lib.ts",
   "tools/skill_router_lib.ts",
-  "tools/stark_review.ts",
-  "tools/stark_review_doc_analytics_lib.ts",
   "tools/stark_session_lib.ts",
   "tools/validation_gate_lib.ts",
 ] as const;
@@ -127,7 +125,7 @@ test("Codex runtime override inventory is exact", () => {
   // make it a tautology.
   assert.equal(
     expected.length,
-    57,
+    53,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });
@@ -195,7 +193,6 @@ test("Codex user-facing output uses dollar skill invocation", () => {
     "standards/stage-completion-line.md",
     "standards/templates/docs-index.md",
     "tools/copilot_land.ts",
-    "tools/stark_review_doc_analytics_lib.ts",
   ];
   const slashInvocation = /\/stark(?:-[a-z0-9]+)*(?::[a-z0-9-]+)?(?=[\s`'"(]|$)/i;
 

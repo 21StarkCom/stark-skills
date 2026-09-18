@@ -6,7 +6,7 @@
  * The gap this closes: `/code-review --comment` posts one standalone
  * `POST /pulls/N/comments` per finding, and GitHub wraps each in its own empty
  * review object — 30 findings become 30 zero-body reviews. `postReview()` in
- * `stark_review.ts` already posts a single review with inline anchoring and a
+ * `review_post_lib.ts` already posts a single review with inline anchoring and a
  * three-tier no-drop guarantee; all that was missing is the payload adapter.
  *
  * Everything here is mapping plus a CLI: no new posting logic, no new retry or
@@ -19,13 +19,13 @@ import { spawnSync } from "node:child_process";
 import {
   postReview,
   type PostReviewResult,
-} from "./stark_review.ts";
+} from "./review_post_lib.ts";
 import {
   findingId,
   type AgentName,
   type Finding,
   type Severity,
-} from "./stark_review_lib.ts";
+} from "./finding_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 /** One entry of the `ReportFindings` tool payload. */
@@ -83,7 +83,7 @@ export function bodyFor(f: ReportFinding): string {
  * Map ONE `ReportFindings` entry into the `Finding` `postReview` consumes.
  *
  * `classification: "fix"` is set on every finding deliberately and is
- * load-bearing: `partitionInlineVsBody` (`stark_review.ts:1487`) requires it
+ * load-bearing: `partitionInlineVsBody` (`review_post_lib.ts`) requires it
  * for inline eligibility, so without it every finding lands in the review body
  * and nothing is ever anchored. `ReportFindings` only emits findings that
  * survived verification, so "fix" is the honest classification for all of them.

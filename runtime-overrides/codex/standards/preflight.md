@@ -10,7 +10,7 @@ TOOLS="${STARK_REVIEW_TOOLS:-${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/code-review}/to
 node "$TOOLS/preflight.ts" --workflow <skill-slug> --json
 ```
 
-The skill provides its own `<skill-slug>` (e.g. `stark-review`, `stark-terraform-review`).
+The skill provides its own `<skill-slug>` (e.g. `stark-terraform-review`, `stark-refactor-plan`).
 
 ## Result handling
 
