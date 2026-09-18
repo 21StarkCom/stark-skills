@@ -131,11 +131,23 @@ If your packet names a base branch, open your PR against it and merge into that 
 Gru cannot verify a merge into any other one, and that refusal comes after the merge.
 Wait for Gru's assignment-specific integration grant before merging.
 The grant identifies your token and the base SHA Gru observed for it.
-After another merge, fetch and rebase onto the base branch's current tip, not the
-granted SHA, then regenerate, reconcile, rebuild, retest, and repost your review.
-Send Gru the new head SHA and the new review id before you merge: it verifies the
-review id you last reported, and after the merge nothing can repair that evidence.
-A clean rebase alone does not renew passing evidence.
+Before every merge, after the grant: fetch and rebase onto the PR's own base branch's
+current tip, even if you observed no other merge. Your merged head must contain the
+granted base SHA. Check `git merge-base --is-ancestor GRANTED_BASE HEAD` and stop on failure.
+Then regenerate, reconcile, rebuild, and retest. A clean rebase alone does not renew
+passing evidence. Push the rebased branch with an explicit force-with-lease.
+Fetch the PR head GitHub reports as PR_HEAD; require PR_HEAD to equal local HEAD,
+then check `git merge-base --is-ancestor GRANTED_BASE PR_HEAD` and stop on failure.
+Repost the review on any new head. Check the posted review's `commit_id` equals
+PR_HEAD; stop on a mismatch before reporting or merging.
+Send Gru the final head SHA and review id in a `progress` report before merging,
+even if unchanged. Do not send `ready` while `integrating`: the store refuses it.
+For this progress report, `message` is a JSON string containing
+`{"head":"<full PR head SHA>","review":<numeric review id>}`.
+The outer report still carries run, task, token and kind; the leader's received event
+preserves this pair even when later progress or completion replaces the report snapshot.
+Gru must `receive` that report and verify with the last reported head and review id.
+After merging, nothing can repair missing ancestry or a review on the wrong head.
 
 Report the observed merge SHA and repository completion milestone.
 Close the ticket yourself once you have independently confirmed that milestone:

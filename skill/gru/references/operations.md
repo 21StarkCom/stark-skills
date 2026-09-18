@@ -64,13 +64,14 @@ Release files can be modeled as integration resources.
 Declared files scope each worker's brief; overlapping files never block dispatch.
 Each worker edits its own worktree, and tasks touching the same files reconcile at the
 rebase before merge (a 3-way merge), one merge at a time under the repository's merge lock.
-That holds only if you grant `integrate` at the base branch tip you fetch and read
+That holds only if you grant `integrate` at the PR's own base branch tip you fetch and read
 immediately before the grant — never a tip observed earlier, and never a local ref you
 have not just fetched, which reads exactly like a current one. You cannot hold the merge
 lock first: `integrate` takes `merge:<repo>` in the same transaction that records the
 base, and refuses a second call once the phase is `integrating`. Its refusal is the
-fence — `resource already owned: merge:<repo> (<run>/<task>)` names the task that is
-mid-merge, so wait for that task to complete, fetch again, and read the tip again.
+fence — `resource already owned: merge:<repo> (<run>/<task>)` or
+`resource already owned: merge-resource:<name> (<run>/<task>)` names the holder.
+Follow the [holder recovery branch](#merge-lock-holder-recovery) before waiting or retrying.
 Read the tip rather than naming the previous merge commit: the previous merge need not
 be the tip (a base branch also takes direct publisher pushes), and `merge:<repo>` locks
 are global, so that merge can belong to an engagement whose commits you never recorded.
@@ -82,7 +83,7 @@ base branch from origin in the task's own repository and refuses unless the SHA 
 commit that repository holds and is that branch's current tip. The refusal names the
 current tip. That comparison is the whole guarantee: a base that IS `origin/<ref>` already
 contains everything merged onto that branch, so nothing walks history. Without that check
-the store validated the SHA's shape alone (40 to 64 hex
+the store validated the SHA's shape alone (40 to 64 lowercase hex
 characters) while `verify` only requires that base in the merged head's ancestry, so a
 foreign-repository SHA, a typo, or an hour-stale tip all passed and let a diff built
 without the other task's changes squash cleanly whenever git sees no textual conflict.
@@ -409,7 +410,8 @@ reserved. Escalate it; never edit the engagement or database to release it.
 
 Inspect tests, review, findings, and PR state before integration.
 The required review is `/code-review xhigh --fix`.
-Keep its actual command/output receipt and posted review identifier.
+Keep its actual command/output receipt and update the posted review identifier whenever
+the worker reports a new head/review pair; the pair captured at READY can become stale.
 Confirm every finding has been fixed or answered.
 For Bifrost's automated sync PRs, the final `aryeh-stark` review body starts
 with `<!-- stark-code-review:complete -->` on its own first line and names
@@ -433,10 +435,36 @@ For Gru integration, use a merge path that preserves the reviewed head,
 such as `gh pr merge --squash --match-head-commit <reviewed-head>` after
 the repository's checks pass. Do not relax the verifier's exact-head rule.
 
-Reserve integration using the base branch tip you fetch and read immediately before
+Reserve integration using the PR's own base branch tip you fetch and read immediately before
 `integrate`, so it includes any merge that landed while this task was in review.
 `integrate` fetches that branch itself and refuses any other SHA, naming the tip to use.
-Rebase, regenerate, reconcile shared counts, rebuild, and retest.
+After every grant, require the worker to fetch and rebase before merging, even if no
+other merge was observed. The merged head must contain the granted base SHA; the worker
+checks `git merge-base --is-ancestor GRANTED_BASE HEAD` and stops on failure.
+Regenerate, reconcile shared counts, rebuild, and retest.
+Require an explicit force-with-lease push and a fetched GitHub PR head equal to local HEAD.
+Check `git merge-base --is-ancestor GRANTED_BASE PR_HEAD` and stop on failure.
+Require the worker to repost the review on any new head and check its `commit_id`
+equals PR_HEAD before reporting or merging.
+Before merge, `receive` the worker's post-grant `progress` report containing the final
+head SHA and review id, even if unchanged. `ready` is refused while `integrating`.
+Keep the last reported head and review id, replacing the pair captured at READY.
+The progress report's `message` is a JSON string containing
+`{"head":"<full PR head SHA>","review":<numeric review id>}`.
+`receive` preserves it in `run.events` as `report:progress` with the pair in `detail`;
+`task.report` is only the latest snapshot and later reports overwrite it.
+On resume or leadership transfer, read `gru status --run ID`: in event array order,
+find this task's latest `integration` event, then its last `report:progress` containing
+that pair after the grant. Never fall back to READY evidence. Missing or malformed
+pair evidence requires a fresh progress report before merge; if already merged,
+inspect the PR and report receipts and escalate missing evidence instead of guessing.
+Compare GitHub's actual PR head to that last reported head and pass the last review id
+to `verify --review`. There is no `--head` flag: the verifier reads the PR head itself.
+If the pair is stale, stop before merge and obtain the current evidence. Neither a
+missing granted-base ancestor nor a wrong-head review can be repaired after merging.
+Re-briefing an integrating worker preserves its existing grant and progress-report rule,
+including when cancellation froze that integration. Replacement-only READY instructions
+apply to a retained previous-attempt grant, not an existing grant for the current attempt.
 Use the repository's squash-merge path and inspect the result.
 Never rely on a merge command's exit code alone.
 
@@ -482,6 +510,27 @@ Release milestones can require additional direct operator actions.
 Keep tasks incomplete until those milestones are satisfied.
 Missing or skipped required remote checks must be resolved before merging.
 Access limitations remain explicit verification blockers.
+
+### Merge-lock holder recovery
+
+For either `resource already owned: merge:<repo> (<run>/<task>)` or
+`resource already owned: merge-resource:<name> (<run>/<task>)`, inspect the named run/task
+and gather fresh Hermod observations of its leader and worker. For a live holder,
+coordinate completion, then fetch the PR's own base branch and read its tip again.
+A dead or unknown holder requires escalation to the operator with those observations
+and the actual PR state. Unknown is not dead; elapsed time does not release a lock.
+Do not wait indefinitely, delete ownership rows, or run a sweep to bypass a pending grant.
+
+Name the STARK-5062 `settle --file` path (shipped in v0.30.7) when the holder's PR has
+already merged with zero posted reviews: use the
+[operator settlement contract](#operator-settlement-of-a-merged-grant-without-review).
+Resume leadership and reconcile under the normal rules first, then obtain the
+operator-authored request. Settlement still requires both ancestry checks, a closed ticket,
+and green declared checks. It releases merge resources as `released-unverified`, never
+verified, and dependents remain blocked. An unmerged PR, wrong ancestry, or an existing
+wrong-head review does not qualify; escalate those facts without inventing a bypass.
+A merged PR with a valid head-matching review uses ordinary `verify` after leadership
+and reconciliation are restored, with the last reported head and review id.
 
 ## Recovery and cancellation
 

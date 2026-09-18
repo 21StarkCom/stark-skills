@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { canonicalRepository, checkLeadershipTransfer, checkRebrief, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, GRANT_FETCH as GRANT_FETCH_FLAGS, PRIVATE_FETCH as VERIFY_FETCH_FLAGS, inspectAdoption, interruptWorker, observations, observeBase, observeOrphan, observeSweep, observeWorkers, packet, PACKET_TRANSFER_WINDOW, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
-import { ADOPTION_CHECKS, BASE_CHECKS, type Assignment, type Engagement, type Run } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, BASE_CHECKS, GruStore, type Assignment, type Engagement, type Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
   surfaceId: "surface", workspaceId: "workspace", cwd: "/worktree", liveness: "live",
@@ -505,6 +505,224 @@ test("dispatch packet uses the selected runtime and retains the full objective a
   assert.throws(() => workerFromPeer({ ...peer(), threadId: undefined }), /identity/);
 });
 
+// These prompts are the executable worker/leader protocol. Exercise the generated packet,
+// both installed skill sources, and the CLI help; each clause has its own negative control.
+const contractCases: { file: string; clause: string; pattern: RegExp; from: string; to: string }[] = [];
+const contract = (files: string[], clause: string, pattern: RegExp, from: string, to = "obsolete contract") => {
+  for (const file of files) contractCases.push({ file, clause, pattern, from, to });
+};
+const minions = ["skill/minion/SKILL.md", "runtime-overrides/codex/skill/minion/SKILL.md"];
+const leaders = ["skill/gru/SKILL.md", "runtime-overrides/codex/skill/gru/SKILL.md"];
+const ops = "skill/gru/references/operations.md";
+const workers = ["tools/gru_runtime_lib.ts", ...minions];
+const protocol = [...workers, ...leaders, ops];
+contract(["tools/gru_runtime_lib.ts", ...minions], "unconditional rebase",
+  /Before every merge, after the grant: fetch and rebase onto the PR's own base branch's current tip, even if you observed no other merge/,
+  "Before every merge, after the grant:", "After another merge:");
+contract(["tools/gru_runtime_lib.ts", ...minions], "granted ancestry",
+  /merged head must contain the granted base SHA/, "merged head must contain", "merged head may omit");
+contract(["tools/gru_runtime_lib.ts", ...minions], "ancestry command",
+  /git merge-base --is-ancestor GRANTED_BASE HEAD/, "git merge-base --is-ancestor GRANTED_BASE HEAD", "git status");
+contract(["tools/gru_runtime_lib.ts", ...minions], "progress report",
+  /head SHA and review id in a progress report before merging, even if unchanged/,
+  "head SHA and review id in a", "old head and review id in a");
+contract(["tools/gru_runtime_lib.ts", ...minions], "ready refusal",
+  /Do not send ready while integrating/, "Do not send", "Send");
+contract(leaders, "receive post-grant report",
+  /Before merge, receive its post-grant progress report with the final head SHA and review id, even if unchanged/,
+  "Before merge, `receive` its post-grant `progress`", "After merge, read its old ready");
+contract([...leaders, ops], "last report pair", /Keep the last reported head and review id, replacing the pair captured at READY/,
+  "Keep the last reported head and review id", "Keep the READY head and review id");
+contract([...leaders, ops], "merge-resource holder", /resource already owned: merge-resource:<name> \(<run>\/<task>\)/,
+  "merge-resource:<name> (<run>/<task>)", "merge-resource:<name>");
+contract(leaders, "dead holder escalation", /A dead or unknown holder requires escalation to the operator/,
+  "A dead or unknown holder", "A live holder");
+contract([...leaders, ops], "settlement path", /STARK-5062/, "STARK-5062", "historical");
+contract([ops], "post-grant import", /Before merge, receive the worker's post-grant progress report/,
+  "Before merge, `receive` the worker's post-grant `progress` report", "After merge, read the READY report");
+contract([ops], "dead holder escalation", /A dead or unknown holder requires escalation to the operator/,
+  "A dead or unknown holder", "A live holder");
+contract([ops], "lowercase SHA", /40 to 64 lowercase hex characters/, "40 to 64 lowercase hex", "40 to 64 hex");
+contract(["tools/gru.ts"], "help base SHA",
+  /SHA = freshly fetched tip of the PR's own base branch \(40 to 64 lowercase hex characters\)/,
+  "SHA = freshly fetched tip of the PR's own base branch (40 to 64 lowercase hex characters)", "SHA = commit");
+contract(["tools/gru.ts"], "stopped READY prerequisite",
+  /if restored to review, integrate .* otherwise receive its worker's READY report first, then integrate/,
+  "otherwise receive its worker's READY report first, then integrate", "otherwise integrate");
+// Pin the obligations on every surface that directs them, including dilution (not
+// only deletion): recording a pair is not using it, and settlement is not verification.
+contract(leaders, "unconditional rebase",
+  /Require the worker to fetch and rebase after every grant before merging, even without another observed merge/,
+  "after every grant before merging", "only after another observed merge");
+contract([ops], "unconditional rebase",
+  /After every grant, require the worker to fetch and rebase before merging, even if no other merge was observed/,
+  "After every grant, require", "After another merge, recommend");
+contract([...leaders, ops], "granted ancestry", /merged head must contain the granted base SHA/i,
+  "merged head must contain", "merged head must EQUAL");
+contract(workers, "mandatory ancestry", /merged head must contain the granted base SHA/,
+  "merged head must contain", "merged head should contain");
+contract([...leaders, ops], "fresh grant observation", /immediately before integrate/,
+  "immediately before", "at some point before");
+contract(protocol, "stop on ancestry failure", /and stop on failure/,
+  "and stop on failure", "and continue on failure");
+contract([...leaders, ops], "ready refusal", /ready.*?is refused while integrating/,
+  "is refused while", "is permitted while");
+contract(["tools/gru_runtime_lib.ts"], "repost new head", /Repost your review on any new head/,
+  "Repost your review on any new head, then ", "");
+contract(minions, "repost new head", /Repost the review on any new head/,
+  "Repost the review on any new head.", "");
+contract([...leaders, ops], "repost new head", /Require the worker to repost the review on any new head/,
+  "Require the worker to repost the review on any new head", "The worker may reuse an older review");
+contract(leaders, "use last review", /Use that last review id for verify --review/,
+  "Use that last review id", "Use the READY review id");
+contract([ops], "use last review", /pass the last review id to verify --review/,
+  "pass the last review id", "pass the READY review id");
+contract(leaders, "compare last head", /compare the actual PR head to that last reported head/,
+  "compare the actual PR head", "record the actual PR head");
+contract([ops], "compare last head", /Compare GitHub's actual PR head to that last reported head/,
+  "Compare GitHub's actual PR head", "Record GitHub's actual PR head");
+contract([...leaders, ops], "unknown is not dead", /unknown is not dead/i,
+  "is not dead", "is dead");
+contract([ops], "irreparable merged evidence",
+  /Neither a missing granted-base ancestor nor a wrong-head review can be repaired after merging/,
+  "can be repaired after merging", "can safely be repaired after merging");
+contract(leaders, "settlement eligibility", /already-merged grant with zero posted reviews/,
+  "with zero posted reviews", "with any number of posted reviews");
+contract([ops], "settlement eligibility", /already merged with zero posted reviews/,
+  "with zero posted reviews", "with any number of posted reviews");
+contract([...leaders, ops], "operator settlement authorization", /operator-authored request/,
+  "operator-authored request", "leader-authored request");
+contract(leaders, "settlement keeps checks", /Settlement retains ancestry, checks and ticket closure/,
+  "Settlement retains ancestry, checks and ticket closure", "Settlement bypasses normal verification");
+contract([ops], "settlement keeps checks", /Settlement still requires both ancestry checks, a closed ticket, and green declared checks/,
+  "Settlement still requires both ancestry checks", "Settlement waives both ancestry checks");
+contract([...leaders, ops], "settlement unverified release", /releases merge resources as released-unverified/i,
+  "merge resources as `released-unverified`", "merge resources as VERIFIED");
+contract([ops], "settlement never verified", /released-unverified, never verified/,
+  ", never\nverified,", ",");
+contract(leaders, "settlement blocks dependents", /keeps dependents blocked/,
+  "keeps dependents blocked", "releases dependents");
+contract([ops], "settlement blocks dependents", /dependents remain blocked/,
+  "dependents remain blocked", "dependents are released");
+contract([...leaders, ops], "settlement cannot repair evidence",
+  /An unmerged PR, wrong ancestry,? or an existing wrong-head review does not qualify/,
+  "does not qualify", "qualifies");
+contract(protocol, "structured progress pair",
+  /message is a JSON string containing \{"head":"<full PR head SHA>","review":<numeric review id>\}/,
+  "<numeric review id>", "<READY review id>");
+contract([...leaders, ops], "durable report events", /run.events as report:progress with the pair in detail/,
+  "`run.events` as `report:progress`", "`task.report` as latest message");
+contract([...leaders, ops], "recover latest post-grant pair",
+  /On resume or leadership transfer, read gru status --run ID: in event array order, find this task's latest integration event, then its last report:progress containing that pair after the grant. Never fall back to READY evidence/,
+  "after the grant. Never fall back to READY evidence", "before the grant. Fall back to READY evidence");
+contract(workers, "push rebased head", /Push the rebased branch with an explicit force-with-lease/,
+  "Push the rebased branch with an explicit force-with-lease", "Keep the rebased branch local");
+contract(workers, "GitHub head equals local head", /require PR_HEAD to equal local HEAD/,
+  "require PR_HEAD to equal local HEAD", "allow PR_HEAD to differ from local HEAD");
+contract([...leaders, ops], "push rebased head",
+  /Require an explicit force-with-lease push and a fetched GitHub PR head equal to local HEAD/,
+  "Require an explicit force-with-lease push", "Allow an unpushed local branch");
+contract(protocol, "GitHub head ancestry", /git merge-base --is-ancestor GRANTED_BASE PR_HEAD/,
+  "git merge-base --is-ancestor GRANTED_BASE PR_HEAD", "git merge-base --is-ancestor GRANTED_BASE HEAD");
+contract(["tools/gru_runtime_lib.ts", ...leaders, ops], "review matches GitHub head", /commit_id equals PR_HEAD/,
+  "equals PR_HEAD", "may differ from PR_HEAD");
+contract(minions, "review matches GitHub head", /commit_id equals PR_HEAD/,
+  "equals\nPR_HEAD", "may differ from PR_HEAD");
+
+for (const c of contractCases) test(`STARK-5052 contract: ${c.file} ${c.clause}`, async () => {
+  const root = path.resolve(import.meta.dirname, "..");
+  let text: string;
+  if (c.file === "tools/gru_runtime_lib.ts") text = packet(run(), assignment());
+  else if (c.file === "tools/gru.ts" && c.clause === "stopped READY prerequisite") {
+    const { verifyBlocker } = await import("./gru.ts");
+    text = verifyBlocker({ ...assignment(), phase: "stopped", stoppedFrom: "working" });
+  } else if (c.file === "tools/gru.ts") text = execFileSync(process.execPath, [path.join(root, c.file), "--help"], { encoding: "utf8" });
+  else text = fs.readFileSync(path.join(root, c.file), "utf8");
+  assert.match(text.replaceAll("`", "").replace(/\s+/g, " "), c.pattern);
+});
+
+test("STARK-5052 mutation sweep detects every reverted contract clause", {
+  skip: process.env.GRU_CONTRACT_MUTATION_SWEEP !== "1",
+}, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-contract-mutations-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const root = path.resolve(import.meta.dirname, "..");
+  for (const name of ["tools", "skill/gru", "skill/minion", "runtime-overrides/codex/skill/gru", "runtime-overrides/codex/skill/minion"]) {
+    fs.cpSync(path.join(root, name), path.join(dir, name), { recursive: true, filter: source => path.basename(source) !== "node_modules" });
+  }
+  const { NODE_TEST_CONTEXT: _context, ...env } = process.env;
+  const execute = (pattern = "STARK-5052 contract:") => spawnSync(process.execPath, ["--test", "--test-reporter=spec", `--test-name-pattern=${pattern}`,
+    path.join(dir, "tools/gru_runtime_lib.test.ts")], { encoding: "utf8", timeout: 30_000, env });
+  const baseline = execute();
+  assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
+  for (const c of contractCases) {
+    const file = path.join(dir, c.file), original = fs.readFileSync(file, "utf8");
+    assert.ok(original.includes(c.from), `missing mutation target: ${c.file} ${c.clause}`);
+    fs.writeFileSync(file, original.replaceAll(c.from, c.to));
+    const result = execute();
+    fs.writeFileSync(file, original);
+    assert.equal(result.status, 1, `mutation survived: ${c.file} ${c.clause}\n${result.stdout}${result.stderr}`);
+    assert.ok(result.stdout.includes(`✖ STARK-5052 contract: ${c.file} ${c.clause}`), result.stdout);
+    assert.match(result.stdout, /AssertionError/);
+    t.diagnostic(`KILLED: ${c.file} ${c.clause}`);
+  }
+  t.diagnostic(`${contractCases.length}/${contractCases.length} contract mutations rejected`);
+  const behavior = "STARK-5052 advanced base";
+  const liveBaseline = execute(behavior);
+  assert.equal(liveBaseline.status, 0, liveBaseline.stdout + liveBaseline.stderr);
+  const guards: [string, string, string][] = [
+    ["gru_lib.ts", '["working", "blocked", "review"].includes(task.phase)', 'true'],
+    ["gru_lib.ts", 'task.report = { kind, message, at: new Date().toISOString() };', 'task.report ??= { kind, message, at: new Date().toISOString() };'],
+    ["gru_lib.ts", 'this.event(run, `report:${kind}`, message, taskId);', ''],
+    ["gru_runtime_lib.ts", 'review.commit_id !== pr.head.sha', 'false'],
+    ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);', ''],
+    ["gru_lib.ts", "resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%' OR resource LIKE 'exclusive:%'", "resource LIKE 'exclusive:%'"],
+  ];
+  for (const [name, from, to] of guards) {
+    const file = path.join(dir, "tools", name), original = fs.readFileSync(file, "utf8");
+    assert.ok(original.includes(from), `missing behavioral guard: ${from}`);
+    fs.writeFileSync(file, original.replace(from, to));
+    const result = execute(behavior);
+    fs.writeFileSync(file, original);
+    assert.equal(result.status, 1, `behavior mutation survived: ${from}\n${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /AssertionError/);
+    t.diagnostic(`KILLED: ${name}: ${from}`);
+  }
+  t.diagnostic(`${guards.length}/${guards.length} behavioral mutations rejected`);
+  const rebriefPattern = "STARK-5052 rebrief preserves";
+  const rebriefBaseline = execute(rebriefPattern);
+  assert.equal(rebriefBaseline.status, 0, rebriefBaseline.stdout + rebriefBaseline.stderr);
+  const runtimeFile = path.join(dir, "tools/gru_runtime_lib.ts"), runtime = fs.readFileSync(runtimeFile, "utf8");
+  const grantArm = 'task.phase === "integrating" || (["stopping", "stopped"].includes(task.phase) && task.stoppedFrom === "integrating")';
+  for (const replacement of ["false", "true", 'task.phase === "integrating"']) {
+    assert.ok(runtime.includes(grantArm));
+    fs.writeFileSync(runtimeFile, runtime.replace(grantArm, replacement));
+    const result = execute(rebriefPattern);
+    fs.writeFileSync(runtimeFile, runtime);
+    assert.equal(result.status, 1, `rebrief mutation survived: ${replacement}\n${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /AssertionError/);
+    t.diagnostic(`KILLED: current-grant rebrief guard -> ${replacement}`);
+  }
+  t.diagnostic("3/3 rebrief mutations rejected");
+});
+
+test("STARK-5052 rebrief preserves current and frozen grants without sending replacement READY instructions", () => {
+  const r = run();
+  for (const phase of ["integrating", "stopping", "stopped"] as const) {
+    const task = { ...assignment(), phase, ...(phase === "integrating" ? {} : { stoppedFrom: "integrating" as const }) };
+    const brief = packet(r, task);
+    assert.match(brief, /This is your existing integration grant/);
+    assert.doesNotMatch(brief, /then send READY and wait for your own integration grant|Gru refuses verification while you hold/);
+  }
+  for (const phase of ["pending", "reserved", "intake", "working", "review", "stopping", "stopped"] as const) {
+    const task = { ...assignment(), phase, ...(["stopping", "stopped"].includes(phase) ? { stoppedFrom: "working" as const } : {}) };
+    const brief = packet(r, task);
+    assert.match(brief, /retained grant from a previous attempt/);
+    assert.match(brief, /then send READY and wait for your own integration grant/);
+    assert.doesNotMatch(brief, /This is your existing integration grant/);
+  }
+});
+
 test("completed idle workers retire through Hermod without deleting session worktrees", async () => {
   const task = assignment(); task.phase = "done";
   let activity = "busy";
@@ -519,6 +737,112 @@ test("completed idle workers retire through Hermod without deleting session work
   await retireWorker(task, call);
   assert.deepEqual(actions.at(-1), ["hermod", "close", "surface", "--workspace", "workspace"]);
   assert.equal(await canonicalRepository("/repo", async () => ({ code: 0, stdout: "git@github.com:Owner/Repo.git\n", stderr: "" })), "owner/repo");
+});
+
+test("STARK-5052 advanced base rebases, imports progress, verifies last review and releases the lock", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-grant-contract-"));
+  const store = new GruStore(path.join(dir, "state.sqlite"));
+  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const repo = path.join(dir, "repo"), origin = path.join(dir, "origin.git"), worktree = path.join(dir, "worker");
+  fs.mkdirSync(repo);
+  let gitDir = repo;
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=Gru Test", "-c",
+    "user.email=gru@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: gitDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "--bare", "--initial-branch=main", origin);
+  git("init", "--initial-branch=main"); git("remote", "add", "origin", origin);
+  fs.writeFileSync(path.join(repo, "base.txt"), "initial\n");
+  git("add", "."); git("commit", "-m", "initial"); git("push", "origin", "main");
+  git("worktree", "add", "-b", "candidate", worktree); gitDir = worktree;
+  fs.writeFileSync(path.join(worktree, "feature.txt"), "feature\n");
+  git("add", "."); git("commit", "-m", "reviewed candidate");
+  const oldHead = git("rev-parse", "HEAD");
+  const spec = { ...assignment().spec, repo, worktree, repositoryKey: "owner/repo", baseRef: "main",
+    checks: [[process.execPath, "-e", "const a=require('node:assert/strict'),f=require('node:fs'); a.equal(f.readFileSync('base.txt','utf8'),'advanced\\n'); a.equal(f.readFileSync('feature.txt','utf8'),'feature\\n'); console.log('base and feature verified')"]] };
+  let current = store.create({ ...run().config, tasks: [spec] });
+  current = store.reconcile("run", "leader", current.revision, {});
+  current = store.reserve("run", "leader", current.revision, "task");
+  const token = current.tasks[0].token!;
+  current = store.attach("run", "leader", current.revision, "task", token, { ...workerFromPeer(peer()), worktree });
+  current = store.report("run", "leader", current.revision, "task", token, "session", "ack", spec.doneWhen);
+  current = store.report("run", "leader", current.revision, "task", token, "session", "ready", JSON.stringify({ head: oldHead, review: 1 }));
+
+  // main advances during review, before the grant; no later merge is needed to reproduce it.
+  gitDir = repo; fs.writeFileSync(path.join(repo, "base.txt"), "advanced\n");
+  git("add", "."); git("commit", "-m", "concurrent base change"); git("push", "origin", "main");
+  const base = git("rev-parse", "HEAD");
+  const apiRepo = { full_name: "owner/repo" };
+  const pr = { merged: true, merged_at: new Date().toISOString(), merge_commit_sha: "",
+    head: { sha: oldHead, repo: apiRepo }, base: { ref: "main", repo: apiRepo }, html_url: "https://github.com/owner/repo/pull/1" };
+  const reviews = new Map([[1, oldHead]]);
+  const call: Command = async (argv, cwd, options) => {
+    if (argv[0] === "git" && argv[1] === "remote") return { code: 0, stdout: "git@github.com:owner/repo.git", stderr: "" };
+    if (argv[0] === "gh") {
+      const id = Number(argv[2].split("/").at(-1));
+      return response(argv[2].includes("reviews/") ? { commit_id: reviews.get(id), submitted_at: new Date().toISOString(),
+        state: "COMMENTED", html_url: `${pr.html_url}#pullrequestreview-${id}` } : pr);
+    }
+    if (argv[0] === "alfred") return response({ item: { ref: { custom_id: spec.ticket }, state: "done" }, comments: [], comments_read: true });
+    return command(argv, cwd, options);
+  };
+  const observed = await observeBase(current.tasks[0], base, "main", call);
+  current = store.integrate("run", "leader", current.revision, "task", token, base, observed);
+  gitDir = worktree;
+  assert.equal(spawnSync("git", ["merge-base", "--is-ancestor", base, "HEAD"], { cwd: worktree }).status, 1);
+  // Counterfactual merged metadata for the old head proves that even its matching review
+  // cannot settle this grant. Git history and verifier checks are real; vendor replies are fixtures.
+  git("push", "origin", "HEAD:refs/pull/1/head"); pr.merge_commit_sha = base;
+  await assert.rejects(verifyCompletion(current.tasks[0], 1, 1, path.join(dir, "missing-base"), call), /git failed \(1\)/);
+  git("fetch", "origin", "main"); git("rebase", "origin/main");
+  const head = git("rev-parse", "HEAD");
+  assert.notEqual(head, oldHead);
+  git("merge-base", "--is-ancestor", base, "HEAD");
+  assert.notEqual(pr.head.sha, head, "a local rebase has not updated GitHub's PR head");
+  await assert.rejects(verifyCompletion(current.tasks[0], 1, 1, path.join(dir, "unpushed"), call), /git failed \(1\)/);
+  git("push", `--force-with-lease=refs/pull/1/head:${oldHead}`, "origin", "HEAD:refs/pull/1/head");
+  pr.head.sha = git("ls-remote", "origin", "refs/pull/1/head").split(/\s/)[0];
+  assert.equal(pr.head.sha, head);
+  git("fetch", "origin", "refs/pull/1/head");
+  git("merge-base", "--is-ancestor", base, pr.head.sha);
+  reviews.set(2, pr.head.sha);
+  const reportMessage = JSON.stringify({ head, review: 2 });
+  const reportId = "12345678-1234-1234-1234-123456789012";
+  const record = (kind: string) => ({ state: "submitted", delivery: "confirmed", from: peer().id,
+    sender: peer(), destination: { sessionId: "leader" }, body: JSON.stringify({ run: "run", task: "task", token, kind, message: reportMessage }) });
+  const importReport = async (kind: string) => {
+    const r = await receive(current, reportId, async () => response(record(kind)));
+    return store.report("run", "leader", current.revision, r.task, r.token, r.session, r.kind, r.message, reportId);
+  };
+  await assert.rejects(importReport("ready"), /in-flight integration/);
+  assert.equal(store.read("run").revision, current.revision, "refused ready must roll back");
+  current = await importReport("progress");
+  assert.equal(current.tasks[0].phase, "integrating");
+  assert.ok(current.received.includes(reportId));
+  assert.equal(current.tasks[0].report?.message, reportMessage, "progress replaces the READY head/review pair");
+  const ownsMerge = () => Number(store.owned("run", "task").includes("merge:owner/repo"));
+  assert.equal(ownsMerge(), 1, "progress retains integration ownership");
+  gitDir = repo; git("merge", "--squash", "candidate"); git("commit", "-m", "squash candidate"); git("push", "origin", "main");
+  pr.merge_commit_sha = git("rev-parse", "HEAD");
+  current = store.report("run", "leader", current.revision, "task", token, "session", "complete", `Merged ${pr.merge_commit_sha}`);
+  assert.match(current.tasks[0].report!.message, /^Merged /, "completion overwrites the task snapshot");
+  // A resumed/transferred leader reads durable status, not its old in-memory pair.
+  const resumed = JSON.parse(execFileSync(process.execPath, [path.join(import.meta.dirname, "gru.ts"), "status",
+    "--state", path.join(dir, "state.sqlite"), "--run", "run", "--leader", "leader"], {
+    encoding: "utf8", env: { ...process.env, CODEX_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "", CLAUDE_SESSION_ID: "" },
+  })) as Run;
+  const grantIndex = resumed.events.findLastIndex(e => e.task === "task" && e.kind === "integration");
+  assert.notEqual(grantIndex, -1);
+  const event = resumed.events.slice(grantIndex + 1).findLast(e => e.task === "task" && e.kind === "report:progress");
+  assert.ok(event, "received progress survives completion and a fresh status read");
+  const last = JSON.parse(event.detail);
+  assert.deepEqual(last, { head, review: 2 });
+  await assert.rejects(verifyCompletion(current.tasks[0], 1, 1, path.join(dir, "stale"), call), /posted review does not cover/);
+  assert.equal(ownsMerge(), 1, "stale READY review cannot settle the grant");
+  const proof = await verifyCompletion(current.tasks[0], 1, last.review, path.join(dir, "verified"), call);
+  assert.equal(proof.head, last.head);
+  assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /base and feature verified/);
+  current = store.complete("run", "leader", current.revision, "task", token, proof);
+  assert.equal(current.tasks[0].phase, "done");
+  assert.equal(ownsMerge(), 0, "verification must release the repository merge lock");
 });
 
 const briefMessage = "12345678-1234-1234-1234-123456789012";
