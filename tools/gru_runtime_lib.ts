@@ -365,6 +365,18 @@ export const PACKET_TRANSFER_WINDOW = 16;
  * or `Leader session: s. Provider: codex.` or `Gru rebrief: {...}` makes `briefIdentity`
  * see two headers and refuse EVERY re-brief for that task forever. Indent continuations so
  * the packet's own header lines are the only ones anchored at column 0. */
+/** THE branch this task's PR must target — one reading, shared by the brief (`packet`) and
+ * the settlement (`verifyCompletion`), so the two can never name different branches.
+ *
+ * Grant evidence wins over the declaration because `--base-ref` is a documented one-off
+ * override: reading `spec.baseRef` first made every use of that flag terminal, since the
+ * worker merged into the branch the grant was taken on and `verify` then demanded the
+ * declared one — with no in-band repair, which is precisely the failure declaring the
+ * branch was meant to remove. Before any grant there is no evidence, so the declaration is
+ * what the FIRST packet names; a legacy grant carrying `integrationBase` but no
+ * `baseEvidence` falls back to it too. */
+export const targetBaseRef = (task: Assignment): string | undefined => task.baseEvidence?.ref ?? task.spec.baseRef;
+
 const inlined = (value: string) => value.split(/\r\n|\r|\n/).join("\n  ");
 
 export function packet(run: Run, task: Assignment): string {
@@ -391,16 +403,18 @@ export function packet(run: Run, task: Assignment): string {
     // and `/minion`'s rule (report anything not in your packet) reaches only workers that ran the skill.
     "Report any exclusive resource not listed in this packet to Gru before touching it.",
     // Unconditional, not inside the grant arm below: `verify` refuses a PR whose base branch
-    // is not the one the grant was read from, and that refusal is terminal. The worker opens
-    // its PR long before any grant exists, so naming the branch only afterwards names it
-    // after the decision it governs — four review passes traced the terminal mismatch here.
-    ...(task.spec.baseRef ? [`Open your PR against base branch ${task.spec.baseRef}, and rebase onto its current tip. Gru cannot verify a merge into any other branch.`] : []),
+    // is not this one, and that refusal is terminal. The worker opens its PR long before any
+    // grant exists, so naming the branch only afterwards names it after the decision it
+    // governs — four review passes traced the terminal mismatch here. `targetBaseRef` is the
+    // SAME reading `verifyCompletion` settles against, so the brief and the gate cannot name
+    // different branches: naming the declaration here while a `--base-ref` grant was taken on
+    // another branch put two contradictory instructions in one packet.
+    ...(targetBaseRef(task) ? [`Open your PR against base branch ${targetBaseRef(task)}, and rebase onto its current tip. Gru cannot verify a merge into any other branch.`] : []),
 
     ...(task.integrationBase ? [
-      // Name the branch, not just the SHA: `verify` now refuses a PR whose base branch is not
-      // the one the grant was read from, and that refusal is terminal. A worker resuming an
-      // existing PR is the one who can still retarget it, and this is the only brief it gets.
-      `Pending integration base: ${task.integrationBase}${task.baseEvidence ? ` on base branch ${task.baseEvidence.ref}, which your PR must target` : ""}. Existing report: ${JSON.stringify(task.report ?? null)}`,
+      // The SHA only: the branch is named once, by the line above, which reads the same
+      // `targetBaseRef` this grant set. A second naming here could only ever disagree with it.
+      `Pending integration base: ${task.integrationBase}. Existing report: ${JSON.stringify(task.report ?? null)}`,
       "Before new work, ask Gru to inspect the existing PR's merge outcome. Do not duplicate that PR.",
       "Gru can only settle that merge before you attach, so assume it did not: resume the existing PR,",
       "then send READY and wait for your own integration grant. Gru refuses verification while you hold the task.",
@@ -669,7 +683,11 @@ export async function defaultBaseRef(repoDir: string, call: Command = command): 
   // `ref: refs/heads/main\tHEAD`, then the SHA line. An origin with no commits yet reports
   // neither, so an empty match is a real absence rather than a parse failure.
   const symref = /^ref:\s+refs\/heads\/(\S+)\s+HEAD$/m.exec(head.stdout);
-  if (!symref) throw new Error(`origin reports no default branch for ${repoDir}; name the base branch with --base-ref`);
+  // Name the repair each CALLER can actually reach. `init` calls this too, and it rejects
+  // `--base-ref` outright (`--base-ref applies to integrate, not init`), so a bare mention of
+  // the flag hands an `init` operator a command that hard-errors — a refusal naming a repair
+  // that cannot work, the shape every other message here exists to avoid.
+  if (!symref) throw new Error(`origin reports no default branch for ${repoDir}; name the base branch explicitly (task "baseRef" at init, or --base-ref on integrate)`);
   return symref[1];
 }
 /** Gather the three git facts `baseRefusal` judges: that the repository is the task's, that it
@@ -778,19 +796,25 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   // a quiet branch's tip — current by definition, and saying nothing about any other branch —
   // could otherwise be discharged by a merge that skipped every other task's changes.
   //
-  // Compare against the DECLARED branch when the task has one. That is the value the worker
-  // was briefed with in its first packet, so a mismatch here now means the worker targeted
-  // something other than its brief, not that the leader mistyped a flag after the PR already
-  // existed. The `baseEvidence.ref` reading stays for a task that declared nothing.
-  const declared = task.spec.baseRef ?? task.baseEvidence?.ref;
+  // `targetBaseRef` is the same reading the worker's packet was built from, so a mismatch
+  // here means the worker targeted something other than its brief. Reading `spec.baseRef`
+  // FIRST instead made the documented one-off `--base-ref` override terminal every time: the
+  // grant was taken on the override branch, the worker merged into it, and this check then
+  // demanded the declaration — refusing a PR that matched its grant exactly, and saying
+  // "granted on <declaration>" about a grant taken somewhere else.
+  const declared = targetBaseRef(task);
   if (declared !== undefined && declared !== pr.base.ref) {
     // Name the repair, as every other refusal here does — and be honest about its shape:
     // `integrate` only grants from `review` and refuses a second call once the phase is
     // `integrating`, so a grant already taken cannot be retaken. The task needs `recover`
     // (an observed-dead worker) or operator takeover. Retarget the PR when it is still the
     // PR that is wrong; that is the repair available without touching the store.
+    // Name the DECLARATION only when it differs from the branch actually granted, and as
+    // context rather than as the requirement: a `--base-ref` grant makes the two diverge
+    // legitimately, and reporting the declaration as "the branch its PR had to target" would
+    // describe a rule this check no longer applies.
     throw new Error(`integration base was granted on ${declared}, but PR ${prNumber} merged into ${pr.base.ref}${
-      task.spec.baseRef ? ` (the task declares baseRef ${task.spec.baseRef}, which its PR had to target)` : ""
+      task.spec.baseRef && task.spec.baseRef !== declared ? ` (the task declares baseRef ${task.spec.baseRef}; this grant overrode it with --base-ref ${declared})` : ""
     }. A grant cannot be retaken once the task is integrating, so this one needs recovery or operator takeover`);
   }
   const review = await api(`pulls/${prNumber}/reviews/${reviewId}`);

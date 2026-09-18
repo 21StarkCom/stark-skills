@@ -511,8 +511,14 @@ function attachRefusal(run: Run, task: Assignment, worker: Worker): string | nul
 function baseRefusal(task: Assignment, base: string, evidence: BaseEvidence): string | null {
   if (!completeChecks(evidence.checks, BASE_CHECKS)) return "incomplete integration base evidence";
   if (!fresh(evidence)) return "integration base evidence is stale; fetch the base branch again";
-  const expected = repositoryKey(task.spec);
-  if (evidence.repositoryKey !== expected) return `integration base observed in ${evidence.repositoryKey}, not ${expected}`;
+  // `integrationRepositoryKey`, NOT `repositoryKey`: this is the second of the two comparisons
+  // against a canonical origin identity, and the `?? t.repo` fallback can never equal an
+  // `owner/repo`. Fixing only `observeBase` moved the permanent refusal here rather than
+  // removing it — a record written before `init` resolved origin identity observed fine and
+  // was then refused by the store with "observed in owner/repo, not /abs/path", forever, with
+  // no in-band repair since a grant cannot be retaken. Absent means unknown: judge the rest.
+  const expected = integrationRepositoryKey(task.spec);
+  if (expected !== undefined && evidence.repositoryKey !== expected) return `integration base observed in ${evidence.repositoryKey}, not ${expected}`;
   if (evidence.base !== base) return "integration base evidence does not cover the supplied SHA";
   if (!nonempty(evidence.ref)) return "integration base evidence names no base branch";
   // Name `--base-ref` here, not just the tip. A task whose PR targets a branch other than the

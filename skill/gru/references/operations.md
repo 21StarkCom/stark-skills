@@ -119,11 +119,13 @@ moved past — a lagging mirror, or a replica behind a rewrite — passes the ti
 floor would have caught the missing merge. Accepted because this fleet fetches GitHub
 directly; revisit if Gru ever grants against a replicated remote.
 The depth probe outlived the floor for the reason above, one local call per grant.
-Both network round trips are bounded by half the evidence freshness window, so a slow one
-fails as a fetch instead of returning evidence the store then calls stale; an observation
-that outlives that window less the same budget fails as the slow observation it was, with
-headroom so evidence squeaking under the limit cannot trip the store's own check a
-millisecond later.
+Both network round trips are bounded by a git transport budget of their own — 30 seconds,
+deliberately NOT derived from the evidence freshness window, which measures worker liveness
+and would otherwise widen for reconcile, sweep and takeover the moment someone raised the
+budget for a slow remote. A slow round trip fails as a fetch instead of returning evidence
+the store then calls stale; an observation that outlives the freshness window less that
+budget fails as the slow observation it was, with headroom so evidence squeaking under the
+limit cannot trip the store's own check a millisecond later.
 The stale-tip refusal names `--base-ref`, the one repair a leader on another branch needs.
 Name the PR's own base branch: a grant cannot be retaken once the task is `integrating`, so
 a grant taken on the wrong branch leaves a task only `recover` or operator takeover can
@@ -137,7 +139,11 @@ no `FETCH_HEAD`, moves no checkout, and touches no shared ref. `verify` fetches 
 that is not in `review`, or an engagement that is not running and reconciled, refuses before
 that fetch rather than after it. `verify` closes the other end: the branch the grant was
 checked against must be the branch the PR actually merged into, so a grant taken at a quiet
-branch's tip cannot discharge a merge into a branch it never read.
+branch's tip cannot discharge a merge into a branch it never read. That is the branch the
+grant was ACTUALLY taken on — the declared `baseRef`, or the `--base-ref` that overrode it —
+and the worker's packet names that same one value, so the brief and the gate cannot
+disagree. Settling against the declaration instead would refuse every overridden grant:
+a PR that matched its own grant exactly, refused terminally.
 
 ## Durable commands
 

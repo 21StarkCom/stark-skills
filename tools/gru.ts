@@ -54,17 +54,22 @@ same repository whose directory or branch names the ticket, with no other unswep
 declaring it, no other task owning it, and no takeover having fenced it; attach then
 adopts that path, audited, and issues a new token for the fresh packet. Anything else
 refuses, as does the leader's own session; identity refusals are named before git is read.
+init records each task's base branch — the "baseRef" field, else the default branch origin
+itself reports — and refuses rather than leaving it unset, so the worker is briefed with
+that branch in its FIRST packet, long before it opens a PR. Declaring it also skips the
+lookup, which is the only way to run init with no network.
 integrate checks --base against the repository, not just its hex shape: it fetches the
-base branch from origin (--base-ref BRANCH, else the default branch origin reports, asked
-of origin rather than read from the local refs/remotes/origin/HEAD) and refuses
-unless the SHA is a commit that repository holds and is that branch's current tip, which
-already implies every merge landed on that branch. A refusal names the current tip.
+base branch from origin (the task's recorded baseRef, or --base-ref BRANCH to override it
+for one grant, else the default branch origin reports, asked of origin rather than read
+from the local refs/remotes/origin/HEAD) and refuses unless the SHA is a commit that
+repository holds and is that branch's current tip, which already implies every merge
+landed on that branch. A refusal names the current tip.
 A failed fetch, an unreachable origin, an origin reporting no default branch, or a shallow
 checkout (which verify cannot walk after the merge) refuses too, and says which. It never
 walks history: the shallow probe is one local call, not an ancestry comparison.
-Pass --base-ref when the PR does not target the default branch:
-verify refuses a grant whose branch is not the PR's base, and a grant cannot be retaken
-once the task is integrating.
+verify settles against the branch the grant was actually taken on, and refuses a PR that
+merged into any other. Prefer declaring baseRef over reaching for --base-ref: a grant
+cannot be retaken once the task is integrating.
 reconcile never equates missing discovery with death. Keep uncertain reservations.
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
@@ -269,7 +274,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       parseEngagement(input);
       // Canonical paths prevent aliases hiding duplicate ownership.
       const repositoryKeys = new Map<string, string>();
-      const baseRefs = new Map<string, string>();
+      // ONLY origin's resolved default branch, keyed by repository — never a task's DECLARED
+      // `baseRef`. A declared value is a property of the task, not of the checkout: caching it
+      // here made a sibling task in the same repository that declared nothing inherit it,
+      // silently and in input order, so `t1: release` + `t2: <omitted>` briefed t2 on
+      // `release` too. That is the wrong-branch brief this whole field exists to remove,
+      // reintroduced by the cache meant to save one `ls-remote`.
+      const originDefaults = new Map<string, string>();
       for (const task of input.tasks) {
         task.repo = fs.realpathSync(task.repo);
         task.repositoryKey = repositoryKeys.get(task.repo) ?? await canonicalRepository(task.repo);
@@ -283,14 +294,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         // exists to remove comes straight back. The escape hatch is the field itself —
         // declare `baseRef` in the input and no network read happens at all.
         if (task.baseRef === undefined) {
-          const known = baseRefs.get(task.repo);
           try {
-            task.baseRef = known ?? await defaultBaseRef(task.repo);
+            task.baseRef = originDefaults.get(task.repo) ?? await defaultBaseRef(task.repo);
           } catch (error) {
             throw new Error(`cannot resolve the base branch for ${task.id} in ${task.repo}: ${(error as Error).message}. Declare "baseRef" on that task to skip this lookup.`);
           }
+          originDefaults.set(task.repo, task.baseRef);
         }
-        baseRefs.set(task.repo, task.baseRef);
         task.worktree = fs.existsSync(task.worktree) ? fs.realpathSync(task.worktree) : canonicalLeaf(task.worktree);
       }
       emit(store.create(input)); return 0;

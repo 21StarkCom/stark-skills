@@ -56,7 +56,13 @@ test("explicit orphan takeover preserves unknown evidence, PR, budget and merge 
   // The retained grant was checked against one base branch, and `verify` now refuses a PR that
   // merged into any other — terminally. The packet is the only brief every worker gets, and a
   // worker resuming an existing PR is the one who can still retarget it, so it has to name it.
-  assert.match(packet(next, next.tasks[0]), /on base branch main, which your PR must target/);
+  // ONCE: the branch is named by the unconditional line, which reads the same `targetBaseRef`
+  // the grant set, so the brief cannot contradict the gate. A second naming in the pending-grant
+  // line could only ever disagree with it — and did, whenever `--base-ref` moved the grant.
+  const brief = packet(next, next.tasks[0]);
+  assert.match(brief, /Open your PR against base branch main, and rebase onto its current tip/);
+  assert.deepEqual(brief.match(/base branch [\w./-]+/g), ["base branch main"],
+    `the packet names a specific base branch exactly once:\n${brief}`);
   const freshWorker = { ...worker("new"), provider: "claude" as const, id: "claude:new", worktree: request.worktree };
   assert.throws(() => store.attach("demo", "leader-one", next.revision, "one", next.tasks[0].token!,
     { ...freshWorker, session: worker("one").session }), /fenced worker/);
@@ -156,6 +162,9 @@ test("a same-run task with overlapping files dispatches at once; only its integr
 test("an integration grant is checked against the repository's base branch, not the SHA's shape", t => {
   const { store } = fixture(t);
   const c = config(); c.tasks = c.tasks.slice(0, 2);
+  // `init` resolves origin identity for every task, so a real engagement always carries one;
+  // the fixture default (absent) is the LEGACY record, exercised separately below.
+  for (const spec of c.tasks) spec.repositoryKey = "o/r";
   let run = start(store, observe(store, store.create(c)), "one");
   run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
   const tip = "b".repeat(40);
@@ -168,7 +177,7 @@ test("an integration grant is checked against the repository's base branch, not 
   // `verify` then refuses against the PR's real base — and no second grant can repair that.
   assert.throws(() => grant(store, run, "one", BASE, { tip }), /pass --base-ref BRANCH if this task's PR targets another branch/);
   // Evidence from another checkout, for another SHA, or without a branch cannot stand in.
-  assert.throws(() => grant(store, run, "one", BASE, { repositoryKey: "other/repo" }), /observed in other\/repo, not \/repo/);
+  assert.throws(() => grant(store, run, "one", BASE, { repositoryKey: "other/repo" }), /observed in other\/repo, not o\/r/);
   assert.throws(() => grant(store, run, "one", BASE, { base: tip }), /does not cover the supplied SHA/);
   assert.throws(() => grant(store, run, "one", BASE, { ref: "" }), /names no base branch/);
   assert.throws(() => grant(store, run, "one", BASE, { checks: BASE_CHECKS.slice(1) }), /incomplete integration base evidence/);
@@ -182,6 +191,27 @@ test("an integration grant is checked against the repository's base branch, not 
   run = grant(store, run, "one", BASE);
   assert.equal(run.tasks[0].phase, "integrating");
   assert.deepEqual(run.tasks[0].baseEvidence, { ...run.tasks[0].baseEvidence!, ref: "main", tip: BASE, base: BASE });
+  assert.ok(store.owned("demo", "one").includes("merge:o/r"));
+});
+
+test("a record written before init resolved origin identity is granted, not refused forever", t => {
+  // `repositoryKey()` falls back to the filesystem path for OWNERSHIP, which is correct there.
+  // Neither comparison against a canonical origin identity may use that fallback: a path can
+  // never equal an `owner/repo`, so a record predating origin resolution would be refused at
+  // every grant, forever, with no in-band repair — a grant cannot be retaken once the task is
+  // `integrating`. Absent means unknown: take what the checkout reports and judge the rest.
+  // Fixing only `observeBase` (which gathers the evidence) moves this refusal into the store
+  // rather than removing it, which is why this test drives the GRANT, not the observation.
+  const { store } = fixture(t);
+  const c = config(); c.tasks = c.tasks.slice(0, 2);
+  assert.equal(c.tasks[0].repositoryKey, undefined, "the legacy shape is a spec with no repositoryKey");
+  let run = start(store, observe(store, store.create(c)), "one");
+  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+  // Exactly what `observeBase` returns for such a record: the identity the checkout reports.
+  run = grant(store, run, "one", BASE, { repositoryKey: "o/r" });
+  assert.equal(run.tasks[0].phase, "integrating");
+  assert.equal(run.tasks[0].baseEvidence!.repositoryKey, "o/r");
+  // Ownership still keys on the path fallback, which is the reading that is right for it.
   assert.ok(store.owned("demo", "one").includes("merge:/repo"));
 });
 

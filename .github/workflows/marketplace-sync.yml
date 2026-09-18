@@ -158,26 +158,39 @@ jobs:
               }
               # The Refresh bullet joins an existing "### Changed" rather than adding a second one.
               # Keep a Changelog section order, so the Refresh bullet lands in position
-              # rather than after whatever the body already had.
+              # rather than after whatever the body already had. Anchored exactly like the
+              # heading test below used to be, and now the ONLY reading of "is this line a
+              # section heading": with a bare /^### Changed/ prefix, a line reading
+              # "### Changed since 1.2.2" ranked 2 here while matching nothing below, so the
+              # generated section was stranded at the very end instead of placed.
               function rank(h) {
-                if (h ~ /^### Added/) return 1
-                if (h ~ /^### Changed/) return 2
-                if (h ~ /^### Deprecated/) return 3
-                if (h ~ /^### Removed/) return 4
-                if (h ~ /^### Fixed/) return 5
-                if (h ~ /^### Security/) return 6
+                if (h ~ /^### Added[[:space:]]*$/) return 1
+                if (h ~ /^### Changed[[:space:]]*$/) return 2
+                if (h ~ /^### Deprecated[[:space:]]*$/) return 3
+                if (h ~ /^### Removed[[:space:]]*$/) return 4
+                if (h ~ /^### Fixed[[:space:]]*$/) return 5
+                if (h ~ /^### Security[[:space:]]*$/) return 6
                 return 99
               }
-              function flush_notes(   i, start, seen) {
+              function flush_notes(   i, r, start, seen, owned) {
                 print "## [" version "] - " date "\n"
                 # Drop the blank that followed "## [Unreleased]"; the heading above supplied one.
                 for (start = 0; start < n && body[start] ~ /^[[:space:]]*$/; start++) ;
+                # Does the body already own a "### Changed"? Decided BEFORE anything is
+                # emitted. A body whose own "### Changed" sits AFTER a later-ranked heading
+                # (Fixed, then Changed) otherwise gets one inserted at the Fixed boundary and
+                # keeps its own too, shipping two "### Changed" sections in one release.
+                # Reordering sections someone else wrote out of order is not this job;
+                # emitting the Refresh bullet exactly once, under one heading, is.
+                for (i = start; i < n; i++) if (rank(body[i]) == 2) { owned = 1; break }
                 for (i = start; i < n; i++) {
                   # Only the FIRST one: a body carrying two "### Changed" headings would
                   # otherwise get the Refresh bullet under each.
-                  if (!seen && body[i] ~ /^### Changed[[:space:]]*$/) { print body[i]; refresh(); seen = 1; continue }
-                  # A later-ranked heading means "### Changed" belongs here, before it.
-                  if (!seen && rank(body[i]) > 2 && rank(body[i]) < 99) { print "### Changed"; refresh(); print ""; seen = 1 }
+                  if (!seen && rank(body[i]) == 2) { print body[i]; refresh(); seen = 1; continue }
+                  # A later-ranked heading means "### Changed" belongs here, before it —
+                  # unless the body has one of its own further down to absorb the bullet.
+                  r = rank(body[i])
+                  if (!owned && !seen && r > 2 && r < 99) { print "### Changed"; refresh(); print ""; seen = 1 }
                   print body[i]
                 }
                 # Nothing ranked after Changed in the body: append, which is also in order.

@@ -751,4 +751,46 @@ test("gru CLI: the base branch is declared at init, briefed before any grant, an
   const refused = await run(["init", "--file", file, "--state", path.join(dir, "refused.sqlite")], "leader-one");
   assert.equal(refused.code, 2);
   assert.match(refused.error, /cannot resolve the base branch for t .*Declare "baseRef" on that task/s);
+  // Every repair a refusal names has to be reachable from the command that refused. `init`
+  // rejects `--base-ref` outright, so an unqualified "name it with --base-ref" hands the
+  // operator a command that hard-errors; the hint has to say WHERE each form applies.
+  // This needs a REACHABLE origin with no default branch — an empty one. The case above
+  // fails at the transport instead, which carries no flag hint at all to get wrong.
+  // Origin must still be owner/repo-shaped: `init` resolves repository identity first, and a
+  // bare path origin refuses there instead, never reaching the base-branch lookup.
+  const empty = fs.mkdtempSync(path.join(dir, "empty-origin-"));
+  git(dir, "init", "-q", "--bare", "--initial-branch=main", path.join(empty, "o", "r.git"));
+  git(empty, "init", "-q", "--initial-branch=main");
+  git(empty, "remote", "add", "origin", "o/r.git");
+  git(empty, "commit", "-q", "--allow-empty", "-m", "first");   // local only; origin stays empty
+  fs.mkdirSync(path.join(dir, "wt-empty"));
+  fs.writeFileSync(file, JSON.stringify({ ...spec({}), tasks: [{ ...spec({}).tasks[0],
+    repo: empty, worktree: path.join(dir, "wt-empty") }] }));
+  const noDefault = await run(["init", "--file", file, "--state", path.join(dir, "no-default.sqlite")], "leader-one");
+  assert.equal(noDefault.code, 2);
+  assert.match(noDefault.error, /origin reports no default branch/);
+  assert.doesNotMatch(noDefault.error, /(?<!at init, or )--base-ref(?! on integrate)/);
+  // And the flag that refusal used to name unqualified really is rejected by `init`.
+  const flagged = await run(["init", "--file", file, "--base-ref", "main",
+    "--state", path.join(dir, "flagged.sqlite")], "leader-one");
+  assert.equal(flagged.code, 2);
+  assert.match(flagged.error, /--base-ref applies to integrate, not init/);
+
+  // Two tasks, one repository, one of them declaring a branch. The per-repository cache
+  // exists to save an `ls-remote`, and origin's DEFAULT is a property of the repository —
+  // but a DECLARED baseRef is a property of the TASK. Caching declarations too made a
+  // sibling that declared nothing inherit one, silently and in input order, which is the
+  // wrong-branch brief this whole field exists to prevent. Asserted in BOTH orders: the
+  // defect only showed when the declaring task came first.
+  fs.mkdirSync(path.join(dir, "wt3"));
+  const sibling = { ...spec({}).tasks[0], id: "plain", ticket: "STARK-2", worktree: path.join(dir, "wt3") };
+  const declaring = { ...spec({}).tasks[0], id: "declared", baseRef: "release" };
+  for (const [n, tasks] of [[0, [declaring, sibling]], [1, [sibling, declaring]]] as const) {
+    fs.writeFileSync(file, JSON.stringify({ ...spec({}), tasks }));
+    const mixed = await run(["init", "--file", file, "--state", path.join(dir, `mixed-${n}.sqlite`)], "leader-one");
+    assert.equal(mixed.code, 0, mixed.error);
+    const byId = Object.fromEntries(JSON.parse(mixed.out).config.tasks.map((task: { id: string; baseRef: string }) => [task.id, task.baseRef]));
+    assert.deepEqual(byId, { declared: "release", plain: "main" },
+      "a declared baseRef must not leak to a sibling task in the same repository");
+  }
 });
