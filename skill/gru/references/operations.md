@@ -568,7 +568,7 @@ The operator-authored file pins the current assignment and explains the exceptio
   "noReview": true,
   "reason": "This historical merge has no posted review; release its integration lock while retaining that gap.",
   "operatorRequest": "The operator's actual instruction authorizing this settlement",
-  "setup": [["bun", "install", "--frozen-lockfile"]]
+  "setup": [["bun", "install"]]
 }
 ```
 
@@ -589,7 +589,9 @@ Alfred must report the exact ticket `done` or `Closed`.
 
 For a historical task whose declared checks omit dependency installation, the operator
 may supply optional `setup` argv arrays in this same request. The example is illustrative,
-never a default. With no `setup`, no preparation is added. Never infer it from repository
+never a default: use the target repository's actual documented install command. For
+example, idun deliberately ignores its Bun lockfile and documents plain `bun install`;
+do not add `--frozen-lockfile` there. With no `setup`, no preparation is added. Never infer it from repository
 contents, lockfiles or detected package managers. The full request binding is checked
 before any command runs. Setup executes in order in the same disposable checkout,
 before every unchanged declared check, with the same per-check timeout. Any nonzero
@@ -599,6 +601,16 @@ and results remain separate. Stored task checks and ordinary `verify` are unchan
 Setup prepares dependencies, never substitutes for tests or rewrites their outcomes.
 Never accept a failing or non-runnable check. A check that passes only because setup
 performed the check's job is a defect to report, not evidence of completion.
+
+The request, including setup argv, must contain **no credentials**. Secrets stay in
+Mimir. The operator supplies required credentials through the process environment
+before invoking settlement, using the existing secret workflow. For example, idun's
+package installation expects `GH_PACKAGES_READ_TOKEN` in that environment. Never put
+its value in the request, an argv argument, a report, or an `env KEY=value` setup command.
+A missing credential that causes setup to fail fails settlement honestly; do not retry
+with the credential embedded in the request. Audit records preserve setup argv verbatim
+but do not serialize the process environment. Command stdout and stderr are retained,
+so choose commands that do not print credentials and do not enable shell tracing.
 Any failure retains ownership. Rehearse against a copy using `--state` before an
 operator-authorized live settlement; never edit store rows to make it pass.
 
