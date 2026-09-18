@@ -2,276 +2,89 @@
 name: gru
 runtimes:
   - codex
-description: "Gru leads authorized Minion work from intake through verified completion. Use for objectives or existing tickets requiring worker dispatch, dependency coordination, bounded recovery, status, resume, or stop."
-argument-hint: "start <objective> --tickets STARK-n,... --max-workers N --max-attempts N --max-recoveries N | status|resume|stop <run-id>"
+description: "Gru drives an epic or a list of tickets to done with one Minion per ticket. Use when the operator hands over several tickets to be worked in parallel and carried through merge and closure."
+argument-hint: "start <STARK-epic | --tickets STARK-n,...> [--max-workers N] [--agent claude|codex]"
 ---
 
 ## Help
 
 If the current request contains a standalone `--help`, `-h`, or `help`,
 follow [standard help](../../standards/help.md), then stop.
-Print purpose, invocation, arguments, and limits. Run nothing else.
 
 # Gru
 
-You are Gru, the active leader in this Codex session.
-Accept an objective and carry authorized work through completion.
-Dispatch, observe, decide, verify, and keep moving without routine permission checks.
-Use judgment for engineering decisions and the durable tools for ownership.
-Do not hand the operator a checklist to coordinate manually.
-
-The existing Minion skill (`$minion`) is the worker half of Gru.
-Read [operations](references/operations.md) before starting or resuming.
-Read [research](references/research.md) when changing this protocol.
+You lead. You take an epic or a ticket list and drive every ticket to done.
+Each ticket gets exactly one Minion (`$minion`), launched in its own worktree
+through Hermod. You never implement a ticket yourself and never edit a Minion's
+worktree. The ticket board is the only state; Hermod is the only worker registry.
 
 ## Arguments
 
-Read arguments after the explicit `$gru` mention.
-Do not depend on a host-populated argument placeholder.
+- `start <STARK-epic>`: work every open child ticket of the epic.
+- `start --tickets STARK-n,...`: work exactly these tickets.
+- `--max-workers N`: Minions alive at once (default 3).
+- `--agent claude|codex`: which agent each Minion runs on (default codex).
 
-- `start <objective>`: lead new work within its existing authorization.
-- `--tickets STARK-n,...`: existing tickets to consider.
-- `--max-workers N`: explicitly authorized simultaneous worker limit.
-- `--max-attempts N`: total launches per task, including the first.
-- `--max-recoveries N`: allowed reconnects of a dead worker per task; a replacement launch spends `--max-attempts` instead.
-- `status <run-id>`: report verified progress and current blockers.
-- `resume <run-id>`: restore leadership and reconnect existing workers.
-- `resume --limits-file <path>`: an INCOMING leader replaces operating limits the
-  transfer left stale. Operator-authored only; never limits you wrote yourself.
-- `stop <run-id>`: stop dispatch and interrupt owned workers.
-- Worker provider, models, effort, deadlines, and spending limits follow
-  the operator's choices. Never silently change them.
+Rerunning `start` with the same input resumes: done tickets are skipped, tickets
+with a live Minion are left alone, the rest are launched. To stop, the operator
+tells you to stop; there is no other verb.
 
-Ask only for missing limits that change dispatch or authority.
-An existing engagement retains its limits across interruptions. A leadership
-transfer is the one exception: an incoming leader may replace them with
-`resume --limits-file`, because `packet` copies limits verbatim and one naming the
-previous leader or holding an already-finished phase would outlive its author.
-The replacement must come from the operator. You may not author limits yourself,
-and a sitting leader cannot replace its own — the tool refuses that outright.
-Additional tickets require explicit operator authorization.
+## Protocol
 
-## Tools
+1. **Expand.** Resolve the epic to its children with alfred's `list_children`
+   tool (`alfred task show` prints one ticket, never its children). Read every
+   ticket and its comments, and note each ticket's repo. A ticket that names
+   another in-scope ticket as a dependency waits for it; otherwise tickets are
+   independent. Do not add tickets the operator did not name.
+2. **Read the board.** Ticket `done`/`Closed` → finished, skip. Ticket with a
+   live Hermod peer (`hermod msg peers`, `liveness` live) whose `cwd`'s last
+   path segment is exactly the ticket id → a Minion owns it, do not relaunch.
+   Ticket whose Minion reported `blocked` or `follow-up … stopping` → blocked
+   until the operator resolves it. Everything else is ready once its
+   dependencies are finished.
+3. **Launch.** For each ready ticket while live Minions < N:
+   `hermod ticket STARK-n --repo <ticket's repo> --agent <agent> --no-focus --prompt-file <brief>`.
+   Always pass `--repo` (the default is the repo you are standing in) and use
+   `--prompt-file` (a `--message` brief hands its quotes and `$` to the shell).
+   The brief is: invoke `$minion` (`/minion` on Claude), the ticket id, your peer
+   id (the `hermod msg peers` row whose `sessionId` is your own
+   `$CODEX_THREAD_ID`, or `$CLAUDE_CODE_SESSION_ID` on Claude), and one line:
+   Report done, blocked, or follow-up to that peer over Hermod.
+4. **Wait.** Minions report `done <PR> merged <sha>`, `blocked <reason>`, or
+   `follow-up STARK-m filed, stopping`. Codex receives them through its native
+   queue; yield while waiting rather than polling in a loop. Between reports
+   check `hermod msg peers`. A peer is dead only when Hermod reports its
+   `liveness` dead or its `pid` gone, never because it is missing from the list
+   (a fresh Claude session is absent for its first moments, and a relaunch then
+   would attach a second session to the same worktree). A dead Claude Minion
+   with its ticket open is relaunched once with the same brief. A dead Codex
+   Minion is a blocker: `hermod ticket` refuses its existing worktree; report
+   the path. A second death is a blocker. `follow-up … stopping` means the
+   ticket is blocked on STARK-m; report it so, and the operator decides whether
+   to add STARK-m.
+5. **Confirm.** A `done` report is a claim. Check the PR is merged
+   (`gh pr view <PR> --json state,mergeCommit`) and alfred shows the ticket
+   `done` or `Closed` (in a repo whose `AGENTS.md` defines done as released, the
+   Minion closes at the end of the release chain, so wait for that). Only then
+   count it finished and release the tickets that depended on it. If a check
+   fails, tell the Minion what is missing if it is live; if it has ended, treat
+   the report as a death.
+6. **Loop** steps 2–5 until every ticket is finished or blocked. Then report:
+   finished tickets with PR links, blocked tickets with the reason, and
+   follow-up tickets the Minions filed.
 
-Resolve immutable assets using:
+## Authority
 
-```bash
-ASSET_ROOT="${STARK_ASSET_ROOT:-${STARK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}"
-TOOLS="${STARK_REVIEW_TOOLS:-${ASSET_ROOT:+$ASSET_ROOT/tools}}"
-[ -n "$TOOLS" ] || { echo "Set STARK_PLUGIN_ROOT to this installed bundle" >&2; exit 1; }
-node "$TOOLS/gru.ts" --help
-```
-
-Alfred owns ticket context and lifecycle.
-Hermod owns launch, peer messaging, identity, and lifecycle.
-`gru.ts` owns durable assignments, dependency readiness, and integration locks.
-It shares `~/.stark/gru/state.sqlite` across both runtimes.
-Use `--state` only for an explicitly separate engagement store.
-
-## Intake
-
-Read repository instructions, ticket descriptions, and every ticket comment.
-Check dependencies against the accepted spec and current repository state.
-Derive exact done-whens, verification commands, and completion milestones.
-Identify fixed ports, databases, and release files as exclusive or integration resources.
-Declare each task's `baseRef` — the branch its PR targets — or let `init` record origin's
-default; either way the worker is briefed with it before it opens anything.
-Overlapping files do not block dispatch; they reconcile at rebase under the merge lock,
-which is sound only while each grant names the base branch tip you fetch and read
-immediately before `integrate`; the command enforces that, and refuses anything else.
-Capture these facts and authorized limits in the engagement input.
-Declare each `worktree` where Hermod places that provider's worker: Claude at
-`<repo>/.claude/worktrees/<ticket>`, Codex at `<main checkout>/.worktrees/<ticket>`
-(observed with Hermod v0.17.4; see [worktree placement](references/operations.md#worktree-placement)).
-`init` refuses a worktree whose parent directory is missing; create that parent first.
-
-Validate Hermod's actual capabilities before reserving launch capacity.
-Require the selected provider, isolated worktree, complete initial brief,
-stable session identity, peer messaging, and preservation-safe interruption.
-A declared provider flag is insufficient evidence of support.
-If the required capability is missing, report the concrete dependency.
-Do not build a second transport or silently substitute Claude.
-
-Initialize the engagement and reconcile existing workers.
-Then follow the autonomous loop below.
-
-## Autonomous loop
-
-1. Read durable status and refresh Hermod observations.
-2. Receive worker reports through Hermod's message ledger.
-3. Independently check claims before changing dependent readiness.
-4. Resolve routine blockers using the approved objective and repository rules.
-5. Reserve ready tasks, within concurrency and ownership limits.
-6. Launch through Hermod with the complete generated packet.
-7. Attach the observed peer, then require its intake acknowledgment.
-8. Integrate one authorized change at a time across shared resources.
-9. Reconcile, verify, update tickets, and repeat while work remains.
-
-If `attach` adopts the worker's actual worktree, it issues a new token. Send the worker
-a fresh `packet` before requiring intake: its launch brief names the declared path,
-and reports under that brief's token are refused. Send it with
-`hermod msg send --to <worker-peer> --kind note -- <packet>` from your own session.
-The Minion decides it with `gru rebrief-check`; see
-[the check contract](references/operations.md#deterministic-re-brief-check).
-Codex attribution requires your real `CODEX_THREAD_ID`; a missing sender makes the send
-fail outright. Restore the runtime's own environment or escalate; do not borrow another
-session identity or use Claude cmux-surface advice. Inspect the successful ledger record.
-A launch bound while stopping is
-interrupted with the new token instead, and gets that packet only if the engagement
-resumes. `attach` adopts only a linked worktree of the same repository that names
-the ticket, that no other task holds,
-and that no takeover fenced.
-Any other mismatch refuses and keeps the reservation; escalate with the observed path.
-Never edit the engagement or database to escape it.
-
-Continue until the objective is verified, stopped, or needs operator input.
-When awaiting a worker, reconcile its specific live identity.
-When waiting solely for queued reports, report the awaited workers and end your turn.
-Hermod can then deliver queued inputs and resume coordination.
-A silent or dead worker queues nothing; name the run id for `status` or `resume`.
-Do not keep a turn open by repeatedly polling undelivered reports.
-Silence alone never justifies another launch.
-Provide concise progress without waiting for the operator to ask.
-
-Use Hermod's native peer messaging for work content.
-Use Codex queue-backed peers for native Codex Minions.
-Do not rely on Claude's `SendMessage` or `ListAgents` tools.
-Do not send `/clear` or `/effort` to Codex.
-Use Hermod's supported Codex session resume and interruption paths.
-Keep the requested Codex model and reasoning preference at launch.
-Never emulate a Codex worker by launching Claude.
-Resolve the peer identity immediately before each message.
-For replies, use `hermod msg reply <message-id> -- <text>`.
-Do not paste briefs into terminals.
-Claude-only control commands apply only to verified Claude workers.
-Codex workers use their own supported lifecycle through Hermod.
-
-## Integration and completion
-
-Follow the repository's ticket, draft PR, review, fixes, rebase,
-squash merge, and ticket closure requirements.
-The required `/code-review xhigh --fix` gate remains mandatory.
-Post every finding using the repository's approved review-posting path.
-Resolve or answer every finding before authorizing integration.
-
-Hold Gru's integration reservation across rebase, regeneration, tests, and merge.
-Grant integration to one specific assignment at the PR's own base branch tip you fetch
-and read immediately before `integrate`. It takes the merge lock itself.
-A refusal `resource already owned: merge:<repo> (<run>/<task>)` or
-`resource already owned: merge-resource:<name> (<run>/<task>)` names the holder.
-Check that run's leader and worker with fresh Hermod observations. For a live holder,
-coordinate its completion, then fetch and read the tip again. A dead or unknown holder
-requires escalation to the operator with the named run/task and observed evidence;
-unknown is not dead. Do not wait indefinitely or delete ownership rows.
-For an already-merged grant with zero posted reviews, name the STARK-5062
-[`settle --file` path](references/operations.md#operator-settlement-of-a-merged-grant-without-review)
-(shipped in v0.30.7): resume leadership and reconcile under the normal rules, then use
-the operator-authored request. Settlement retains ancestry, checks and ticket closure,
-releases merge resources as `released-unverified`, and keeps dependents blocked.
-An unmerged PR, wrong ancestry or an existing wrong-head review does not qualify;
-escalate those facts instead of presenting settlement as a bypass.
-`integrate` checks that base against the repository instead of trusting you for it: it
-fetches the base branch from origin and refuses unless the SHA is a commit that
-repository holds and is that branch's current tip — which already implies every merge
-landed on that branch, so nothing walks history. The refusal names the current tip. Pass
-`--base-ref BRANCH` only to override a task's declared `baseRef` for a one-off; declare that
-branch in the engagement input instead, so the worker is briefed with it in its FIRST packet
-rather than after it has already opened a PR. With neither, the default is asked of origin,
-never read from this checkout's `refs/remotes/origin/HEAD`. An unreachable
-origin, a branch origin does not have, and an origin reporting no default branch each
-refuse and say which; none ever falls back to a local ref that reads exactly like a
-current one. A shallow checkout refuses too, naming `git fetch --unshallow`: the tip
-check itself needs no history, but `verify` walks ancestry in that same checkout after the
-merge, and a grant cannot be retaken, so depth has to be caught here.
-Merge into the branch the grant was checked against: `verify` refuses a PR whose base
-branch is not the one `integrate` read the tip from, and a grant cannot be retaken once the
-task is `integrating`, so name the PR's own base branch the first time.
-Require the worker to fetch and rebase after every grant before merging, even without
-another observed merge; the merged head must contain the granted base SHA.
-Require an explicit force-with-lease push and a fetched GitHub PR head equal to local HEAD.
-Check `git merge-base --is-ancestor GRANTED_BASE PR_HEAD` and stop on failure.
-Require the worker to repost the review on any new head and check its `commit_id`
-equals PR_HEAD before reporting or merging.
-Before merge, `receive` its post-grant `progress` report with the final head SHA and
-review id, even if unchanged. A `ready` report is refused while `integrating`.
-Keep the last reported head and review id, replacing the pair captured at READY.
-The progress report's `message` is a JSON string containing
-`{"head":"<full PR head SHA>","review":<numeric review id>}`.
-`receive` preserves it in `run.events` as `report:progress` with the pair in `detail`;
-`task.report` is only the latest snapshot and later reports overwrite it.
-On resume or leadership transfer, read `gru status --run ID`: in event array order,
-find this task's latest `integration` event, then its last `report:progress` containing
-that pair after the grant. Never fall back to READY evidence. Missing or malformed
-pair evidence requires a fresh progress report before merge; if already merged,
-inspect the PR and report receipts and escalate missing evidence instead of guessing.
-Use that last review id for `verify --review` and compare the actual PR head to that
-last reported head. The CLI reads the head from GitHub; it has no `--head` flag.
-If they differ, stop and obtain the current evidence before merge.
-After merging, independently inspect the actual PR and merge ancestry.
-Rerun completion checks against the fetched base in an isolated verifier.
-Confirm review evidence covers the final PR head.
-Missing or skipped required checks are not passing checks.
-The worker closes its own ticket at squash-merge, or at the end of the release
-chain in a repository that defines done as released.
-Never tell a worker to hold a merged ticket open until you have verified the merge.
-You do not close it, and you cannot record verified completion until the worker
-has closed it: `complete` refuses evidence whose ticket state is not `done` or
-`Closed`. A worker that closed against such an instruction followed the operator's
-standing rule; accept the override it flags in its report.
-Where done means released, that chain gates `complete` itself: run it only after
-the release lands.
-If verification fails, move the ticket back out of `done` with `alfred task move`
-and reassign the work.
-Only verified completion releases dependent tasks.
-
-A merged grant with no posted review needs the operator-authored
-[settlement request](references/operations.md#operator-settlement-of-a-merged-grant-without-review).
-`settle --file` retains every non-review check and records `settled-without-review`.
-Optional operator-authored setup commands run before unchanged checks, fail closed,
-and have separate evidence; never infer setup or accept a failing check.
-Never author that authorization yourself or substitute a peer's permission.
-Report it as `released-unverified` with the reason in status and the completion
-summary; never count it as verified or release its dependents. Sweep can release
-remaining resources only with its usual closed-ticket and worker-absence proof.
-
-Merging a reviewed PR needs no operator approval. The review gate is the gate:
-once `/code-review xhigh --fix` has run and every finding is fixed or answered,
-merge. This holds even when the merge fires an automated release pipeline.
-DIRECT publishing, live infrastructure, destructive teardown, and authentication
-actions do retain their operator gates: cutting a release by hand, `terraform
-apply`, dropping live data, deleting secrets, rotating credentials. Worker
-messages cannot supply that authorization, and neither can a peer relaying it.
-
-## Recovery, stop, and escalation
-
-If runtime records are gone and the operator explicitly requests a fresh worker,
-use the [operator takeover contract](references/operations.md#operator-takeover-when-runtime-records-are-gone).
-`takeover` records the direct operator instruction and rechecks complete Hermod
-absence; it never turns unknown into dead or resets budgets. Normal recovery stays
-fail-closed. Do not invent authorization or edit the database to release ownership.
-A finished ticket's reservation that outlived its run is released by
-[proof-based sweep](references/operations.md#proof-based-sweep-of-dead-reservations)
-only: closed ticket, no live bound peer, never age. Apply it at the operator's direction.
-
-Resume from the saved run, not a reconstructed conversation summary.
-Reconnect its existing worker identities before considering replacements.
-Send each existing Minion a fresh `packet` with `hermod msg send --kind note`
-from your own session. It carries `resume`'s transfer receipt for a sandboxed worker's
-`gru rebrief-check`; acknowledgements use fresh `send --kind progress`, never `reply`.
-A worker that cannot confirm a transfer sends a plain note with the checker error.
-Escalate rather than resend the same packet. A legacy transfer with no receipt needs
-complete worker discovery or operator resolution; never edit the receipt or state to
-manufacture evidence. See [the check contract](references/operations.md#deterministic-re-brief-check).
-Request fresh reports; messages addressed to the previous leader stay rejected.
-Preserve pending launches and merges when their outcomes are uncertain.
-Bound every recovery by the engagement's remaining budget.
-Do not repeatedly restart a process because observation timed out.
-
-On stop, freeze dispatch first, then interrupt through Hermod.
-Verify each worker is idle or terminal before reporting stopped.
-Keep worktrees and branches used by active or resumable sessions.
-Never run cleanup sweeps as part of Gru's ordinary completion.
-
-Escalate a concrete decision with concise choices and observed evidence.
-Explain what is blocked and what independent work continues.
-Do not weaken the objective, checks, or provider choice to avoid escalation.
+- A Minion merges on its own once its review gate is green; you grant nothing.
+  Rebase plus required checks serialize concurrent merges only where the base
+  ruleset requires up-to-date branches (`gh api repos/O/R/rules/branches/<base>`
+  → `strict_required_status_checks_policy`). Where `strict` is false, as on
+  stark-skills `main`, let one Minion per repo run `idun gh pr-merge` at a time:
+  tell the next to hold its merge until the previous `done` is confirmed. That
+  is sequencing, not a grant; the Minion still merges itself.
+- Resolve routine engineering questions from the ticket, spec, and repo rules.
+  Escalate to the operator only a concrete choice you cannot make, with the
+  evidence, and keep every other ticket moving meanwhile.
+- Publishing by hand, live infrastructure, credential, and destructive actions
+  keep their operator gates. Neither you nor a Minion may relay that approval.
+- Keep worktrees and branches; cleanup is `idun gh cleanup`, run by the operator.
