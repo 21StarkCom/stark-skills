@@ -23,14 +23,16 @@ test("settlement mutation sweep detects reverted protections", { skip: process.e
   fs.cpSync(import.meta.dirname, copy, { recursive: true, filter: source => path.basename(source) !== "node_modules" });
   const originals = new Map(["gru.ts", "gru_lib.ts", "gru_runtime_lib.ts"].map(name => [name, fs.readFileSync(path.join(copy, name), "utf8")]));
   const { NODE_TEST_CONTEXT: _context, ...env } = process.env;
-  const execute = (cli: boolean) => spawnSync(process.execPath, ["--test", "--test-reporter=spec", "--test-name-pattern",
-    cli ? "settle requires written" : "settlement records|settlement refuses|settlement setup", path.join(copy, cli ? "gru.test.ts" : "gru_lib.test.ts")],
+  const execute = (cli: boolean, pattern = cli ? "settle requires written|verifyBlocker" : "settlement ") => spawnSync(process.execPath, ["--test", "--test-reporter=spec", "--test-name-pattern",
+    pattern, path.join(copy, cli ? "gru.test.ts" : "gru_lib.test.ts")],
   { encoding: "utf8", timeout: 120_000, env: { ...env, GRU_SETTLEMENT_MUTATION_SWEEP: "0" } });
   for (const cli of [false, true]) {
     const baseline = execute(cli);
     assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
   }
-  const mutants: [string, string, string, boolean, string?][] = [
+  // Review regressions name their focused test and finding, so each has its own
+  // passing baseline and assertion failure rather than relying on a suite total.
+  const mutants: [string, string, string, boolean, string?, string?, string?][] = [
     ["gru.ts", '      flag("file");', "", true],
     ["gru_lib.ts", 'value.noReview === true', 'true', false],
     ["gru_lib.ts", 'nonempty(value[key]), `settlement ${key} is required`', 'true, `settlement ${key} is required`', false],
@@ -64,19 +66,46 @@ test("settlement mutation sweep detects reverted protections", { skip: process.e
     ["gru_runtime_lib.ts", 'if (result.code !== 0 || result.timedOut)', 'if (false)', true],
     ["gru_runtime_lib.ts", 'task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS', 'DEFAULT_CHECK_TIMEOUT_MS', false],
     ["gru_runtime_lib.ts", 'await noReviews();\n      const proof:', 'const proof:', false],
+    ["gru.ts", '  if (task.phase === "released-unverified") return `task was released-unverified: ${task.settlement?.request.reason}; it cannot be verified`;', '', true,
+      undefined, 'verifyBlocker', '4046260579 terminal guidance'],
+    ["gru_lib.ts", ', "released-unverified"', '', false,
+      'const active =', 'settlement stays terminal', '4046260590 terminal task'],
+    ["gru_lib.ts", '["done", "released-unverified"].includes(t.phase)', '["done"].includes(t.phase)', false,
+      'const occupiesSlot =', 'settlement frees a worker slot', '4046260595 idle slot'],
+    ["gru_lib.ts", ' && !t.swept', '', false,
+      'private adopt(', 'settlement followed by sweep', '4046260600 swept adoption'],
+    ["gru_lib.ts", 'run.mode === "running" && run.reconciled && verificationReady(task)', 'true', false,
+      'settleWithoutReview(', 'settlement store refuses', '4046260606 store guard'],
+    ["gru_lib.ts", 'run.mode === "running" && ', '', false,
+      'settleWithoutReview(', 'settlement store refuses', '4046260606 running mode'],
+    ["gru_lib.ts", 'run.reconciled && ', '', false,
+      'settleWithoutReview(', 'settlement store refuses', '4046260606 reconciliation'],
+    ["gru_lib.ts", 'verificationReady(task)', 'true', false,
+      'settleWithoutReview(', 'settlement store refuses', '4046260606 settlement window'],
+    ["gru_runtime_lib.ts", 'if ("request" in authority && pr.html_url?.toLowerCase() !== authority.request.pr.toLowerCase())', 'if (false)', true,
+      undefined, 'settle requires written', '4046260612 PR before setup'],
+    ["gru_runtime_lib.ts", 'request.task !== task.spec.id || ', '', false,
+      'export async function inspectUnreviewedMerge(', 'settlement runtime refuses', '4046260612 task before commands'],
+    ["gru_runtime_lib.ts", ' || request.token !== task.token', '', false,
+      'export async function inspectUnreviewedMerge(', 'settlement runtime refuses', '4046260612 token before commands'],
   ];
-  for (const [name, from, to, cli, scope] of mutants) {
+  for (const [name, from, to, cli, scope, pattern, finding] of mutants) {
+    if (pattern) {
+      const baseline = execute(cli, pattern);
+      assert.equal(baseline.status, 0, `${finding} baseline: ${baseline.stdout}${baseline.stderr}`);
+      assert.match(baseline.stdout, /pass [1-9]/, `${finding} baseline must execute assertions`);
+    }
     const original = originals.get(name)!;
     const offset = scope ? original.indexOf(scope) : 0;
     assert.ok(offset >= 0, `missing mutation scope ${scope}`);
     const index = original.indexOf(from, offset);
     assert.ok(index >= 0, `missing mutation ${from}`);
     fs.writeFileSync(path.join(copy, name), original.slice(0, index) + to + original.slice(index + from.length));
-    const result = execute(cli);
+    const result = execute(cli, pattern);
     fs.writeFileSync(path.join(copy, name), original);
     assert.equal(result.status, 1, `mutation survived or did not execute: ${from}\n${result.stdout}${result.stderr}`);
     assert.match(result.stdout, /AssertionError/, `expected assertion failure, not startup failure: ${from}\n${result.stdout}${result.stderr}`);
-    t.diagnostic(`KILLED: ${name}: ${from}`);
+    t.diagnostic(`KILLED: ${finding ? `${finding}: ` : ""}${name}: ${from}`);
   }
   t.diagnostic(`${mutants.length}/${mutants.length} settlement mutations rejected`);
 });
@@ -442,6 +471,7 @@ console.log(JSON.stringify({item:{ref:{custom_id:'STARK-1'},state:r.ticket},comm
   await refuses(/noReview/);
   fs.writeFileSync(authorization, JSON.stringify({ ...request, pr: "https://github.com/other/repo/pull/1" }));
   await refuses(/PR does not match/);
+  assert.equal(fs.existsSync(setupMarker), false, "PR binding refuses before setup executes");
   fs.writeFileSync(authorization, JSON.stringify(request));
   // Ordinary verify still refuses a reviewless merge while keeping every owner row.
   await refuses(/posted review does not cover/, ["verify", ...args, "--pr", "1", "--review", "1"]);
@@ -743,6 +773,9 @@ test("verifyBlocker names the command that actually repairs each phase", () => {
   assert.match(at("working"), /report ready and receive integration/);
   // Checked before any grant branch: a swept task has no repair, only an explanation.
   assert.match(at("swept"), /released by a proof-based sweep; it cannot be verified/);
+  const released = at("released-unverified", { settlement: { request: { reason: "No posted review for historical merge" } } });
+  assert.equal(released, "task was released-unverified: No posted review for historical merge; it cannot be verified");
+  assert.doesNotMatch(released, /report ready|receive integration|integrate/);
 
   // Reaching `review` IS the READY report, so the generic default told a task to take a
   // step it had already taken and never named `integrate` — the one command that applies.

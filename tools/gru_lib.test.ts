@@ -416,6 +416,103 @@ test("settlement refuses missing authority, mismatched binding, invalid proof an
   }
 });
 
+test("settlement stays terminal while other tasks keep the engagement running", t => {
+  const { store } = fixture(t);
+  let r = start(store, observe(store, store.create(config())), "one");
+  r = report(store, r, "one", "ack"); r = report(store, r, "one", "ready");
+  r = grant(store, r, "one", BASE);
+  r = store.settleWithoutReview("demo", "leader-one", r.revision, "one", r.tasks[0].token!, settlementRequest(r), settlementProof(r));
+  assert.equal(r.mode, "running", "the engagement mode must not mask the task's terminal guard");
+  const held = store.owned("demo", "one");
+  // Without active() excluding this phase, blocked -> ready -> integrate could turn
+  // the retained token and base into a new grant, then falsely verified completion.
+  for (const kind of ["blocked", "ready", "complete"] as const) {
+    assert.throws(() => report(store, r, "one", kind), /task cannot accept work reports/);
+    assert.deepEqual(store.read("demo"), stored(r));
+    assert.deepEqual(store.owned("demo", "one"), held);
+  }
+  assert.match(store.readyReason(r, r.tasks[2])!, /prerequisite one is unverified/);
+  assert.deepEqual(completionSummary(r).verified, []);
+});
+
+test("settlement frees a worker slot only after fresh idle or dead evidence", t => {
+  const { store } = fixture(t);
+  const c = config(); c.maxWorkers = 1;
+  let r = start(store, observe(store, store.create(c)), "one");
+  r = report(store, r, "one", "ack"); r = report(store, r, "one", "ready");
+  r = grant(store, r, "one", BASE);
+  r = store.settleWithoutReview("demo", "leader-one", r.revision, "one", r.tasks[0].token!, settlementRequest(r), settlementProof(r));
+  assert.equal(r.mode, "running");
+  for (const [liveness, activity] of [["unknown", "unknown"], ["live", "busy"]] as const) {
+    r = store.reconcile("demo", "leader-one", r.revision, { one: {
+      observedAt: new Date().toISOString(), liveness, activity, evidence: ["Hermod observation"],
+    } });
+    assert.throws(() => store.reserve("demo", "leader-one", r.revision, "two"), /worker limit reached/);
+  }
+  r = reconcileLive(store, r);
+  assert.equal(r.tasks[0].observation!.liveness, "live");
+  assert.equal(r.tasks[0].observation!.activity, "idle");
+  assert.doesNotThrow(() => { r = store.reserve("demo", "leader-one", r.revision, "two"); });
+  assert.equal(r.tasks[1].phase, "reserved");
+  assert.equal(r.tasks[0].phase, "released-unverified");
+});
+
+test("settlement store refuses a retained grant outside its settlement window", async t => {
+  const refuses = (store: GruStore, r: Run) => {
+    const held = store.owned("demo", "one");
+    assert.ok(held.includes("merge:/repo"), "a missing lock must not mask the settlement-window guard");
+    assert.throws(() => store.settleWithoutReview("demo", "leader-one", r.revision, "one", r.tasks[0].token!,
+      settlementRequest(r), settlementProof(r)), /integration and independent verification required/);
+    assert.deepEqual(store.read("demo"), stored(r));
+    assert.deepEqual(store.owned("demo", "one"), held);
+  };
+  await t.test("attached replacement in intake, working and review", child => {
+    const { store } = fixture(child);
+    let r = start(store, grantThenLoseWorker(store), "one");
+    assert.equal(r.tasks[0].phase, "intake"); refuses(store, r);
+    r = report(store, r, "one", "ack");
+    assert.equal(r.tasks[0].phase, "working"); refuses(store, r);
+    r = report(store, r, "one", "ready");
+    assert.equal(r.tasks[0].phase, "review"); refuses(store, r);
+  });
+  await t.test("stopping, stopped and unreconciled engagement", async child => {
+    const { store, r: initial } = await orphanedRun(child, true);
+    let r = store.stop("demo", "leader-one", initial.revision);
+    assert.equal(r.mode, "stopping"); refuses(store, r);
+    r = reconcileLive(store, r);
+    r = store.stopped("demo", "leader-one", r.revision, "one", r.tasks[0].token!);
+    assert.equal(r.mode, "stopped");
+    assert.equal(verificationReady(r.tasks[0]), true, "only the mode guard refuses the frozen integration");
+    refuses(store, r);
+    r = store.resume("demo", "leader-one", r.revision, "leader-one");
+    assert.equal(r.mode, "running"); assert.equal(r.reconciled, false);
+    assert.equal(verificationReady(r.tasks[0]), true);
+    refuses(store, r);
+  });
+  await t.test("uncertain reconnect", async child => {
+    const { store, r: initial } = await orphanedRun(child, true);
+    let r = observe(store, initial, "dead");
+    r = store.beginReconnect("demo", "leader-one", r.revision, "one", r.tasks[0].token!);
+    assert.equal(r.tasks[0].reconnect!.pending, true);
+    refuses(store, r);
+  });
+});
+
+test("settlement runtime refuses mismatched task and token before any command", async t => {
+  const { r, file } = await orphanedRun(t, true);
+  const calls: string[][] = [];
+  const call: Command = async argv => {
+    calls.push(argv);
+    throw new Error("a command ran before the assignment binding was checked");
+  };
+  for (const request of [{ ...settlementRequest(r), task: "two" }, { ...settlementRequest(r), token: "old" }]) {
+    const evidence = path.join(path.dirname(file), "no-evidence");
+    await assert.rejects(inspectUnreviewedMerge(r.tasks[0], request, evidence, call), /does not match the current assignment/);
+    assert.deepEqual(calls, []);
+    assert.equal(fs.existsSync(evidence), false);
+  }
+});
+
 test("settlement setup shares check timeouts, preserves order, stops on failure and rechecks reviews", async t => {
   const { r, file } = await orphanedRun(t, true);
   const task = r.tasks[0]; task.spec.checkTimeoutMs = 1234;
@@ -546,6 +643,33 @@ test("a swept task's leftover worktree declaration does not refuse adoption of t
   run = store.attach("demo", "leader-one", run.revision, "one", run.tasks[0].token!,
     { ...worker("one"), worktree: observed }, adoptionProof(observed, "/worktrees/one", "o/r"));
   assert.equal(run.tasks[0].spec.worktree, observed);
+});
+
+test("settlement followed by sweep permits adoption of its released worktree", async t => {
+  const { store } = fixture(t);
+  const observed = "/repo/.claude/worktrees/STARK-100";
+  const earlier = config(); earlier.id = "earlier";
+  earlier.tasks = [{ ...earlier.tasks[0], worktree: observed, repositoryKey: "o/r" }];
+  let old = observe(store, store.create(earlier));
+  old = store.reserve("earlier", "leader-one", old.revision, "one");
+  old = store.attach("earlier", "leader-one", old.revision, "one", old.tasks[0].token!,
+    { ...worker("one"), worktree: observed, pid: 42 });
+  old = report(store, old, "one", "ack"); old = report(store, old, "one", "ready");
+  old = grant(store, old, "one", BASE);
+  old = store.settleWithoutReview("earlier", "leader-one", old.revision, "one", old.tasks[0].token!, settlementRequest(old), settlementProof(old));
+  old = store.sweep("earlier", old.revision,
+    await sweepEvidence(old, { tickets: { "STARK-100": "Closed" }, sessions: [terminated("one")] }), null).run;
+  assert.equal(old.tasks[0].phase, "released-unverified", "the phase alone does not identify a swept settlement");
+  assert.ok(old.tasks[0].swept);
+  assert.deepEqual(store.owned("earlier", "one"), []);
+  const c = config(); c.tasks = [{ ...c.tasks[0], repositoryKey: "o/r" }];
+  let r = observe(store, store.create(c));
+  r = store.reserve("demo", "leader-one", r.revision, "one");
+  assert.doesNotThrow(() => { r = store.attach("demo", "leader-one", r.revision, "one", r.tasks[0].token!,
+    { ...worker("one"), worktree: observed }, adoptionProof(observed, "/worktrees/one", "o/r")); });
+  assert.equal(r.tasks[0].spec.worktree, observed);
+  assert.ok(store.owned("demo", "one").includes(`tree:${observed}`));
+  assert.equal(store.read("earlier").tasks[0].phase, "released-unverified");
 });
 
 test("an adopted worktree replaces the declared one in the spec and is owned against later engagements", t => {
