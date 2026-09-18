@@ -59,7 +59,7 @@ test("settlement mutation sweep detects reverted protections", { skip: process.e
     ["gru.ts", 'summary: completionSummary(run), ready:', 'ready:', true],
     ["gru_runtime_lib.ts", 'if (!pr.merged || !pr.merged_at || !isRevision(pr.merge_commit_sha))', 'if (false)', true],
     ["gru_runtime_lib.ts", 'if (!sameRepo(pr.head.repo) || !sameRepo(pr.base.repo))', 'if (false)', true],
-    ["gru_runtime_lib.ts", 'if (task.baseEvidence && task.baseEvidence.ref !== pr.base.ref)', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'if (declared !== undefined && declared !== pr.base.ref)', 'if (false)', true],
     ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);', '', true],
     ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);', '', true],
     ["gru_runtime_lib.ts", '!pages.every(p => Array.isArray(p) && p.length === 0)', 'false', true],
