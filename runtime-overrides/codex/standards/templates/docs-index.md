@@ -13,7 +13,7 @@ flowchart LR
     A[💡 Brainstorm] --> B[📄 Spec\ndocs/specs/]
     B --> C[🔨 Code]
     C --> D[🔀 PR\nlinks spec]
-    D --> E[🤖 stark-review\n1 LLM × triage-selected domains]
+    D --> E[🤖 code-review\nxhigh, findings posted on the PR]
     E --> F[✅ Merge]
 ```
 
@@ -34,7 +34,7 @@ cp docs/adr/template.md docs/adr/$(printf "%04d" $(ls docs/adr/*.md | wc -l))-yo
 touch docs/specs/your-feature.md
 
 # Run AI review on a PR
-$stark-review <PR_NUMBER>
+$code-review xhigh --fix
 ```
 
 ---

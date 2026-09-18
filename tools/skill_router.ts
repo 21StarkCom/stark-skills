@@ -4,7 +4,7 @@
  *
  * Surface preserved 1:1:
  *
- *   skill_router.ts --context {review|implementation|session|debug} [--json]
+ *   skill_router.ts --context {review|implementation|session} [--json]
  *
  * JSON output keeps the same shape (`suggestions`, `context`,
  * `timestamp`, `config`) — the `_suppressed_count` key from the
@@ -67,7 +67,7 @@ function flagBool(args: ParsedArgs, name: string): boolean {
 function main(argv: string[]): number {
   if (argv.includes("-h") || argv.includes("--help")) {
     process.stderr.write(
-      "usage: skill_router.ts --context {review|implementation|session|debug} [--json]\n",
+      "usage: skill_router.ts --context {review|implementation|session} [--json]\n",
     );
     return 0;
   }

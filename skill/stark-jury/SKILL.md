@@ -46,7 +46,7 @@ them either.
   scorecard.
 - Calibrating a skill itself: does the method survive three different vendors?
 - **Not** for: a quick single-model pass (invoke the skill directly), Slack
-  messages, code or spec review (`stark-review`, `stark-fresh-eyes`), or
+  messages, code or spec review (`/code-review`, `stark-fresh-eyes`), or
   anything that publishes. The jury writes to a run dir and stops.
 
 ## The method

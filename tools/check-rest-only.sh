@@ -1,11 +1,15 @@
 #!/bin/sh
-# REST-only contract guard for the stark-review TS pipeline.
+# REST-only contract guard for the PR-posting path.
 #
-# Phase 4 verification was a developer-time grep; this script is the real
-# enforcement that prevents silent GraphQL slip-in. CI runs it before tests.
+# Originally written for the stark-review dispatcher; that skill was buried
+# (STARK-6098) but the contract outlived it — `review_post_lib.ts` and
+# `findings_review_post.ts` are how findings reach a PR today, and the agent
+# ports spawn subprocesses alongside them. This script is the real enforcement
+# that prevents silent GraphQL slip-in; CI runs it before tests.
 #
-# Scope is intentionally minimal — dispatcher and agent ports only, excluding
-# their own *.test.ts companions.
+# Scope is intentionally minimal — the posting path and the agent ports only,
+# excluding their own *.test.ts companions. `github_projects.ts` is GraphQL by
+# design (Projects V2 has no REST surface) and is deliberately out of scope.
 set -e
 
 cd "$(dirname "$0")"
@@ -13,7 +17,7 @@ cd "$(dirname "$0")"
 # Collect candidate sources (skip .test.ts so test fixtures with example
 # strings don't false-positive).
 files=""
-for f in stark_review*.ts agent_*.ts; do
+for f in review_post_lib.ts findings_review_post.ts finding_lib.ts agent_*.ts; do
   case "$f" in
     *.test.ts) continue ;;
   esac

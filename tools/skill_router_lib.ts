@@ -2,7 +2,7 @@
  * Contextual skill router — TypeScript port of `scripts/skill_router.py`.
  *
  * Surfaces underused skills at relevant moments. Given a context
- * ("review", "implementation", "session", "debug"), returns the mapped
+ * ("review", "implementation", "session"), returns the mapped
  * skills minus suppressed/recently-used ones, ranked by a
  * relevance + age score, capped at `max_suggestions`.
  *
@@ -21,20 +21,21 @@ import { assetConfigPath } from "./asset_root_lib.ts";
 // Constants
 // ---------------------------------------------------------------------------
 
-export type Context = "review" | "implementation" | "session" | "debug";
+export type Context = "review" | "implementation" | "session";
 
 export const VALID_CONTEXTS: ReadonlySet<Context> = new Set<Context>([
   "review",
   "implementation",
   "session",
-  "debug",
 ]);
 
+// The `debug` context was dropped with `/stark-review` (STARK-6098): it existed
+// only to suggest that skill, and no surviving skill is a debugging tool, so an
+// empty context would have been dead surface pretending to be a suggestion.
 export const CONTEXT_SKILLS: Readonly<Record<Context, readonly string[]>> = {
-  review: ["stark-review-improvement"],
+  review: ["stark-fresh-eyes"],
   implementation: ["stark-init-docs"],
   session: ["stark-handover"],
-  debug: ["stark-review"],
 };
 
 export interface SkillActivationConfig {

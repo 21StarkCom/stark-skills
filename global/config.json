@@ -3,28 +3,6 @@
     "claude",
     "codex"
   ],
-  "quick_domains": [],
-  "default_agent": "codex",
-  "test_command": null,
-  "allow_no_test_command": true,
-  "untrusted_fix_loop": false,
-  "history_retention_days": 90,
-  "domain_agents": {
-    "architecture": "codex",
-    "behavior": "codex",
-    "type-safety": "codex",
-    "security": "codex",
-    "test-coverage": "codex",
-    "spec-conformance": "codex",
-    "ssot": "codex"
-  },
-  "fix_threshold": "low",
-  "max_rounds": 3,
-  "verify_before_clean": true,
-  "disabled_domains": [],
-  "extra_domains": [],
-  "context_files": [],
-  "severity_overrides": {},
   "iac_review": {
     "enabled": true,
     "agents": [
@@ -73,25 +51,11 @@
       "TEST_DATABASE_URL",
       "DATABASE_URL"
     ],
-    "test_env_allowlist": [
-      "PATH",
-      "HOME",
-      "LANG",
-      "LC_ALL",
-      "SHELL",
-      "TMPDIR",
-      "USER",
-      "LOGNAME",
-      "VTT_TEST_PG_DSN"
-    ],
     "max_concurrent_agents": 3,
     "max_concurrent_per_agent": {
       "codex": 1
     },
-    "temp_dir_prefix": "stark-env",
-    "large_pr_file_threshold": 40,
-    "large_pr_line_threshold": 3000,
-    "large_pr_timeout_s": 1800
+    "temp_dir_prefix": "stark-env"
   },
   "self_heal": {
     "enabled": true,
@@ -133,13 +97,6 @@
     "daily_alert_usd": 15,
     "hard_stop_usd": 100,
     "track_rolling_7d": true
-  },
-  "triage": {
-    "mode": "conservative",
-    "agent": "claude",
-    "timeout": 15,
-    "conservative_confidence_threshold": 0.8,
-    "insights_url": "http://localhost:7420"
   },
   "model_rates": {
     "o3": {

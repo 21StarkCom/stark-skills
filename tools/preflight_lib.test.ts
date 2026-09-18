@@ -315,7 +315,7 @@ test("checkDeprecatedConfig: warns when automation.model_pins is present", async
 
 test("renderTable: includes workflow, overall label, every check, and recommended mode", () => {
   const result: PreFlightResult = {
-    workflow: "stark-review",
+    workflow: "stark-terraform-review",
     overall: "degraded",
     recommended_mode: "single-agent",
     timestamp: "2026-05-18T19:00:00Z",
@@ -325,7 +325,7 @@ test("renderTable: includes workflow, overall label, every check, and recommende
     ],
   };
   const out = renderTable(result);
-  assert.match(out, /Preflight: stark-review {2}\[DEGRADED\]/);
+  assert.match(out, /Preflight: stark-terraform-review {2}\[DEGRADED\]/);
   assert.match(out, /check_a/);
   assert.match(out, /check_b/);
   assert.match(out, /Recommended mode: single-agent/);

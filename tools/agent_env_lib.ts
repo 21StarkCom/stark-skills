@@ -111,10 +111,11 @@ export const AGENT_ENV_ALLOWLIST: readonly string[] = [
  * PAT or App private key is one prompt injection away from leaving the host.
  *
  * Deliberately NOT here: `DATABASE_URL` / `TEST_DATABASE_URL`. They are
- * credentials, but the copilot lead is their declared consumer — blocking
- * them globally would be a capability removal, not a hardening. The reviewer
- * path blocks them locally instead (`stark_review.ts::FORBIDDEN_ENV_KEYS`),
- * which is the per-consumer split the leak actually calls for.
+ * credentials, but a dispatch path that implements against a real database is
+ * their declared consumer — blocking them globally would be a capability
+ * removal, not a hardening. The prompt-injectable paths block them locally
+ * instead (`isForbiddenReviewerEnvKey` below), which is the per-consumer split
+ * the leak actually calls for.
  */
 const CREDENTIAL_ENV_EXACT: ReadonlySet<string> = new Set([
   "GH_TOKEN",
@@ -151,4 +152,71 @@ export function isCredentialEnvKey(key: string): boolean {
   if (CREDENTIAL_ENV_KEEP.has(key)) return false;
   if (CREDENTIAL_ENV_EXACT.has(key)) return true;
   return CREDENTIAL_ENV_PATTERN.test(key);
+}
+
+// ─── Allowlist application ──────────────────────────────────────────────────
+
+/**
+ * Push/posting credentials, blocked here on top of the allowlist.
+ *
+ * `runtime.subagent_env_allowlist` is a user-editable knob whose file is
+ * symlinked into the repo, so the allowlist DATA alone is not a control: adding
+ * one entry back would re-arm a leak with zero test failures. This is the
+ * code-level backstop.
+ */
+const FORBIDDEN_ENV_KEYS = ["GH_TOKEN", "GITHUB_TOKEN", "STARK_PUSH_TOKEN"] as const;
+
+/**
+ * Database DSNs, blocked HERE rather than in the shared credential denylist
+ * (`CREDENTIAL_ENV_EXACT`) so the block stays per-consumer.
+ *
+ * They sit in `runtime.subagent_env_allowlist` for dispatch paths that
+ * legitimately implement against a real database. An agent subprocess reviewing
+ * or judging text is not such a path: its entire input is untrusted content,
+ * and its output is posted through the operator's existing gh login, so a
+ * prompt-injected input that dumps the env publishes a live DSN on a public
+ * thread. A trusted runner that genuinely needs DB access asks for it
+ * explicitly rather than inheriting it through this path.
+ */
+const FORBIDDEN_REVIEWER_ENV_KEYS = ["DATABASE_URL", "TEST_DATABASE_URL"] as const;
+
+/** True when a key must never reach a prompt-injectable agent subprocess. */
+export function isForbiddenReviewerEnvKey(key: string): boolean {
+  if (FORBIDDEN_ENV_KEYS.includes(key as (typeof FORBIDDEN_ENV_KEYS)[number])) {
+    return true;
+  }
+  if (
+    FORBIDDEN_REVIEWER_ENV_KEYS.includes(
+      key as (typeof FORBIDDEN_REVIEWER_ENV_KEYS)[number],
+    )
+  ) {
+    return true;
+  }
+  return isCredentialEnvKey(key);
+}
+
+/**
+ * Project `source` down to `allowlist`, minus anything
+ * {@link isForbiddenReviewerEnvKey} refuses.
+ *
+ * Moved here from the buried `stark_review.ts` (STARK-6098): this file is the
+ * documented single owner of the agent subprocess env allowlist, and
+ * `subagent_env_allowlist.test.ts` pins the credential-scrub behaviour through
+ * this function.
+ */
+export function pickAllowlistedEnv(
+  source: NodeJS.ProcessEnv,
+  allowlist: string[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const allow = new Set(allowlist);
+  for (const k of allow) {
+    if (isForbiddenReviewerEnvKey(k)) continue;
+    const v = source[k];
+    if (typeof v === "string") out[k] = v;
+  }
+  for (const k of Object.keys(out)) {
+    if (isForbiddenReviewerEnvKey(k)) delete out[k];
+  }
+  return out;
 }

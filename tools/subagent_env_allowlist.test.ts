@@ -43,7 +43,7 @@ for (const runtime of ["claude", "codex"]) {
       const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
         import assert from "node:assert/strict";
         import { makeGeminiEnv, buildAgentEnv, releaseAgentTempDir } from "./tools/agent_dispatch_lib.ts";
-        import { pickAllowlistedEnv } from "./tools/stark_review.ts";
+        import { pickAllowlistedEnv } from "./tools/agent_env_lib.ts";
         const source = { USER: "fixture-user", GH_TOKEN: "fixture-github", OPENAI_API_KEY: "fixture-openai", EXAMPLE_SECRET: "fixture-secret",
           DATABASE_URL: "fixture-database", TEST_DATABASE_URL: "fixture-test-database" };
         assert.deepEqual(pickAllowlistedEnv(source, Object.keys(source)), { USER: "fixture-user" });

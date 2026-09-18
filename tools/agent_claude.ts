@@ -1,5 +1,5 @@
-import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
-import { findingId } from "./stark_review_lib.ts";
+import type { AgentName, Finding, Severity } from "./finding_lib.ts";
+import { findingId } from "./finding_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
 import { AGENT_ENV_ALLOWLIST, resolvedPath } from "./agent_env_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";

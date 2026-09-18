@@ -17,8 +17,9 @@ codex plugin add stark-plan@bifrost
 # Start a work session (context loading, health checks, briefing)
 /stark-session start
 
-# PR review (1 LLM × triage-selected domains)
-/stark-review 42
+# Review a PR, then publish the findings on it as one anchored review
+/code-review xhigh --fix
+node tools/findings_review_post.ts --repo ORG/REPO --pr 42 --findings findings.json
 
 # End the session (tests, cleanup, push)
 /stark-session end
@@ -40,14 +41,17 @@ The human writes and gates the spec (`/stark-author`). Everything after that gat
 
 ### Quality Gates
 
-Review artifacts before they ship. Each review skill dispatches the enabled LLM agents in parallel, classifies findings as real issues vs. noise, and applies fixes autonomously.
+Review artifacts before they ship.
 
 | Skill | What it reviews | When to use |
 |-------|----------------|-------------|
-| `/stark-review` | PR code changes | Triage-selected domains, 1 LLM × N domains — fast, cheap, default agent configurable per domain. |
-| [`/stark-review-improvement`](skill/stark-review-improvement/SKILL.md) | Review prompt effectiveness | After reviews produce too many false positives. Tunes agent prompts based on assessment data. |
+| [`/stark-fresh-eyes`](skill/stark-fresh-eyes/SKILL.md) | A prompt, brief, spec or doc | Before it ships. ONE zero-context subagent re-verifies every checkable claim by a *different* method than the doc's own, and reports defects only. |
+| [`/stark-terraform-review`](skill/stark-terraform-review/SKILL.md) | Terraform / OpenTofu HCL | Multi-agent, cross-validated, with host scanners (`fmt`, `validate`, `tflint`, `trivy`, `checkov`) as evidence. |
+| [`/stark-terragrunt-review`](skill/stark-terragrunt-review/SKILL.md) | Terragrunt orchestration | include/dependency/generate/remote_state, mock-output schema, DAG cycles, state isolation. |
 
-**Best practice:** Gate the spec at `/stark-author`'s human checklist *before* implementation starts — it's cheaper to fix a spec than to fix code. Use `/stark-review` on every PR.
+**PR code review is `/code-review xhigh --fix`** — Claude Code's built-in reviewer, which every change passes before merge. To publish its findings on the PR as ONE anchored review (instead of N zero-body ones), pipe the `ReportFindings` payload through `tools/findings_review_post.ts`.
+
+**Best practice:** Gate the spec at `/stark-author`'s human checklist *before* implementation starts — it's cheaper to fix a spec than to fix code.
 
 ### Planning and Execution
 
@@ -114,25 +118,33 @@ Start and end your work sessions with consistent context loading and cleanup.
 ### Reviewing someone else's PR
 
 ```
-/stark-review 42                    # PR review: 1 agent × triage-selected domains
+/code-review xhigh --fix            # the review itself
+node tools/findings_review_post.ts --repo ORG/REPO --pr 42 --findings -
 ```
 
 ---
 
 ## Architecture
 
-The core engine dispatches the enabled AI agents across the configured review domains:
+Skills are thin protocol wrappers over TypeScript dispatchers in `tools/`. A
+dispatcher resolves the enabled agents from config, spawns each as its own
+headless subprocess with a credential-scrubbed env, parses the structured
+output, and merges the results:
 
 ```
-Default install:
-├── claude × {architecture, behavior, security, test-coverage, spec-conformance}
-└── codex  × {same 5 domains}
-
-Optional:
-└── gemini × {same 5 domains} when `models.gemini.enabled` is true
+/stark-terraform-review ─┐
+/stark-terragrunt-review ─┼─→ iac_review.ts   ─→ codex, gemini (parallel, read-only)
+/stark-refactor-plan ─────┴─→ refactor_planner.ts ─→ 10 focused subagents
+/stark-jury ──────────────→ jury_dispatch.ts  ─→ claude, codex, gemini panel
 ```
 
-Reviews post through the operator's existing `gh` login as `aryeh-stark`.
+PR findings — from `/code-review` or any of the above — reach GitHub through
+`findings_review_post.ts` → `review_post_lib.ts::postReview`: ONE anchored
+`COMMENT` review, inline where the anchor falls inside a diff hunk and in the
+body otherwise, with a no-drop fallback so a rejected anchor never costs a
+finding.
+
+Everything posts through the operator's existing `gh` login as `aryeh-stark`.
 Each review identifies its models in the text.
 
 ## Repo Structure
@@ -140,25 +152,22 @@ Each review identifies its models in the text.
 ```
 stark-skills/
 ├── skill/                        ← one dir per skill (stark-*/SKILL.md)
-│   ├── stark-review/SKILL.md
+│   ├── stark-author/SKILL.md
 │   ├── stark-persona/SKILL.md
 │   └── ...
 ├── scripts/                      ← shell helpers + JSON (healer_patterns.json)
 │   └── *.{sh,json}
 ├── tools/                        ← TypeScript dispatch infra, agent CLIs, meta-tooling
-│   ├── multi_review.ts           ← PR review orchestrator
+│   ├── findings_review_post.ts   ← publish findings on a PR as one anchored review
+│   ├── review_post_lib.ts        ← the REST gh transport + postReview
+│   ├── iac_review.ts             ← multi-agent Terraform/Terragrunt reviewer
 │   └── ...
 ├── global/                       ← config + prompts vendored into each plugin
 │   ├── config.json               ← global defaults
-│   └── prompts/{claude,codex,gemini}/  ← per-agent × per-domain review prompts (5 domains)
+│   └── prompts/{iac-review,refactor-planner}/  ← per-dispatcher rubrics
 ├── runtime-overrides/codex/      ← Codex-only artifact + support overlays; never shipped to Claude
-├── data/                         ← persona roster, review coverage, showcase pages
+├── data/persona/                 ← persona roster
 ├── .github/workflows/            ← GitHub Actions (tests, project sync, marketplace-sync)
-├── org/evinced/                  ← org config overrides
-├── docs/
-│   ├── skills/                   ← generated skill docs (Markdown, Mermaid, JSON, and PNG artifacts)
-│   ├── adr/                      ← architectural decision records
-│   └── specs/                    ← design specs
 └── standards/                    ← org-wide doc templates and workflows
 ```
 

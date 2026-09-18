@@ -10,7 +10,7 @@ TOOLS="${STARK_REVIEW_TOOLS:-$HOME/.claude/code-review/tools}"
 node "$TOOLS/preflight.ts" --workflow <skill-slug> --json
 ```
 
-The skill provides its own `<skill-slug>` (e.g. `stark-review`, `stark-terraform-review`).
+The skill provides its own `<skill-slug>` (e.g. `stark-terraform-review`, `stark-refactor-plan`).
 
 ## Result handling
 
@@ -34,6 +34,6 @@ Interactive skill invocations skip steps 1–2 and just print + stop.
 
 ## Constants
 
-`TOOLS` also locates dispatchers such as `stark_review.ts`.
+`TOOLS` also locates dispatchers such as `iac_review.ts`.
 Preflight checks the existing `gh` login as `aryeh-stark`.
 Authentication changes require operator action.

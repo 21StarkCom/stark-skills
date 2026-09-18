@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import type { AgentName, Finding, Severity } from "./stark_review_lib.ts";
-import { findingId } from "./stark_review_lib.ts";
+import type { AgentName, Finding, Severity } from "./finding_lib.ts";
+import { findingId } from "./finding_lib.ts";
 import type { BuildContext, BuiltCommand, ParseError, ParseResult } from "./agent_codex.ts";
 import { AGENT_ENV_ALLOWLIST, resolvedPath } from "./agent_env_lib.ts";
 import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";

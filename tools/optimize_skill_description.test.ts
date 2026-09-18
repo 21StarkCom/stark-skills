@@ -46,7 +46,7 @@ test("parseSkillDescription: YAML block-scalar (>-) joined into one line", () =>
       "---",
       "name: stark-forged-review",
       "description: >-",
-      "  Multi-agent PR review with leader + second-opinion per domain, dynamic triage, and forge-style escalation on non-trivial findings. Replaces stark-review.",
+      "  Multi-agent PR review with leader + second-opinion per domain, dynamic triage, and forge-style escalation on non-trivial findings. Replaces the legacy reviewer.",
       "model: opus[1m]",
       "---",
     ].join("\n"),
@@ -54,7 +54,7 @@ test("parseSkillDescription: YAML block-scalar (>-) joined into one line", () =>
   const { name, description } = parseSkillDescription(skill);
   assert.equal(name, "stark-forged-review");
   assert.ok(description.includes("leader + second-opinion"));
-  assert.ok(description.includes("Replaces stark-review"));
+  assert.ok(description.includes("Replaces the legacy reviewer"));
 });
 
 test("parseSkillDescription: ignores other frontmatter fields", () => {

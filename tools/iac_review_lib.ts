@@ -43,7 +43,7 @@ import {
 } from "./agent_dispatch_lib.ts";
 import { assetPromptsDir } from "./asset_root_lib.ts";
 import { getIacReviewConfig } from "./stark_config_lib.ts";
-import { ghJsonOnce } from "./stark_review.ts";
+import { ghJsonOnce } from "./review_post_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Types
