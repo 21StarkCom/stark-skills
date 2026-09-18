@@ -76,7 +76,7 @@ Derive exact done-whens, verification commands, and completion milestones.
 Identify fixed ports, databases, and release files as exclusive or integration resources.
 Overlapping files do not block dispatch; they reconcile at rebase under the merge lock,
 which is sound only while each grant names the base branch tip you fetch and read
-immediately before `integrate`.
+immediately before `integrate`; the command enforces that, and refuses anything else.
 Capture these facts and authorized limits in the engagement input.
 Declare each `worktree` where Hermod places that provider's worker: Claude at
 `<repo>/.claude/worktrees/<ticket>`, Codex at `<main checkout>/.worktrees/<ticket>`
@@ -157,6 +157,13 @@ Grant integration to one specific assignment at the base branch tip you fetch an
 immediately before `integrate`, never one observed earlier: `integrate` takes the merge
 lock itself, so its `resource already owned: merge:<repo>` refusal means another task is
 mid-merge — wait for it, fetch again, and read the tip again.
+`integrate` checks that base against the repository instead of trusting you for it: it
+fetches the base branch from origin and refuses unless the SHA is a commit that
+repository holds, is that branch's current tip, and contains every merge this
+engagement already verified there. The refusal names the current tip. Pass
+`--base-ref BRANCH` when the base is not origin's default branch. An unreachable
+origin or an unresolvable branch refuses and says which; neither ever falls back to a
+local ref that reads exactly like a current one.
 After merging, independently inspect the actual PR and merge ancestry.
 Rerun completion checks against the fetched base in an isolated verifier.
 Confirm review evidence covers the final PR head.

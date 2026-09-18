@@ -68,11 +68,22 @@ mid-merge, so wait for that task to complete, fetch again, and read the tip agai
 Read the tip rather than naming the previous merge commit: the previous merge need not
 be the tip (a base branch also takes direct publisher pushes), and `merge:<repo>` locks
 are global, so that merge can belong to an engagement whose commits you never recorded.
-The store validates the SHA's shape alone (40 to 64 hex characters), and `verify` only
-requires that base in the merged head's ancestry, so a stale grant lets a diff built
-without the other task's changes squash cleanly whenever git sees no textual conflict.
 The first grant in a repository has no prior merge to wait for; the tip you fetch is
 simply the current one.
+
+`integrate` enforces this rather than trusting it. Before the transaction it fetches the
+base branch from origin in the task's own repository and refuses unless the SHA is a
+commit that repository holds, is that branch's current tip, and contains every merge
+this engagement has already verified onto the same branch. The refusal names the current
+tip. Without that check the store validated the SHA's shape alone (40 to 64 hex
+characters) while `verify` only requires that base in the merged head's ancestry, so a
+foreign-repository SHA, a typo, or an hour-stale tip all passed and let a diff built
+without the other task's changes squash cleanly whenever git sees no textual conflict.
+The base branch is origin's default branch unless `--base-ref BRANCH` names another.
+The check is fail-closed: an unreachable origin, a branch origin does not have, and an
+unresolvable default branch each refuse and say which, rather than falling back to a
+local ref. The observation fetches into an invocation-owned `refs/gru/integration/<uuid>`
+and removes it, so it neither writes `FETCH_HEAD` nor moves the leader's checkout.
 
 ## Durable commands
 
@@ -91,7 +102,7 @@ An obsolete leader or revision cannot overwrite current state.
 | `rebrief-check` | Message id, current accepted run/task/leader and optional current message id | DB-free worker verdict and accepted ledger body |
 | `attach` | Exact live Hermod peer; git evidence if outside the declared worktree | Worker bound, adopted worktree audited; awaiting intake |
 | `receive` | Leader-acked Hermod message, delivery confirmed | Intake, progress, blocker, or claim |
-| `integrate` | Reviewed candidate and base SHA | Exclusive integration reservation |
+| `integrate` | Reviewed candidate; a base SHA the repository confirms is its base branch's current tip | Exclusive integration reservation |
 | `verify` | Merged PR, review, independent checks | Verified completion evidence |
 | `resume` | Previous leader no longer live | New epoch; reconciliation required |
 | `continue` | Existing stopped worker observed idle | Original assignment and token resumed |
@@ -325,6 +336,7 @@ the repository's checks pass. Do not relax the verifier's exact-head rule.
 
 Reserve integration using the base branch tip you fetch and read immediately before
 `integrate`, so it includes any merge that landed while this task was in review.
+`integrate` fetches that branch itself and refuses any other SHA, naming the tip to use.
 Rebase, regenerate, reconcile shared counts, rebuild, and retest.
 Use the repository's squash-merge path and inspect the result.
 Never rely on a merge command's exit code alone.

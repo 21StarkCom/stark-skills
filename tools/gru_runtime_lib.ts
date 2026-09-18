@@ -4,8 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { ADOPTION_CHECKS, assertAbsentWorktree, assertLeadershipTransfer, canonicalWorktree, fresh, namesTicket, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, sweepCandidates, verificationReady } from "./gru_lib.ts";
-import type { Assignment, CompletionEvidence, LeadershipEvidence, LeadershipTransfer, Observation, OrphanEvidence, Provider, Run, SweepEvidence, Worker, WorktreeAdoption } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, assertAbsentWorktree, assertLeadershipTransfer, BASE_CHECKS, canonicalWorktree, fresh, namesTicket, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, sweepCandidates, verificationReady } from "./gru_lib.ts";
+import type { Assignment, BaseEvidence, CompletionEvidence, LeadershipEvidence, LeadershipTransfer, Observation, OrphanEvidence, Provider, Run, SweepEvidence, Worker, WorktreeAdoption } from "./gru_lib.ts";
 
 export interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut?: boolean }
 export type Command = (argv: string[], cwd?: string, timeoutMs?: number) => Promise<CommandResult>;
@@ -591,6 +591,65 @@ export async function receive(run: Run, messageId: string, call: Command = comma
   }
   return { task: task.spec.id, token: task.token!, session: task.worker.session,
     kind: body.kind as "ack" | "progress" | "blocked" | "ready" | "complete", message: body.message };
+}
+
+/** The base branch to read the tip from when the leader names none: origin's default branch.
+ * Read the full ref and strip the known prefix — `--short` renders it `origin/main`, and
+ * stripping `origin/` from that would also maul a branch genuinely named `origin/something`. */
+async function defaultBaseRef(repoDir: string, call: Command): Promise<string> {
+  const head = await call(["git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], repoDir);
+  const value = head.code === 0 ? head.stdout.trim().replace(/^refs\/remotes\/origin\//, "") : "";
+  if (!value || value.startsWith("refs/")) {
+    throw new Error(`cannot resolve origin's default branch in ${repoDir}; name the base branch with --base-ref (git remote set-head origin --auto records refs/remotes/origin/HEAD)`);
+  }
+  return value;
+}
+/** Gather the git facts `baseRefusal` judges: that the repository is the task's, that it holds
+ * the supplied base as a commit, what the base branch's tip is right now, and which of this
+ * engagement's verified merges the base contains. Fail closed — an unfetchable branch, an
+ * unresolvable ref, or a base this repository does not have refuses here, naming which. */
+export async function observeBase(task: Assignment, base: string, priorMerges: string[], ref?: string,
+  call: Command = command): Promise<BaseEvidence> {
+  if (!/^[0-9a-f]{40,64}$/.test(base)) throw new Error("integration requires an observed base SHA");
+  const repoDir = task.spec.repo;
+  const repositoryKey = await canonicalRepository(repoDir, call);
+  const expected = taskRepositoryKey(task.spec);
+  if (repositoryKey !== expected) throw new Error(`integration base repository mismatch: ${repoDir} is ${repositoryKey}, not ${expected}`);
+  const branch = ref ?? await defaultBaseRef(repoDir, call);
+  // check-ref-format exits 1 silently on a malformed name, so say what was rejected.
+  if ((await call(["git", "check-ref-format", `refs/heads/${branch}`], repoDir)).code !== 0) {
+    throw new Error(`invalid base branch name ${JSON.stringify(branch)}`);
+  }
+  // Each invocation owns its ref, so concurrent grants in one repository cannot overwrite
+  // each other's fetch, and none of them writes the shared FETCH_HEAD.
+  const temp = `refs/gru/integration/${randomUUID()}/base`;
+  try {
+    const observedAt = new Date().toISOString();
+    const fetched = await call(["git", "fetch", "--no-write-fetch-head", "origin", `refs/heads/${branch}:${temp}`], repoDir);
+    if (fetched.code !== 0) throw new Error(`cannot fetch refs/heads/${branch} from origin in ${repoDir}: ${(fetched.stderr || fetched.stdout).trim() || `git exited ${fetched.code}`}`);
+    const tip = await checked(call, ["git", "rev-parse", "--verify", `${temp}^{commit}`], repoDir);
+    // `--verify --quiet` exits 1 on an unknown object instead of printing git's fatal; a base
+    // from another repository, or a typo, lands here rather than passing the shape check alone.
+    const resolved = await call(["git", "rev-parse", "--verify", "--quiet", `${base}^{commit}`], repoDir);
+    if (resolved.code !== 0 || resolved.stdout.trim() !== base) throw new Error(`integration base ${base} is not a commit in ${repositoryKey}`);
+    const contains: string[] = [];
+    for (const sha of [...new Set(priorMerges)]) {
+      const ancestor = await call(["git", "merge-base", "--is-ancestor", sha, base], repoDir);
+      // 0 contained, 1 not contained. 128 is an unknown object: the fetch above brought the
+      // base branch, so a merge this repository still lacks is not in the base's history
+      // either — not contained, not an error. Anything else (a timeout, a signal) is a failed
+      // observation, so refuse rather than record silence as a clean comparison.
+      if (ancestor.code === 0) contains.push(sha);
+      else if (ancestor.code !== 1 && ancestor.code !== 128) {
+        throw new Error(`cannot compare verified merge ${sha} against ${base}: ${(ancestor.stderr || ancestor.stdout).trim() || `git exited ${ancestor.code}`}`);
+      }
+    }
+    return { observedAt, repositoryKey, ref: branch, tip, base, contains, checks: [...BASE_CHECKS] };
+  } finally {
+    const removed = await call(["git", "update-ref", "-d", temp], repoDir);
+    // The grant's verdict is already decided; a leftover private ref is noise, not a failure.
+    if (removed.code !== 0) process.stderr.write(`gru: could not remove ${temp}: ${(removed.stderr || removed.stdout).trim()}\n`);
+  }
 }
 
 /** Read authoritative PR/commit state and rerun declared checks in a fresh verification worktree. */
