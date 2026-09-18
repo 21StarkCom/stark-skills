@@ -141,7 +141,7 @@ An obsolete leader or revision cannot overwrite current state.
 | `reserve` | Readiness, resources, available budget | Unique token; launch pending |
 | `packet` | Existing reservation | Complete worker brief |
 | `rebrief-check` | Message id, current accepted run/task/leader and optional current message id | DB-free worker verdict and accepted ledger body |
-| `attach` | Exact live Hermod peer; git evidence if outside the declared worktree | Worker bound, adopted worktree audited; awaiting intake |
+| `attach` | Exact live Hermod peer, present in the provider view even when it is incomplete; git evidence if outside the declared worktree | Worker bound, adopted worktree audited; awaiting intake |
 | `receive` | Leader-acked Hermod message, delivery confirmed | Intake, progress, blocker, or claim |
 | `integrate` | Reviewed candidate; a base SHA the repository confirms is its base branch's current tip | Exclusive integration reservation |
 | `verify` | Merged PR, review, independent checks | Verified completion evidence |
@@ -187,6 +187,33 @@ Mixed-provider runs retain uncertainty for each unavailable provider.
 Opaque recorded identities still require the complete discovery namespace.
 Same-session resume retains its existing ownership; transferring leadership
 still requires complete discovery and a previous leader that is not live.
+
+`incomplete: true` answers one question only: does absence inside this view prove death?
+**Presence binds; only absence is gated by completeness.**
+A peer Hermod returned as `live` and addressable is self-evidencing, so `attach`,
+`interrupt` and `retire` bind it inside an incomplete namespace — the identity bar
+(`live` liveness, available messaging, and a complete id/surface/workspace/cwd/session
+record for a supported provider) is what they check, not the namespace flag.
+A peer that is *missing* from the view still refuses, in either view, and `attach`'s
+refusal preserves the launch reservation. The refusal names *which* absence it saw:
+inside an incomplete view it adds `the view was incomplete, so this absence is unproven`,
+because neither repair an unqualified "missing" implies is available there — `reconcile`
+can only answer `unknown`, and `takeover` refuses an incomplete view outright. Re-run
+`attach` (a just-launched worker is briefly unregistered) before reaching for a takeover.
+The flag is not stable, which is why gating presence on it produced an intermittent,
+unexplainable refusal. On Hermod v0.18.1 the unscoped view reports `incomplete: true`
+routinely, and a scoped Claude view reports it whenever an uninspectable Claude identity
+is present — its `boundaries` explain that remote, desktop, other-user, container and
+unregistered Claude identities establish no supported messaging destination, so Hermod
+cannot enumerate them, and a just-launched worker is briefly unregistered. That is an
+honest boundary, not a defect; do not ask Hermod to claim a completeness it does not have.
+The paths that reason from absence keep the gate: `takeover`, leadership transfer,
+the sweep verdict, and `reconcile`'s `dead`/`retired` derivation.
+That last one has an unresolved cost: `retire` now closes the surface inside an incomplete
+view and `store.retire` clears the observation, but `reconcile` cannot re-derive
+`observation.retired` without a complete view — so the completed worker keeps occupying its
+`maxWorkers` slot, and `readyReason` reports only `worker limit reached`, until a complete
+view appears. Prefer retiring under a complete view; a retirement is not lost either way.
 
 Messages carry engagement, task, token, kind, and body.
 The worker's `ack` body quotes the exact done-when.
@@ -591,6 +618,8 @@ Verified workers release slots when freshly observed idle, dead, or confirmed re
 `retire` records successful idle-surface closure before refreshing observations.
 Complete discovery with no live session confirms retired capacity without claiming PID death.
 Incomplete discovery or a resumed live session revokes that capacity evidence.
+`retire` itself no longer waits for a complete view, so retiring inside an incomplete one
+closes the surface and leaves the slot held until a complete view confirms the retirement.
 Completed engagements retain ticket, worktree, and saved-session identity ownership.
 Follow-up assignments use distinct tickets and worktrees; completion does not authorize their reuse.
 Exhausted budgets require operator input; resume never resets them.

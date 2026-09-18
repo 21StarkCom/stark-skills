@@ -300,9 +300,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       case "attach": {
         const assigned = task(flag("token"));
         const peers = await discoverWorker({ provider: assigned.spec.provider, id: flag("peer") });
-        if (peers.incomplete) throw new Error("Hermod discovery incomplete; preserve launch reservation");
+        // Positive live evidence always wins, including in an incomplete namespace. `incomplete`
+        // answers whether absence proves death; a returned peer is present, and `workerFromPeer`
+        // below is the identity bar it must clear. Absence refuses either way — preserving the
+        // reservation is the safe direction — but it names which absence it saw: inside an
+        // incomplete view the launch may simply be an identity Hermod cannot enumerate yet
+        // (a just-launched worker is briefly unregistered), so re-running `attach` is the repair,
+        // not a takeover, which refuses that view anyway.
         const peer = peers.peers.find(p => p.id === flag("peer"));
-        if (!peer) throw new Error("Hermod peer missing; preserve launch reservation");
+        if (!peer) throw new Error(`Hermod peer missing; preserve launch reservation${
+          peers.incomplete ? "; the view was incomplete, so this absence is unproven — attach again" : ""}`);
         const worker = workerFromPeer(peer);
         // Inspect git only for a peer that could bind; the store names any other refusal.
         const adoption = canonicalWorktree(worker.worktree) === canonicalWorktree(assigned.spec.worktree) || store.attachRefusal(run, assigned, worker)
