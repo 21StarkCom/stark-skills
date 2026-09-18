@@ -216,6 +216,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       if (typeof value !== "string" || !value) throw new Error(`--${name} is required`);
       return value;
     };
+    // "this verb takes ONLY these flags", in one reading. Three verbs scan for a flag they
+    // would otherwise parse and drop, and three hand-copies of the scan is how the next verb
+    // gets a subtly narrower one — a flag silently ignored is the exact failure the scans
+    // exist to prevent. `parseArgs` only records flags actually supplied, so an absent one
+    // never appears here.
+    const onlyFlags = (...allowed: string[]): void => {
+      const extra = Object.keys(values).find(key => !allowed.includes(key));
+      if (extra) throw new Error(`--${extra} does not apply to ${verb}`);
+    };
     // parseArgs registers one option set for every verb, so a flag only `resume` reads is
     // silently accepted everywhere else. An operator who puts --limits-file on `reconcile`
     // would get exit 0 and believe the dead-leader limits were replaced while `packet` kept
@@ -227,8 +236,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // Fail before opening state or starting any network/check work without written authority.
     if (verb === "settle") {
       flag("file");
-      const unused = Object.keys(values).find(key => !["file", "run", "revision", "task", "token", "state", "leader"].includes(key));
-      if (unused) throw new Error(`--${unused} does not apply to settle`);
+      onlyFlags("file", "run", "revision", "task", "token", "state", "leader");
     }
     // Same trap as --limits-file: a --base-ref parsed but ignored would read as a grant checked
     // against the named branch while the tip actually came from origin's default one.
@@ -237,8 +245,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     if (verb !== "sweep" && values.apply !== undefined) throw new Error(`--apply applies to sweep, not ${verb}`);
     // sweep evaluates whole engagements: a --task it ignored would read as a narrowed sweep.
-    const unused = verb === "sweep" && Object.keys(values).find(key => !["run", "apply", "state", "leader"].includes(key));
-    if (unused) throw new Error(`--${unused} does not apply to sweep`);
+    if (verb === "sweep") onlyFlags("run", "apply", "state", "leader");
     for (const key of ["current-leader", "current-message"]) {
       if (verb !== "rebrief-check" && values[key] !== undefined) throw new Error(`--${key} applies to rebrief-check, not ${verb}`);
     }
@@ -264,8 +271,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const identity = process.env.CODEX_THREAD_ID || process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID || values.leader;
     if (values.leader && values.leader !== identity) throw new Error("--leader differs from the runtime session identity");
     if (verb === "rebrief-check") {
-      const extra = Object.keys(values).find(key => !["message", "run", "task", "current-leader", "current-message"].includes(key));
-      if (extra) throw new Error(`--${extra} does not apply to rebrief-check`);
+      onlyFlags("message", "run", "task", "current-leader", "current-message");
       if (typeof identity !== "string" || !identity) throw new Error("worker runtime session identity unavailable");
       const result = await checkRebrief({ message: flag("message"), run: flag("run"), task: flag("task"),
         currentLeader: flag("current-leader"), worker: identity,
@@ -331,6 +337,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       emit({ ...run, summary: completionSummary(run), ready: run.tasks.filter(t => reasons.get(t.spec.id) === null).map(t => t.spec.id),
         waiting: run.tasks.filter(t => !["done", "swept", "released-unverified"].includes(t.phase)).map(t => ({ task: t.spec.id, reason: reasons.get(t.spec.id) })) }); return 0;
     }
+    // One private, 0700 directory per settling attempt, beside the store. Shared by `verify`
+    // and `settle` so the two cannot drift apart on the mode or the location: the evidence
+    // files inside are written `wx`, so a second run under a reused directory would refuse.
+    const freshEvidenceDir = (prefix: string): string => {
+      const evidenceRoot = path.join(path.dirname(statePath), "evidence", id);
+      fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
+      return fs.mkdtempSync(path.join(evidenceRoot, prefix));
+    };
     const task = (token?: string) => {
       const found = run.tasks.find(t => t.spec.id === flag("task"));
       if (!found) throw new Error("unknown task");
@@ -429,10 +443,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         // Name the repair that actually applies. "integrate" only works from `review`,
         // so offering it for a stopped or in-flight task hands over a command that refuses.
         if (!verificationReady(assigned)) throw new Error(verifyBlocker(assigned));
-        const evidenceRoot = path.join(path.dirname(statePath), "evidence", id);
-        fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
-        const evidenceDir = fs.mkdtempSync(path.join(evidenceRoot, "verification-"));
-        const proof = await verifyCompletion(assigned, integer("pr"), integer("review"), evidenceDir);
+        const proof = await verifyCompletion(assigned, integer("pr"), integer("review"), freshEvidenceDir("verification-"));
         const completed = store.complete(id, identity, revision, assigned.spec.id, assigned.token!, proof);
         emit({ ...completed, summary: completionSummary(completed) }); break;
       }
@@ -444,9 +455,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         }
         if (run.mode !== "running" || !run.reconciled) throw new Error("resume and reconcile before settlement");
         if (!verificationReady(assigned)) throw new Error(verifyBlocker(assigned));
-        const evidenceRoot = path.join(path.dirname(statePath), "evidence", id);
-        fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
-        const proof = await inspectUnreviewedMerge(assigned, request, fs.mkdtempSync(path.join(evidenceRoot, "settlement-")));
+        const proof = await inspectUnreviewedMerge(assigned, request, freshEvidenceDir("settlement-"));
         const settled = store.settleWithoutReview(id, identity, revision, assigned.spec.id, assigned.token!, request, proof);
         emit({ ...settled, summary: completionSummary(settled) }); break;
       }

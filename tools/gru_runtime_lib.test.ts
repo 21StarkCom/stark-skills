@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { canonicalRepository, checkLeadershipTransfer, checkRebrief, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, inspectAdoption, interruptWorker, observations, observeBase, observeOrphan, observeSweep, observeWorkers, packet, PACKET_TRANSFER_WINDOW, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, checkRebrief, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, GRANT_FETCH as GRANT_FETCH_FLAGS, PRIVATE_FETCH as VERIFY_FETCH_FLAGS, inspectAdoption, interruptWorker, observations, observeBase, observeOrphan, observeSweep, observeWorkers, packet, PACKET_TRANSFER_WINDOW, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
 import { ADOPTION_CHECKS, BASE_CHECKS, type Assignment, type Engagement, type Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
@@ -943,16 +943,25 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   assert.notEqual(exec(["git", "cat-file", "-e", candidate], verifier).code, 0);
   task.spec.repo = verifier; task.integrationBase = fixed;
   pr.head.sha = candidate; pr.merge_commit_sha = merged; reviewHead = candidate;
+  // A release tag on the merged base, as this fleet cuts. The verification fetch must bring
+  // it: `git describe --tags` is an ordinary way for a declared check to derive a version, and
+  // the GRANT observation's `--no-tags` (which keeps a refused grant from touching the tag
+  // namespace) must not leak into this path, or the check fails with "No names found" and
+  // nothing points at the fetch flags.
+  must(["git", "tag", "v9.9.9", merged], repoDir);
+  must(["git", "push", "-q", "origin", "v9.9.9"], repoDir);
   // Task-owned commands may provision ignored dependencies before testing.
   task.spec.checks = [
     [process.execPath, "-e", "require('fs').writeFileSync('prepared-dependency', 'ready')"],
     [process.execPath, "-e", "require('assert').equal(require('fs').readFileSync('prepared-dependency','utf8'), 'ready')"],
+    ["git", "describe", "--tags"],
     [process.execPath, "verify.cjs"],
   ];
   const squashProof = await verifyCompletion(task, 1, 1, path.join(dir, "squashed"), call);
   assert.equal(squashProof.head, candidate);
   assert.equal(squashProof.merge, merged);
-  assert.equal(squashProof.checks.length, 3);
+  assert.equal(squashProof.checks.length, 4);
+  assert.match(fs.readFileSync(squashProof.checks[2].log, "utf8"), /v9\.9\.9/);
   assert.equal(fs.existsSync(path.join(dir, "squashed", "worktree-token")), false);
   assert.ok(!must(["git", "worktree", "list", "--porcelain"], verifier).includes("worktree-token"));
 });
@@ -1039,6 +1048,16 @@ test("the integration base is read from the real base branch, and every gap fail
   assert.equal(must(["git", "rev-parse", "refs/remotes/origin/main"], repoDir), beforeRemote,
     "the grant fetch must not advance origin/<branch> in a ref store shared with live worktrees");
   assert.equal(must(["git", "tag", "-l"], repoDir), "", "the grant fetch must not auto-follow tags");
+  // ...but `verifyCompletion` MUST follow them. Its declared checks run against the fetched
+  // base in a disposable worktree, and this fleet cuts tagged releases, so a check deriving a
+  // version with `git describe --tags` reports "No names found" when the tags were never
+  // fetched — a failed completion check with nothing pointing at the fetch flags. The grant
+  // and the verification fetch therefore differ by exactly `--no-tags`, deliberately.
+  assert.ok(!(VERIFY_FETCH_FLAGS as readonly string[]).includes("--no-tags"), "verification must still see tags its checks may describe against");
+  assert.ok((GRANT_FETCH_FLAGS as readonly string[]).includes("--no-tags"), "a refused grant must leave the tag namespace untouched");
+  for (const flag of ["--no-write-fetch-head", "--refmap="]) {
+    for (const set of [VERIFY_FETCH_FLAGS, GRANT_FETCH_FLAGS]) assert.ok((set as readonly string[]).includes(flag), flag);
+  }
 
   // An explicitly named branch is fetched instead of the default one.
   must(["git", "push", "origin", `${first}:refs/heads/release`], repoDir);
@@ -1160,7 +1179,17 @@ test("verify settles against the branch the grant was taken on, not the declarat
 
   // With no override the two agree, so the declaration is still enforced end to end.
   await assert.rejects(verifyCompletion(granted("main"), 1, 1, path.join(dir, "declared"), gh("release")),
-    /granted on main, but PR 1 merged into release\. A grant cannot be retaken/);
+    /granted on main, but PR 1 merged into release\. The PR is already merged/);
+
+  // The refusal must not name a repair that refuses in the state it fires in: this branch is
+  // reached only for a merged PR, where `recover` (observed-dead worker) and `takeover`
+  // (unknown worker) are both unreachable while the worker is live.
+  await assert.rejects(verifyCompletion(granted("main"), 1, 1, path.join(dir, "terminal"), gh("release")),
+    (error: Error) => {
+      assert.doesNotMatch(error.message, /\brecovery or operator takeover\b/);
+      assert.match(error.message, /cannot be settled in band/);
+      return true;
+    });
 
   // The worker's brief names exactly the branch this gate will settle against.
   const pending = run(); pending.tasks[0] = granted("release"); pending.tasks[0].token = "token";

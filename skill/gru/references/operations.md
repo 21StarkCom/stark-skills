@@ -95,8 +95,10 @@ merge with no way back. Git writes that pointer at clone and then only on an exp
 `git remote set-head`, so a checkout made before a default-branch rename still names the
 old branch — which usually still exists and is frozen, so every supplied base passes as
 "the current tip" while the refusal text and `baseEvidence.ref` report a branch the
-engagement never merges into. Pass `--base-ref` whenever the task's PR does not target
-origin's default branch; `verify` refuses a grant whose branch is not the PR's base.
+engagement never merges into. Declare `baseRef` whenever the task's PR does not target
+origin's default branch; reach for `--base-ref` only when one grant has to deviate from
+that declaration. `verify` refuses a PR whose base branch is not the one its grant was
+taken on, and that refusal lands after the merge, where nothing can repair it.
 The check is fail-closed: an unreachable origin, a branch origin does not have, and an
 origin that reports no default branch each refuse and say which, rather than falling back
 to a local ref. A shallow checkout refuses too, by name, on one local probe before any
@@ -127,15 +129,25 @@ the store then calls stale; an observation that outlives the freshness window le
 budget fails as the slow observation it was, with headroom so evidence squeaking under the
 limit cannot trip the store's own check a millisecond later.
 The stale-tip refusal names `--base-ref`, the one repair a leader on another branch needs.
-Name the PR's own base branch: a grant cannot be retaken once the task is `integrating`, so
-a grant taken on the wrong branch leaves a task only `recover` or operator takeover can
-move. A packet regenerated while a grant is pending names that branch to the worker.
+Name the PR's own base branch BEFORE the merge: once the PR has merged into the wrong one,
+nothing repairs it in band. A grant cannot be retaken while the task is `integrating`;
+`recover` needs an observed-dead worker and `takeover` an unknown one, and a worker that
+just merged is normally live and idle, so neither is reachable; and re-granting after a
+recovery would record a tip that already contains the merge, which the reviewed head then
+does not contain. `verify` says exactly that and escalates to the operator.
+A packet regenerated while a grant is pending names that branch to the worker.
 The observation fetches into an invocation-owned `refs/gru/integration/<uuid>` and removes
 it. It also passes `--refmap= --no-tags`: with an explicit refspec git still applies the
 remote's configured refmap opportunistically, so without those a grant — a REFUSED one
 included — would advance `refs/remotes/origin/<branch>` and follow new tags in a ref store
 every linked worktree shares, moving `origin/main` under a Minion mid-rebase. So it writes
-no `FETCH_HEAD`, moves no checkout, and touches no shared ref. `verify` fetches the same way. A task
+no `FETCH_HEAD`, moves no checkout, and touches no shared ref.
+`verify` shares `--no-write-fetch-head --refmap=` and deliberately does NOT pass `--no-tags`
+(STARK-5662): it is a completing operation whose declared checks run against the fetched
+base in a disposable worktree, and this fleet cuts tagged releases, so a `git describe --tags`
+check reports `No names found, cannot describe anything` when the tags were never fetched.
+Verification therefore does add `refs/tags/*` to the shared ref store; the grant, which runs
+on every `integrate` attempt and usually refuses, must not. A task
 that is not in `review`, or an engagement that is not running and reconciled, refuses before
 that fetch rather than after it. `verify` closes the other end: the branch the grant was
 checked against must be the branch the PR actually merged into, so a grant taken at a quiet
@@ -173,7 +185,7 @@ An obsolete leader or revision cannot overwrite current state.
 | `stop` | Current engagement | Dispatch frozen; interruption pending |
 | `interrupt` | Exact live worker identity | Hermod interrupt and observation |
 | `stopped` | Idle interrupted or terminal worker | Stopped assignment; ownership retained |
-| `retire` | Verified completed worker observed idle | Surface closed; worktree preserved |
+| `retire` | Settled worker (verified `done`, or `released-unverified`) observed idle | Surface closed; worktree preserved |
 | `sweep` | Alfred ticket `done`/`Closed`; no live Hermod peer bound | Dry run, or with `--apply` ownership released and `swept` recorded |
 
 `reserved` never means started.
