@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
-import { observations, observeOrphan, observeSweep, observeWorkers, packet, type Command, type HermodPeer, type SavedSession } from "./gru_runtime_lib.ts";
+import { inspectUnreviewedMerge, observations, observeOrphan, observeSweep, observeWorkers, packet, type Command, type HermodPeer, type SavedSession } from "./gru_runtime_lib.ts";
 import { ADOPTION_CHECKS, BASE_CHECKS, completionSummary, GruStore, namesTicket, parseEngagement, parseSettlement, parseTakeover, readyReason, repositoryKey, sweepCandidates, verificationReady, type BaseEvidence, type CompletionEvidence, type Engagement, type Run, type SettlementEvidence, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
 
 // Compose the production observation builders with the store: a handwritten "dead"
@@ -338,7 +338,7 @@ const settlementRequest = (r: Run) => ({ run: r.config.id, task: "one", token: r
   operatorRequest: "TEST FIXTURE: release the unreviewed merge while preserving the review gap." });
 function settlementProof(r: Run): SettlementEvidence {
   const { review: _review, verifiedAt: _at, ...proof } = landedProof(r);
-  return { ...proof, checkedAt: new Date().toISOString(), reviewCount: 0, baseTip: "d".repeat(40) };
+  return { ...proof, checkedAt: new Date().toISOString(), reviewCount: 0, baseTip: "d".repeat(40), setup: [] };
 }
 
 test("settlement records an audited release, never verification or dependency readiness, and sweep preserves its reason", async t => {
@@ -386,7 +386,8 @@ test("settlement refuses missing authority, mismatched binding, invalid proof an
   const held = store.owned("demo", "one");
   for (const input of [undefined, {}, ...["operatorRequest", "reason", "run", "task", "token", "pr"].map(k => ({ ...request, [k]: "" })),
     { ...request, noReview: false }, { ...request, noReview: undefined }, { ...request, revision: -1 }, { ...request, extra: "authority" },
-    { ...request, pr: "https://github.com/o/r/pull/0" }]) assert.throws(() => parseSettlement(input));
+    { ...request, pr: "https://github.com/o/r/pull/0" }, { ...request, setup: "bun install" }, { ...request, setup: [[]] },
+    { ...request, setup: [["bun", ""]] }]) assert.throws(() => parseSettlement(input));
   for (const changed of [{ ...request, run: "other" }, { ...request, task: "two" }, { ...request, token: "old" }, { ...request, revision: r.revision - 1 }]) {
     assert.throws(() => store.settleWithoutReview("demo", "leader-one", r.revision, "one", request.token, changed, proof), /does not match/);
   }
@@ -394,7 +395,7 @@ test("settlement refuses missing authority, mismatched binding, invalid proof an
     { ...proof, base: "e".repeat(40) }, { ...proof, head: "bad" }, { ...proof, merge: "bad" }, { ...proof, baseTip: "bad" },
     { ...proof, pr: "https://github.com/o/r/pull/2" }, { ...proof, reviewCount: 1 }, { ...proof, review: "review" },
     { ...proof, verifiedAt: new Date().toISOString() }, { ...proof, checkedAt: new Date(Date.now() - 120_000).toISOString() },
-    { ...proof, ticketState: "in progress" }, { ...proof, checks: [] },
+    { ...proof, ticketState: "in progress" }, { ...proof, checks: [] }, { ...proof, checks: [...proof.checks, ...proof.checks] },
     { ...proof, checks: [{ ...proof.checks[0], exitCode: 1 }] }, { ...proof, checks: [{ ...proof.checks[0], argv: ["true"] }] },
     { ...proof, checks: [{ ...proof.checks[0], log: "" }] },
   ];
@@ -407,6 +408,54 @@ test("settlement refuses missing authority, mismatched binding, invalid proof an
   assert.throws(() => store.settleWithoutReview("demo", "leader-one", r.revision, "one", "old", request, proof), /stale assignment/);
   const { review: _review, ...missingReview } = landedProof(r);
   assert.throws(() => store.complete("demo", "leader-one", r.revision, "one", request.token, missingReview as CompletionEvidence), /review/);
+  const withSetup = { ...request, setup: [["bun", "install", "--frozen-lockfile"]] };
+  for (const setup of [[], [{ argv: ["true"], exitCode: 0, log: "/evidence/setup.log" }],
+    [{ argv: withSetup.setup[0], exitCode: 1, log: "/evidence/setup.log" }], [{ argv: withSetup.setup[0], exitCode: 0, log: "" }]]) {
+    assert.throws(() => store.settleWithoutReview("demo", "leader-one", r.revision, "one", request.token, withSetup, { ...proof, setup }), /setup/);
+    assert.deepEqual(store.owned("demo", "one"), held);
+  }
+});
+
+test("settlement setup shares check timeouts, preserves order, stops on failure and rechecks reviews", async t => {
+  const { r, file } = await orphanedRun(t, true);
+  const task = r.tasks[0]; task.spec.checkTimeoutMs = 1234;
+  const request = { ...settlementRequest(r), setup: [["setup-one"], ["setup-two"]] };
+  const calls: { argv: string[]; cwd?: string; timeout?: number }[] = [];
+  let setupFailure = false, setupTimeout = false, reviewAppears = false, reads = 0;
+  const call: Command = async (argv, cwd, timeout) => {
+    calls.push({ argv, cwd, timeout });
+    const json = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
+    if (argv[0] === "gh") {
+      if (argv[2].endsWith("reviews")) return json(++reads > 1 && reviewAppears ? [[{ id: 1 }]] : [[]]);
+      return json({ merged: true, merged_at: new Date().toISOString(), merge_commit_sha: "c".repeat(40),
+        html_url: request.pr, head: { sha: "b".repeat(40), repo: { full_name: "o/r" } }, base: { ref: "main", repo: { full_name: "o/r" } } });
+    }
+    if (argv[0] === "alfred") return json({ item: { ref: { custom_id: "STARK-100" }, state: "Closed" }, comments: [], comments_read: true });
+    if (argv[0] === "git" && argv[1] === "remote") return { code: 0, stdout: "https://github.com/o/r.git", stderr: "" };
+    if (argv[0] === "git" && argv[1] === "rev-parse") return { code: 0, stdout: (argv.at(-1)!.includes("/head") ? "b" : "d").repeat(40), stderr: "" };
+    return { code: argv[0] === "setup-one" && setupFailure ? 9 : 0,
+      timedOut: argv[0] === "setup-one" && setupTimeout, stdout: "ran", stderr: "" };
+  };
+  const directory = (name: string) => path.join(path.dirname(file), name);
+  for (const timed of [false, true]) {
+    calls.length = 0; reads = 0; setupFailure = !timed; setupTimeout = timed;
+    await assert.rejects(inspectUnreviewedMerge(task, request, directory(timed ? "timeout" : "failed"), call),
+      timed ? /independent setup timed out/ : /independent setup failed/);
+    const commands = calls.filter(c => c.argv[0] !== "git" && c.argv[0] !== "gh");
+    assert.deepEqual(commands.map(c => c.argv), [["setup-one"]], "no later setup or check runs after failure");
+    assert.equal(commands[0].timeout, 1234);
+    assert.ok(calls.some(c => c.argv[1] === "worktree" && c.argv[2] === "remove"));
+  }
+  setupFailure = false; setupTimeout = false; calls.length = 0; reads = 0;
+  const proof = await inspectUnreviewedMerge(task, request, directory("success"), call);
+  const executions = calls.filter(c => c.timeout !== undefined);
+  assert.deepEqual(executions.map(c => c.argv), [...request.setup, ...task.spec.checks]);
+  assert.ok(executions.every(c => c.timeout === 1234 && c.cwd === executions[0].cwd));
+  assert.deepEqual(proof.setup.map(c => c.argv), request.setup);
+  assert.deepEqual(proof.checks.map(c => c.argv), task.spec.checks);
+  assert.equal(reads, 2);
+  reviewAppears = true; reads = 0;
+  await assert.rejects(inspectUnreviewedMerge(task, request, directory("late-review"), call), /no posted review/);
 });
 
 /** Runtime evidence for a linked worktree of /repo, as `inspectAdoption` would record it. */

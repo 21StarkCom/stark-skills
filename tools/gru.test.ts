@@ -14,6 +14,73 @@ import { BASE_CHECKS, GruStore } from "./gru_lib.ts";
 
 const CLI = path.join(import.meta.dirname, "gru.ts");
 
+// Repeatable negative controls. Never mutates the checkout or a real engagement.
+// GRU_SETTLEMENT_MUTATION_SWEEP=1 node --test --test-name-pattern='settlement mutation' tools/gru.test.ts
+test("settlement mutation sweep detects reverted protections", { skip: process.env.GRU_SETTLEMENT_MUTATION_SWEEP !== "1" }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-settlement-mutations-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const copy = path.join(dir, "tools");
+  fs.cpSync(import.meta.dirname, copy, { recursive: true, filter: source => path.basename(source) !== "node_modules" });
+  const originals = new Map(["gru.ts", "gru_lib.ts", "gru_runtime_lib.ts"].map(name => [name, fs.readFileSync(path.join(copy, name), "utf8")]));
+  const { NODE_TEST_CONTEXT: _context, ...env } = process.env;
+  const execute = (cli: boolean) => spawnSync(process.execPath, ["--test", "--test-reporter=spec", "--test-name-pattern",
+    cli ? "settle requires written" : "settlement records|settlement refuses|settlement setup", path.join(copy, cli ? "gru.test.ts" : "gru_lib.test.ts")],
+  { encoding: "utf8", timeout: 120_000, env: { ...env, GRU_SETTLEMENT_MUTATION_SWEEP: "0" } });
+  for (const cli of [false, true]) {
+    const baseline = execute(cli);
+    assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
+  }
+  const mutants: [string, string, string, boolean, string?][] = [
+    ["gru.ts", '      flag("file");', "", true],
+    ["gru_lib.ts", 'value.noReview === true', 'true', false],
+    ["gru_lib.ts", 'nonempty(value[key]), `settlement ${key} is required`', 'true, `settlement ${key} is required`', false],
+    ["gru_lib.ts", 'request.run === id && request.task === taskId && request.token === token && request.revision === revision', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.base === task.integrationBase', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'isRevision(sha)', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.pr.toLowerCase() === request.pr.toLowerCase()', 'true', false],
+    ["gru_lib.ts", 'evidence.reviewCount === 0 && !("review" in evidence) && !("verifiedAt" in evidence)', 'true', false],
+    ["gru_lib.ts", 'fresh({ observedAt: evidence.checkedAt })', 'true', false],
+    ["gru_lib.ts", 'ticketClosed(evidence.ticketState)', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.checks.length === task.spec.checks.length', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.checks[i].exitCode === 0', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'JSON.stringify(evidence.checks[i].argv) === JSON.stringify(argv)', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'nonempty(evidence.checks[i].log)', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.setup.length === setup.length', 'true', false],
+    ["gru_lib.ts", 'evidence.setup[i].exitCode === 0', 'true', false],
+    ["gru_lib.ts", 'JSON.stringify(evidence.setup[i].argv) === JSON.stringify(argv)', 'true', false],
+    ["gru_lib.ts", 'nonempty(evidence.setup[i].log)', 'true', false],
+    ["gru_lib.ts", 'this.event(run, "settled-without-review",', 'this.event(run, "verified",', false],
+    ["gru_lib.ts", 'task.phase = "released-unverified";', 'task.phase = "done";', false],
+    ["gru_lib.ts", 'task.integrationBase && !task.settlement', 'task.integrationBase', false],
+    ["gru_lib.ts", 'task.phase = task.settlement ? "released-unverified" : "swept";', 'task.phase = "swept";', false],
+    ["gru_lib.ts", '&& !t.swept && (t.phase', '&& (t.phase', false],
+    ["gru.ts", 'summary: completionSummary(run), ready:', 'ready:', true],
+    ["gru_runtime_lib.ts", 'if (!pr.merged || !pr.merged_at || !isRevision(pr.merge_commit_sha))', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'if (!sameRepo(pr.head.repo) || !sameRepo(pr.base.repo))', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'if (task.baseEvidence && task.baseEvidence.ref !== pr.base.ref)', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);', '', true],
+    ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);', '', true],
+    ["gru_runtime_lib.ts", '!pages.every(p => Array.isArray(p) && p.length === 0)', 'false', true],
+    ["gru_runtime_lib.ts", 'if (result.code !== 0 || result.timedOut)', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS', 'DEFAULT_CHECK_TIMEOUT_MS', false],
+    ["gru_runtime_lib.ts", 'await noReviews();\n      const proof:', 'const proof:', false],
+  ];
+  for (const [name, from, to, cli, scope] of mutants) {
+    const original = originals.get(name)!;
+    const offset = scope ? original.indexOf(scope) : 0;
+    assert.ok(offset >= 0, `missing mutation scope ${scope}`);
+    const index = original.indexOf(from, offset);
+    assert.ok(index >= 0, `missing mutation ${from}`);
+    fs.writeFileSync(path.join(copy, name), original.slice(0, index) + to + original.slice(index + from.length));
+    const result = execute(cli);
+    fs.writeFileSync(path.join(copy, name), original);
+    assert.equal(result.status, 1, `mutation survived or did not execute: ${from}\n${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /AssertionError/, `expected assertion failure, not startup failure: ${from}\n${result.stdout}${result.stderr}`);
+    t.diagnostic(`KILLED: ${name}: ${from}`);
+  }
+  t.diagnostic(`${mutants.length}/${mutants.length} settlement mutations rejected`);
+});
+
 test("rebrief-check is a worker command and succeeds without creating or opening Gru state", async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-rebrief-cli-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -309,8 +376,12 @@ test("gru CLI: settle requires written authority and all non-review proof; statu
   const unrelated = git(repo, "commit-tree", "HEAD^{tree}", "-m", "unrelated history").trim();
   git(repo, "push", "-q", "origin", "main", "HEAD:refs/pull/1/head");
   config.tasks[0].repositoryKey = "o/r";
+  const setupMarker = path.join(dir, "setup-ran");
+  const setup = [
+    [process.execPath, "-e", "require('fs').writeFileSync(process.env.GRU_SETUP_RUN_MARKER, 'ran'); console.log('setup stage'); process.exit(Number(process.env.GRU_SETTLE_SETUP_FAIL || 0))"],
+    [process.execPath, "-e", "if (!require('fs').existsSync(process.env.GRU_SETUP_RUN_MARKER)) process.exit(8); require('fs').writeFileSync('setup-proof', 'installed')"],
+  ];
   config.tasks[0].checks = [
-    [process.execPath, "-e", "require('fs').writeFileSync('setup-proof', 'installed')"],
     [process.execPath, "-e", "if (!require('fs').existsSync('setup-proof')) process.exit(9); console.log('disposable checks passed'); process.exit(Number(process.env.GRU_SETTLE_CHECK_FAIL || 0))"],
   ];
   const store = new GruStore(state); t.after(() => store.close());
@@ -344,11 +415,11 @@ if (args[1].endsWith('/reviews')) {
 const r = JSON.parse(require('fs').readFileSync(${JSON.stringify(records)}, 'utf8'));
 console.log(JSON.stringify({item:{ref:{custom_id:'STARK-1'},state:r.ticket},comments:[],comments_read:true}));
 `, { mode: 0o755 });
-  const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}`, GRU_SETUP_RUN_MARKER: setupMarker };
   const args = ["--run", "cli", "--revision", String(current.revision), "--task", "t", "--token", token, "--state", state];
   // This is synthetic test authority against a throwaway store, never the live rehearsal file.
   const authorization = path.join(dir, "fixture-operator.json");
-  const request = { run: "cli", task: "t", token, revision: current.revision, pr: pr.html_url, noReview: true,
+  const request = { run: "cli", task: "t", token, revision: current.revision, pr: pr.html_url, noReview: true, setup,
     reason: "Legacy merge has no review", operatorRequest: "TEST FIXTURE: release this unreviewed grant" };
   fs.writeFileSync(authorization, JSON.stringify(request));
   const settledArgs = ["settle", ...args, "--file", authorization];
@@ -366,6 +437,7 @@ console.log(JSON.stringify({item:{ref:{custom_id:'STARK-1'},state:r.ticket},comm
     fs.writeFileSync(authorization, JSON.stringify({ ...request, [field]: value }));
     await refuses(/does not match/);
   }
+  assert.equal(fs.existsSync(setupMarker), false, "binding refuses before setup executes");
   fs.writeFileSync(authorization, JSON.stringify({ ...request, noReview: false }));
   await refuses(/noReview/);
   fs.writeFileSync(authorization, JSON.stringify({ ...request, pr: "https://github.com/other/repo/pull/1" }));
@@ -386,6 +458,10 @@ console.log(JSON.stringify({item:{ref:{custom_id:'STARK-1'},state:r.ticket},comm
   world.reviews = {}; save(); await refuses(/no posted review/);
   world.reviews = [[]]; world.ticket = "in progress"; save(); await refuses(/completion milestone/);
   world.ticket = "Closed"; save();
+  await refuses(/independent setup failed/, settledArgs, { GRU_SETTLE_SETUP_FAIL: "6" });
+  fs.writeFileSync(authorization, JSON.stringify({ ...request, setup: undefined }));
+  await refuses(/independent check failed/);
+  fs.writeFileSync(authorization, JSON.stringify(request));
   await refuses(/independent check failed/, settledArgs, { GRU_SETTLE_CHECK_FAIL: "7" });
   const result = await run(settledArgs, "leader-one", env);
   assert.equal(result.code, 0, result.error);
@@ -394,7 +470,17 @@ console.log(JSON.stringify({item:{ref:{custom_id:'STARK-1'},state:r.ticket},comm
   assert.equal(settled.tasks[0].phase, "released-unverified");
   assert.equal(settled.tasks[0].evidence, undefined);
   assert.deepEqual(store.owned("cli", "t"), held.filter(r => !r.startsWith("merge:") && !r.startsWith("merge-resource:")));
-  assert.equal(settled.tasks[0].settlement!.evidence.checks.length, 2);
+  assert.equal(settled.tasks[0].settlement!.evidence.checks.length, 1);
+  assert.deepEqual(settled.tasks[0].spec.checks, config.tasks[0].checks, "setup never rewrites declared checks");
+  const setupEvidence = settled.tasks[0].settlement!.evidence.setup;
+  assert.deepEqual(setupEvidence.map(c => c.argv), setup);
+  for (const entry of setupEvidence) {
+    const log = JSON.parse(fs.readFileSync(entry.log, "utf8"));
+    assert.equal(log.kind, "setup");
+    assert.match(path.basename(entry.log), /^setup-/);
+    assert.equal(log.code, 0);
+    assert.equal(log.cwd, JSON.parse(fs.readFileSync(settled.tasks[0].settlement!.evidence.checks[0].log, "utf8")).cwd);
+  }
   for (const check of settled.tasks[0].settlement!.evidence.checks) {
     const log = JSON.parse(fs.readFileSync(check.log, "utf8"));
     assert.equal(log.head, head);

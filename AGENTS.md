@@ -87,6 +87,8 @@ Gru preserves session worktrees and ownership after completion. Native worker ob
 
 Gru's `settle --file` accepts an operator-authored request bound to run/task/token/revision
 for a merged PR with zero reviews, retaining all other verification requirements.
+Optional setup in that same request runs before unchanged checks with separate evidence;
+it is never inferred, and any failure refuses settlement.
 It records `settled-without-review`, releases only integration locks, and reports
 `released-unverified` with its reason in status and completion summaries. It never
 unblocks dependents. Sweep can release remaining reservations on its usual proof,

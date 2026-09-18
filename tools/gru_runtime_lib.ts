@@ -862,22 +862,27 @@ async function inspectCompletion(task: Assignment, prNumber: number,
     // Existing evidence remains untouched. A fresh directory prevents stale build products passing.
     await git(["worktree", "add", "--detach", verifyTree, baseTip]);
     cleanup.unshift(["worktree", "remove", "--force", verifyTree]);
-    const checks: CompletionEvidence["checks"] = [];
-    for (let i = 0; i < task.spec.checks.length; i++) {
-      const argv = task.spec.checks[i];
-      const result = await call(argv, verifyTree, task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS);
-      const log = path.join(evidenceDir, `check-${task.token}-${i}.log`);
-      fs.writeFileSync(log, JSON.stringify({ argv, cwd: verifyTree, head: baseTip, ...result }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-      if (result.code !== 0 || result.timedOut) throw new Error(`independent check ${result.timedOut ? "timed out" : "failed"}; evidence: ${log}`);
-      checks.push({ argv, exitCode: result.code, log });
-    }
+    const runCommands = async (commands: string[][], kind: "setup" | "check") => {
+      const results: CompletionEvidence["checks"] = [];
+      for (let i = 0; i < commands.length; i++) {
+        const argv = commands[i];
+        const result = await call(argv, verifyTree, task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS);
+        const log = path.join(evidenceDir, `${kind}-${task.token}-${i}.log`);
+        fs.writeFileSync(log, JSON.stringify({ ...(kind === "setup" ? { kind } : {}), argv, cwd: verifyTree, head: baseTip, ...result }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+        if (result.code !== 0 || result.timedOut) throw new Error(`independent ${kind} ${result.timedOut ? "timed out" : "failed"}; evidence: ${log}`);
+        results.push({ argv, exitCode: result.code, log });
+      }
+      return results;
+    };
+    const setup = "request" in authority ? await runCommands(authority.request.setup ?? [], "setup") : [];
+    const checks = await runCommands(task.spec.checks, "check");
     const ticketState = await readTicketState(task.spec.ticket, call, repoDir);
     if ("request" in authority) {
       if (!ticketClosed(ticketState)) throw new Error("repository completion milestone not recorded in Alfred");
       // Checks can be long; a review posted while they ran must not become a false no-review attestation.
       await noReviews();
       const proof: SettlementEvidence = { head: pr.head.sha, base: task.integrationBase, merge: pr.merge_commit_sha,
-        pr: pr.html_url, checks, checkedAt: new Date().toISOString(), ticketState, reviewCount: 0, baseTip };
+        pr: pr.html_url, checks, setup, checkedAt: new Date().toISOString(), ticketState, reviewCount: 0, baseTip };
       fs.writeFileSync(path.join(evidenceDir, `settlement-${task.token}.json`), JSON.stringify({ ...proof, prRecord: pr, request: authority.request }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
       return proof;
     }

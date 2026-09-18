@@ -89,6 +89,8 @@ It checks complete Hermod absence, fences the old worker, preserves budgets and 
 ownership, and permits an explicitly selected provider/new worktree. Unknown stays unknown.
 settle requires --file with run/task/token/revision, a GitHub pr URL, noReview: true,
 reason, and the operator's actual operatorRequest. Never author your own authorization.
+Optional setup argv arrays in that same bound request run before the unchanged checks;
+never infer setup. Setup shares their timeout, fails closed, and has separate setup logs.
 It requires the current leader, running/reconciled state, the same integration phase,
 merged PR, both ancestry checks, closed ticket and green disposable checks as verify.
 GitHub must report zero reviews. It records settled-without-review, releases only merge

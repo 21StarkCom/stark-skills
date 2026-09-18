@@ -195,6 +195,8 @@ Only verified completion releases dependent tasks.
 A merged grant with no posted review needs the operator-authored
 [settlement request](references/operations.md#operator-settlement-of-a-merged-grant-without-review).
 `settle --file` retains every non-review check and records `settled-without-review`.
+Optional operator-authored setup commands run before unchanged checks, fail closed,
+and have separate evidence; never infer setup or accept a failing check.
 Never author that authorization yourself or substitute a peer's permission.
 Report it as `released-unverified` with the reason in status and the completion
 summary; never count it as verified or release its dependents. Sweep can release

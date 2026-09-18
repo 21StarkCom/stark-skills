@@ -567,7 +567,8 @@ The operator-authored file pins the current assignment and explains the exceptio
   "pr": "https://github.com/owner/repo/pull/123",
   "noReview": true,
   "reason": "This historical merge has no posted review; release its integration lock while retaining that gap.",
-  "operatorRequest": "The operator's actual instruction authorizing this settlement"
+  "operatorRequest": "The operator's actual instruction authorizing this settlement",
+  "setup": [["bun", "install", "--frozen-lockfile"]]
 }
 ```
 
@@ -584,8 +585,20 @@ The only exception is the absent review. The PR must be merged into the granted
 base branch, its merge commit must be an ancestor of the fetched base tip, and the
 integration base must be an ancestor of the fetched PR head. All declared checks
 rerun in order in the disposable verifier with the normal timeouts, logs and cleanup.
-Alfred must report the exact ticket `done` or `Closed`. Include dependency installation
-in declared checks; settlement cannot silently add setup or skip a failing check.
+Alfred must report the exact ticket `done` or `Closed`.
+
+For a historical task whose declared checks omit dependency installation, the operator
+may supply optional `setup` argv arrays in this same request. The example is illustrative,
+never a default. With no `setup`, no preparation is added. Never infer it from repository
+contents, lockfiles or detected package managers. The full request binding is checked
+before any command runs. Setup executes in order in the same disposable checkout,
+before every unchanged declared check, with the same per-check timeout. Any nonzero
+exit, timeout or command error fails settlement without retry. Setup evidence lives in
+its own `setup` array and `setup-*` logs explicitly labelled `kind: "setup"`; check logs
+and results remain separate. Stored task checks and ordinary `verify` are unchanged.
+Setup prepares dependencies, never substitutes for tests or rewrites their outcomes.
+Never accept a failing or non-runnable check. A check that passes only because setup
+performed the check's job is a defect to report, not evidence of completion.
 Any failure retains ownership. Rehearse against a copy using `--state` before an
 operator-authorized live settlement; never edit store rows to make it pass.
 

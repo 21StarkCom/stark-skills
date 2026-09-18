@@ -88,11 +88,14 @@ export interface SettlementRequest {
   noReview: true;
   reason: string;
   operatorRequest: string;
+  /** Explicit operator-supplied preparation, never inferred from the repository. */
+  setup?: string[][];
 }
 export interface SettlementEvidence extends Omit<CompletionEvidence, "review" | "verifiedAt"> {
   checkedAt: string;
   reviewCount: 0;
   baseTip: string;
+  setup: CompletionEvidence["checks"];
 }
 export interface SettlementRecord {
   request: SettlementRequest;
@@ -308,12 +311,14 @@ function isProvider(value: unknown): value is Provider {
 }
 export function parseSettlement(value: unknown): SettlementRequest {
   requireValue(isRecord(value), "settlement request must be an object");
-  const keys = ["run", "task", "token", "revision", "pr", "noReview", "reason", "operatorRequest"];
+  const keys = ["run", "task", "token", "revision", "pr", "noReview", "reason", "operatorRequest", "setup"];
   requireValue(Object.keys(value).every(k => keys.includes(k)), "unknown settlement request field");
   for (const key of ["run", "task", "token", "pr", "reason", "operatorRequest"]) requireValue(nonempty(value[key]), `settlement ${key} is required`);
   requireValue(Number.isSafeInteger(value.revision) && Number(value.revision) >= 0, "settlement revision is required");
   requireValue(/^https:\/\/github\.com\/[^/?#]+\/[^/?#]+\/pull\/[1-9]\d*$/.test(value.pr as string), "settlement requires a GitHub PR URL");
   requireValue(value.noReview === true, "settlement must explicitly state noReview: true");
+  requireValue(value.setup === undefined || (Array.isArray(value.setup) && value.setup.every(argv => stringList(argv) && argv.length > 0)),
+    "settlement setup must contain explicit command argument arrays");
   return structuredClone(value) as unknown as SettlementRequest;
 }
 /** A release can finish an engagement, but can never enter its verified count. */
@@ -1015,6 +1020,9 @@ export class GruStore {
       requireValue(evidence.pr.toLowerCase() === request.pr.toLowerCase(), "settlement PR does not match operator request");
       requireValue(evidence.reviewCount === 0 && !("review" in evidence) && !("verifiedAt" in evidence), "settlement requires absence of posted reviews");
       requireValue(fresh({ observedAt: evidence.checkedAt }), "settlement evidence is stale; rerun checks");
+      const setup = request.setup ?? [];
+      requireValue(evidence.setup.length === setup.length, "missing or extra settlement setup evidence");
+      setup.forEach((argv, i) => requireValue(JSON.stringify(evidence.setup[i].argv) === JSON.stringify(argv) && evidence.setup[i].exitCode === 0 && nonempty(evidence.setup[i].log), "setup failed, changed, or missing output"));
       requireValue(ticketClosed(evidence.ticketState), "repository completion milestone not recorded in Alfred");
       requireValue(evidence.checks.length === task.spec.checks.length, "missing completion checks");
       task.spec.checks.forEach((argv, i) => requireValue(JSON.stringify(evidence.checks[i].argv) === JSON.stringify(argv) && evidence.checks[i].exitCode === 0 && nonempty(evidence.checks[i].log), "check failed, changed, or missing output"));
