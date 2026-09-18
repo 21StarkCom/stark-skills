@@ -206,8 +206,13 @@ jobs:
               unreleased && !inserted && /^## \[/ { flush_notes(); unreleased = 0 }
               !unreleased && !inserted && /^## \[[0-9]/ { flush_notes() }
               unreleased && !inserted { body[n++] = $0; next }
-              { print }
-              END { if (!inserted) { if (!unreleased) print ""; flush_notes() } }
+              { last = $0; print }
+              # Appending at EOF needs one blank line between the old tail and the new heading —
+              # but only one. A CHANGELOG that already ends with a blank line got a second,
+              # since this branch printed unconditionally. `last` is the final line actually
+              # emitted, and it is only consulted on the !unreleased path, where the catch-all
+              # above printed every record.
+              END { if (!inserted) { if (!unreleased && last !~ /^[[:space:]]*$/) print ""; flush_notes() } }
             ' CHANGELOG.md > CHANGELOG.md.next
             mv CHANGELOG.md.next CHANGELOG.md
           fi

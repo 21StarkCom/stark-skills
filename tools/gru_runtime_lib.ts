@@ -796,7 +796,7 @@ export async function observeBase(task: Assignment, base: string, ref?: string,
 /** Read authoritative PR/commit state and rerun declared checks in a fresh verification worktree. */
 export async function verifyCompletion(task: Assignment, prNumber: number, reviewId: number, evidenceDir: string,
   call: Command = command): Promise<CompletionEvidence> {
-  if (!Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
+  if (!Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("a posted review id is required");
   return inspectCompletion(task, prNumber, { reviewId }, evidenceDir, call) as Promise<CompletionEvidence>;
 }
 
@@ -813,7 +813,10 @@ export async function inspectUnreviewedMerge(task: Assignment, input: Settlement
 async function inspectCompletion(task: Assignment, prNumber: number,
   authority: { reviewId: number } | { request: SettlementRequest }, evidenceDir: string, call: Command): Promise<CompletionEvidence | SettlementEvidence> {
   if (!verificationReady(task) || !task.token) throw new Error("integration reservation required");
-  if (!Number.isSafeInteger(prNumber) || prNumber < 1) throw new Error("PR and posted review ids required");
+  // The PR number is all this shared path validates; the review id belongs to `verifyCompletion`
+  // alone, and naming it here reported "posted review ids required" on a settlement that has
+  // none by definition — a refusal pointing at evidence the command refuses to accept.
+  if (!Number.isSafeInteger(prNumber) || prNumber < 1) throw new Error("a positive PR number is required");
   const repoDir = task.spec.repo;
   const git = (args: string[]) => checked(call, ["git", ...args], repoDir);
   const repo = await originRepository(repoDir, call);
