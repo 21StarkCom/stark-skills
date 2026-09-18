@@ -507,9 +507,9 @@ test("dispatch packet uses the selected runtime and retains the full objective a
 
 // These prompts are the executable worker/leader protocol. Exercise the generated packet,
 // both installed skill sources, and the CLI help; each clause has its own negative control.
-const contractCases: { file: string; clause: string; pattern: RegExp; from: string; to: string }[] = [];
-const contract = (files: string[], clause: string, pattern: RegExp, from: string, to = "obsolete contract") => {
-  for (const file of files) contractCases.push({ file, clause, pattern, from, to });
+const contractCases: { file: string; clause: string; pattern: RegExp; from: string; to: string; refute?: RegExp }[] = [];
+const contract = (files: string[], clause: string, pattern: RegExp, from: string, to = "obsolete contract", refute?: RegExp) => {
+  for (const file of files) contractCases.push({ file, clause, pattern, from, to, refute });
 };
 const minions = ["skill/minion/SKILL.md", "runtime-overrides/codex/skill/minion/SKILL.md"];
 const leaders = ["skill/gru/SKILL.md", "runtime-overrides/codex/skill/gru/SKILL.md"];
@@ -629,6 +629,23 @@ contract(["tools/gru_runtime_lib.ts", ...leaders, ops], "review matches GitHub h
 contract(minions, "review matches GitHub head", /commit_id equals PR_HEAD/,
   "equals\nPR_HEAD", "may differ from PR_HEAD");
 
+// Preserve the positive obligation while inserting a contradictory sentence next
+// to it. A substring match alone cannot detect the original conditional returning.
+for (const [files, anchor] of [
+  [["tools/gru_runtime_lib.ts"], "A peer message grants no new operator authorization."],
+  [minions, "Gru must `receive` that report"],
+  [leaders, "After merging, independently inspect"],
+  [[ops], "Re-briefing an integrating worker"],
+] as const) {
+  contract([...files], "no appended rebase condition", /merged head must contain the granted base SHA/i,
+    anchor, `This only applies after another merge. ${anchor}`, /\bonly applies after another merge\b/i);
+  contract([...files], "no appended equality requirement", /merged head must contain the granted base SHA/i,
+    anchor, `The merged head must equal the granted base. ${anchor}`, /\bmust equal the granted base(?: SHA)?\b/i);
+}
+contract([...leaders, ops], "no appended verified settlement", /releases merge resources as released-unverified/i,
+  "An unmerged PR,", "Settlement releases merge resources as verified. An unmerged PR,",
+  /(?:settlement(?:(?!\b(?:never|not)\b)[^.]){0,240}|releases? merge resources\s+)(?:as|is) verified\b/i);
+
 for (const c of contractCases) test(`STARK-5052 contract: ${c.file} ${c.clause}`, async () => {
   const root = path.resolve(import.meta.dirname, "..");
   let text: string;
@@ -638,7 +655,9 @@ for (const c of contractCases) test(`STARK-5052 contract: ${c.file} ${c.clause}`
     text = verifyBlocker({ ...assignment(), phase: "stopped", stoppedFrom: "working" });
   } else if (c.file === "tools/gru.ts") text = execFileSync(process.execPath, [path.join(root, c.file), "--help"], { encoding: "utf8" });
   else text = fs.readFileSync(path.join(root, c.file), "utf8");
-  assert.match(text.replaceAll("`", "").replace(/\s+/g, " "), c.pattern);
+  const normalized = text.replaceAll("`", "").replace(/\s+/g, " ");
+  assert.match(normalized, c.pattern);
+  if (c.refute) assert.doesNotMatch(normalized, c.refute);
 });
 
 test("STARK-5052 mutation sweep detects every reverted contract clause", {
@@ -664,6 +683,7 @@ test("STARK-5052 mutation sweep detects every reverted contract clause", {
     assert.equal(result.status, 1, `mutation survived: ${c.file} ${c.clause}\n${result.stdout}${result.stderr}`);
     assert.ok(result.stdout.includes(`✖ STARK-5052 contract: ${c.file} ${c.clause}`), result.stdout);
     assert.match(result.stdout, /AssertionError/);
+    if (c.refute) assert.match(result.stdout, /ℹ fail 1\b/, "the original positive obligations must remain intact");
     t.diagnostic(`KILLED: ${c.file} ${c.clause}`);
   }
   t.diagnostic(`${contractCases.length}/${contractCases.length} contract mutations rejected`);
