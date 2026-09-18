@@ -4,8 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { ADOPTION_CHECKS, assertAbsentWorktree, assertLeadershipTransfer, canonicalWorktree, fresh, namesTicket, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, sweepCandidates, verificationReady } from "./gru_lib.ts";
-import type { Assignment, CompletionEvidence, LeadershipEvidence, LeadershipTransfer, Observation, OrphanEvidence, Provider, Run, SweepEvidence, Worker, WorktreeAdoption } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, assertAbsentWorktree, assertLeadershipTransfer, BASE_CHECKS, canonicalWorktree, fresh, namesTicket, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, sweepCandidates, verificationReady } from "./gru_lib.ts";
+import type { Assignment, BaseEvidence, CompletionEvidence, LeadershipEvidence, LeadershipTransfer, Observation, OrphanEvidence, Provider, Run, SweepEvidence, Worker, WorktreeAdoption } from "./gru_lib.ts";
 
 export interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut?: boolean }
 export type Command = (argv: string[], cwd?: string, timeoutMs?: number) => Promise<CommandResult>;
@@ -593,6 +593,81 @@ export async function receive(run: Run, messageId: string, call: Command = comma
     kind: body.kind as "ack" | "progress" | "blocked" | "ready" | "complete", message: body.message };
 }
 
+/** The base branch to read the tip from when the leader names none: origin's default branch,
+ * asked of ORIGIN. Not the local `refs/remotes/origin/HEAD`: git writes that pointer once at
+ * clone and then only on an explicit `git remote set-head`, so a checkout made before a
+ * default-branch rename still names the old branch. That branch usually still exists and is
+ * frozen, which makes every supplied base "the current tip" — the whole guard silently off
+ * while the refusal text, the docs, and the recorded `baseEvidence.ref` all report it on.
+ * A grant already costs one network round trip; reading the name over the same connection
+ * keeps the one local input that could lie out of the decision. */
+async function defaultBaseRef(repoDir: string, call: Command): Promise<string> {
+  const head = await call(["git", "ls-remote", "--symref", "origin", "HEAD"], repoDir);
+  if (head.code !== 0) {
+    throw new Error(`cannot read origin's default branch in ${repoDir}: ${(head.stderr || head.stdout).trim() || `git exited ${head.code}`}; name the base branch with --base-ref`);
+  }
+  // `ref: refs/heads/main\tHEAD`, then the SHA line. An origin with no commits yet reports
+  // neither, so an empty match is a real absence rather than a parse failure.
+  const symref = /^ref:\s+refs\/heads\/(\S+)\s+HEAD$/m.exec(head.stdout);
+  if (!symref) throw new Error(`origin reports no default branch for ${repoDir}; name the base branch with --base-ref`);
+  return symref[1];
+}
+/** Gather the git facts `baseRefusal` judges: that the repository is the task's, that it holds
+ * the supplied base as a commit, what the base branch's tip is right now, and which of this
+ * engagement's verified merges the base contains. Fail closed — an unfetchable branch, an
+ * unresolvable ref, or a base this repository does not have refuses here, naming which. */
+export async function observeBase(task: Assignment, base: string, priorMerges: string[], ref?: string,
+  call: Command = command): Promise<BaseEvidence> {
+  if (!/^[0-9a-f]{40,64}$/.test(base)) throw new Error("integration requires an observed base SHA");
+  const repoDir = task.spec.repo;
+  const repositoryKey = await canonicalRepository(repoDir, call);
+  const expected = taskRepositoryKey(task.spec);
+  if (repositoryKey !== expected) throw new Error(`integration base repository mismatch: ${repoDir} is ${repositoryKey}, not ${expected}`);
+  const branch = ref ?? await defaultBaseRef(repoDir, call);
+  // check-ref-format exits 1 silently on a malformed name, so say what was rejected.
+  if ((await call(["git", "check-ref-format", `refs/heads/${branch}`], repoDir)).code !== 0) {
+    throw new Error(`invalid base branch name ${JSON.stringify(branch)}`);
+  }
+  // Each invocation owns its ref, so concurrent grants in one repository cannot overwrite
+  // each other's fetch, and none of them writes the shared FETCH_HEAD.
+  const temp = `refs/gru/integration/${randomUUID()}/base`;
+  try {
+    const observedAt = new Date().toISOString();
+    const fetched = await call(["git", "fetch", "--no-write-fetch-head", "origin", `refs/heads/${branch}:${temp}`], repoDir);
+    if (fetched.code !== 0) throw new Error(`cannot fetch refs/heads/${branch} from origin in ${repoDir}: ${(fetched.stderr || fetched.stdout).trim() || `git exited ${fetched.code}`}`);
+    const tip = await checked(call, ["git", "rev-parse", "--verify", `${temp}^{commit}`], repoDir);
+    // `--verify --quiet` exits 1 on an unknown object instead of printing git's fatal; a base
+    // from another repository, or a typo, lands here rather than passing the shape check alone.
+    const resolved = await call(["git", "rev-parse", "--verify", "--quiet", `${base}^{commit}`], repoDir);
+    if (resolved.code !== 0 || resolved.stdout.trim() !== base) throw new Error(`integration base ${base} is not a commit in ${repositoryKey}`);
+    const contains: string[] = [];
+    for (const sha of [...new Set(priorMerges)]) {
+      const ancestor = await call(["git", "merge-base", "--is-ancestor", sha, base], repoDir);
+      // 0 contained, 1 not contained. 128 is an unknown object: the fetch above brought the
+      // base branch, so a merge this repository still lacks is not in the base's history
+      // either — not contained, not an error. Anything else (a timeout, a signal) is a failed
+      // observation, so refuse rather than record silence as a clean comparison.
+      if (ancestor.code === 0) contains.push(sha);
+      else if (ancestor.code !== 1 && ancestor.code !== 128) {
+        throw new Error(`cannot compare verified merge ${sha} against ${base}: ${(ancestor.stderr || ancestor.stdout).trim() || `git exited ${ancestor.code}`}`);
+      }
+    }
+    return { observedAt, repositoryKey, ref: branch, tip, base, contains, checks: [...BASE_CHECKS] };
+  } finally {
+    // The grant's verdict is already decided; a leftover private ref is noise, not a failure.
+    // A cleanup that THROWS is the same noise, so catch it here: an unguarded `await` in a
+    // `finally` replaces the refusal the operator has to read ("not the current main tip X")
+    // with a spawn error from the ref deletion. `verifyCompletion` guards its cleanup for
+    // exactly this reason; the two must not drift.
+    try {
+      const removed = await call(["git", "update-ref", "-d", temp], repoDir);
+      if (removed.code !== 0) process.stderr.write(`gru: could not remove ${temp}: ${(removed.stderr || removed.stdout).trim()}\n`);
+    } catch (error) {
+      process.stderr.write(`gru: could not remove ${temp}: ${String(error)}\n`);
+    }
+  }
+}
+
 /** Read authoritative PR/commit state and rerun declared checks in a fresh verification worktree. */
 export async function verifyCompletion(task: Assignment, prNumber: number, reviewId: number, evidenceDir: string,
   call: Command = command): Promise<CompletionEvidence> {
@@ -607,6 +682,14 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   // GitHub reports canonical case, and a deleted fork reports head.repo as null.
   const sameRepo = (r: { full_name?: string } | null | undefined) => r?.full_name?.toLowerCase() === repo.toLowerCase();
   if (!sameRepo(pr.head.repo) || !sameRepo(pr.base.repo)) throw new Error("PR repository mismatch");
+  // `observeBase` validated the grant against ONE base branch's tip, and scoped the
+  // verified-merge floor to that branch. Settling it with a PR merged into a different branch
+  // would reopen the exact window it closes: `--base-ref` is operator-supplied, so a grant
+  // taken at a quiet branch's tip (current by definition, empty floor) could otherwise be
+  // discharged by a merge into `main` that skipped every other task's changes.
+  if (task.baseEvidence && task.baseEvidence.ref !== pr.base.ref) {
+    throw new Error(`integration base was granted on ${task.baseEvidence.ref}, but PR ${prNumber} merged into ${pr.base.ref}`);
+  }
   const review = await api(`pulls/${prNumber}/reviews/${reviewId}`);
   if (review.commit_id !== pr.head.sha || !review.submitted_at || !["COMMENTED", "APPROVED"].includes(review.state)) throw new Error("posted review does not cover the merged PR head");
   await git(["check-ref-format", `refs/heads/${pr.base.ref}`]);

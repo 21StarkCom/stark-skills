@@ -4,9 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
+import { canonicalWorktree, GruStore, parseEngagement, parseTakeover, verificationReady, verifiedMerges } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
-import { canonicalRepository, checkLeadershipTransfer, checkRebrief, discoverWorker, inspectAdoption, interruptWorker, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, checkRebrief, discoverWorker, inspectAdoption, interruptWorker, observeBase, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -27,7 +27,7 @@ Usage: node tools/gru.ts <command> [options]
   reconnected  --run ID --revision N --task ID --token TOKEN
   recover      --run ID --revision N --task ID --token TOKEN
   takeover     --run ID --revision N --task ID --token TOKEN --file operator-request.json
-  integrate    --run ID --revision N --task ID --token TOKEN --base SHA
+  integrate    --run ID --revision N --task ID --token TOKEN --base SHA [--base-ref BRANCH]
   verify       --run ID --revision N --task ID --token TOKEN --pr N --review N
   stop         --run ID --revision N
   interrupt    --run ID --revision N --task ID --token TOKEN
@@ -54,6 +54,14 @@ same repository whose directory or branch names the ticket, with no other unswep
 declaring it, no other task owning it, and no takeover having fenced it; attach then
 adopts that path, audited, and issues a new token for the fresh packet. Anything else
 refuses, as does the leader's own session; identity refusals are named before git is read.
+integrate checks --base against the repository, not just its hex shape: it fetches the
+base branch from origin (--base-ref BRANCH, else the default branch origin reports, asked
+of origin rather than read from the local refs/remotes/origin/HEAD) and refuses
+unless the SHA is a commit that repository holds, is that branch's current tip, and
+contains every merge this engagement has already verified there. A refusal names the
+current tip. A failed fetch, an unreachable origin, or an origin reporting no default
+branch refuses too, and says which. Pass --base-ref when the PR does not target the
+default branch: verify refuses a grant whose branch is not the PR's base.
 reconcile never equates missing discovery with death. Keep uncertain reservations.
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
@@ -85,8 +93,9 @@ released. Alfred or Hermod failure exits non-zero with nothing released.
 /** The one base a grant may name, shared by the three hints below so they cannot drift.
  * There is no "take the lock, then read the tip" ordering to prescribe: `integrate` takes
  * `merge:<repo>` in the same transaction that records the base, and refuses a second call
- * once the phase is `integrating`. A fetch immediately before the call is the whole rule;
- * the lock refusal names the task to wait for. */
+ * once the phase is `integrating`. `integrate` fetches the base branch itself and refuses
+ * anything but that tip, so this text describes an enforced rule, not an obligation the
+ * leader carries alone; the lock refusal still names the task to wait for. */
 const GRANT_BASE = "at the base branch tip fetched immediately before the grant";
 
 /** Explain why `verificationReady` refused, naming the command that actually repairs it.
@@ -179,7 +188,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     const verb = argv[0];
     const options: Record<string, { type: "string" | "boolean" }> = { apply: { type: "boolean" }, ...Object.fromEntries(
-      ["file", "run", "revision", "task", "token", "peer", "message", "base", "pr", "review", "state", "leader", "limits-file", "current-leader", "current-message"].map(key => [key, { type: "string" }])) };
+      ["file", "run", "revision", "task", "token", "peer", "message", "base", "base-ref", "pr", "review", "state", "leader", "limits-file", "current-leader", "current-message"].map(key => [key, { type: "string" }])) };
     const { values } = parseArgs({ args: argv.slice(1), strict: true, options });
     const flag = (name: string): string => {
       const value = values[name];
@@ -194,6 +203,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       throw new Error(`--limits-file applies to resume, not ${verb}`);
     }
     if (!["init", "takeover"].includes(verb) && values.file !== undefined) throw new Error(`--file applies to init or takeover, not ${verb}`);
+    // Same trap as --limits-file: a --base-ref parsed but ignored would read as a grant checked
+    // against the named branch while the tip actually came from origin's default one.
+    for (const key of ["base", "base-ref"]) {
+      if (verb !== "integrate" && values[key] !== undefined) throw new Error(`--${key} applies to integrate, not ${verb}`);
+    }
     if (verb !== "sweep" && values.apply !== undefined) throw new Error(`--apply applies to sweep, not ${verb}`);
     // sweep evaluates whole engagements: a --task it ignored would read as a narrowed sweep.
     const unused = verb === "sweep" && Object.keys(values).find(key => !["run", "apply", "state", "leader"].includes(key));
@@ -336,7 +350,19 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         process.stderr.write("gru: reconnect submitted; reconcile and confirm its outcome\n"); break;
       }
       case "reconnected": emit(store.finishReconnect(id, identity, revision, flag("task"), flag("token"))); break;
-      case "integrate": emit(store.integrate(id, identity, revision, flag("task"), flag("token"), flag("base"))); break;
+      case "integrate": {
+        const assigned = task(flag("token"));
+        const base = flag("base");
+        // integrate() will refuse these anyway; refuse before a network fetch that writes
+        // objects into the leader's own checkout, exactly as `verify` refuses below.
+        if (run.mode !== "running" || !run.reconciled || assigned.phase !== "review") throw new Error("task is not ready for integration");
+        // Observe before the transaction: the store owns the verdict, but only git can say the
+        // SHA is a commit this repository holds and is the base branch's current tip. Gathering
+        // first also keeps a failed fetch from taking the merge lock.
+        const observed = await observeBase(assigned, base, verifiedMerges(run, assigned),
+          values["base-ref"] === undefined ? undefined : flag("base-ref"));
+        emit(store.integrate(id, identity, revision, flag("task"), flag("token"), base, observed)); break;
+      }
       case "verify": {
         const assigned = task(flag("token"));
         // complete() will refuse these anyway; refuse before spending a full verification run.

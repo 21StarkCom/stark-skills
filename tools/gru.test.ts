@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { verifyBlocker } from "./gru.ts";
-import { GruStore } from "./gru_lib.ts";
+import { BASE_CHECKS, GruStore } from "./gru_lib.ts";
 
 const CLI = path.join(import.meta.dirname, "gru.ts");
 
@@ -512,4 +512,112 @@ test("verifyBlocker names the command that actually repairs each phase", () => {
   // task forces run.mode to `stopping`. gru_lib.test.ts pins that invariant; here we only
   // assert the branch is gone rather than re-asserting a message nothing can read.
   assert.doesNotMatch(at("stopping"), /observe termination/);
+});
+
+test("gru CLI: integrate fetches the base branch and refuses anything but its current tip", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-cli-base-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const state = path.join(dir, "state.sqlite");
+  const repo = fs.mkdtempSync(path.join(dir, "checkout-"));
+  // A RELATIVE origin URL makes this a real remote git can fetch from while still
+  // normalizing to the `owner/repo` identity Gru requires: `git remote get-url` reports
+  // it verbatim, and git resolves it against the checkout it runs in.
+  const origin = path.join(repo, "o", "r.git");
+  git(dir, "init", "-q", "--bare", "--initial-branch=main", origin);
+  git(repo, "init", "-q", "--initial-branch=main");
+  git(repo, "remote", "add", "origin", "o/r.git");
+  const land = (message: string, cwd = repo) => {
+    git(cwd, "commit", "-q", "--allow-empty", "-m", message);
+    git(cwd, "push", "-q", "origin", "HEAD:main");
+    return git(cwd, "rev-parse", "HEAD").trim();
+  };
+  // No `git remote set-head`: the default branch is read from origin, so this checkout has
+  // no local refs/remotes/origin/HEAD at all and the CLI still resolves `main`.
+  const first = land("first task merged");
+  for (const name of ["wt-one", "wt-two"]) fs.mkdirSync(path.join(dir, name));
+  const file = path.join(dir, "engagement.json");
+  fs.writeFileSync(file, JSON.stringify({
+    id: "cli", objective: "o", leader: "leader-one", maxWorkers: 2, maxAttempts: 1, maxRecoveries: 0,
+    limits: ["OPERATOR LIMIT: no publishing"],
+    tasks: ["one", "two"].map((id, i) => ({ id, ticket: `STARK-${1 + i}`, objective: "o", repo,
+      worktree: path.join(dir, i === 0 ? "wt-one" : "wt-two"), provider: "codex", dependsOn: [],
+      files: [`${id}.ts`], exclusiveResources: [], mergeResources: [], doneWhen: "d", checks: [["true"]] })),
+  }));
+  const initialized = await run(["init", "--file", file, "--state", state], "leader-one");
+  assert.equal(initialized.code, 0, initialized.error);
+  assert.equal(JSON.parse(initialized.out).config.tasks[0].repositoryKey, "o/r");
+
+  const store = new GruStore(state); t.after(() => store.close());
+  /** Drive `id` to phase `review` the way reconcile/attach/receive would, without Hermod. */
+  const ready = (id: string, index: number) => {
+    let current = store.read("cli");
+    // reconcile requires an observation for every bound worker, including a verified one.
+    current = store.reconcile("cli", "leader-one", current.revision, Object.fromEntries(current.tasks
+      .filter(task => task.worker).map(task => [task.spec.id, { observedAt: new Date().toISOString(),
+        liveness: "live" as const, activity: "idle" as const, evidence: ["Hermod observation"] }])));
+    current = store.reserve("cli", "leader-one", current.revision, id);
+    const worker = { id: `codex:${id}`, session: `session-${id}`, surface: `surface-${id}`,
+      workspace: "workspace", provider: "codex" as const, worktree: current.tasks[index].spec.worktree };
+    current = store.attach("cli", "leader-one", current.revision, id, current.tasks[index].token!, worker);
+    for (const kind of ["ack", "ready"] as const) {
+      current = store.report("cli", "leader-one", current.revision, id, current.tasks[index].token!,
+        worker.session, kind, "d");
+    }
+    return current;
+  };
+  ready("one", 0);
+  const integrate = (id: string, index: number, base: string, ...extra: string[]) =>
+    run(["integrate", "--run", "cli", "--revision", String(store.read("cli").revision), "--task", id,
+      "--token", store.read("cli").tasks[index].token!, "--base", base, "--state", state, ...extra], "leader-one");
+
+  // A SHA of the right shape that this repository does not hold — the shape check alone passed it.
+  const foreign = await integrate("one", 0, "f".repeat(40));
+  assert.equal(foreign.code, 2);
+  assert.match(foreign.error, /integration base f{40} is not a commit in o\/r/);
+  // Another task's merge lands on origin while this one is in review: the leader's base is stale.
+  const second = fs.mkdtempSync(path.join(dir, "other-worker-"));
+  git(dir, "clone", "-q", origin, second);
+  const landed = land("second task merged", second);
+  const stale = await integrate("one", 0, first);
+  assert.equal(stale.code, 2);
+  assert.match(stale.error, new RegExp(`integration base ${first} is not the current main tip ${landed}`));
+  // The branch must exist on origin; an unfetchable one refuses instead of reading a local ref.
+  const missing = await integrate("one", 0, landed, "--base-ref", "no-such-branch");
+  assert.equal(missing.code, 2);
+  assert.match(missing.error, /cannot fetch refs\/heads\/no-such-branch from origin/);
+
+  const granted = await integrate("one", 0, landed);
+  assert.equal(granted.code, 0, granted.error);
+  const evidence = JSON.parse(granted.out).tasks[0].baseEvidence;
+  // Every field but the timestamp is asserted against a literal. `checks: evidence.checks`
+  // would compare the field with itself and accept anything the CLI happened to record.
+  assert.deepEqual({ ...evidence, observedAt: undefined },
+    { observedAt: undefined, repositoryKey: "o/r", ref: "main", tip: landed, base: landed, contains: [], checks: [...BASE_CHECKS] });
+  assert.ok(Date.now() - Date.parse(evidence.observedAt) < 60_000);
+
+  // Phase is checked before the fetch. With origin unreachable, a task already integrating
+  // refuses for its phase — proof the CLI never spent a network round trip, and never wrote
+  // objects into the leader's checkout, for a grant the store was always going to refuse.
+  const moved = path.join(dir, "origin-moved.git");
+  fs.renameSync(origin, moved);
+  const reentrant = await integrate("one", 0, landed);
+  fs.renameSync(moved, origin);
+  assert.equal(reentrant.code, 2);
+  assert.match(reentrant.error, /task is not ready for integration/);
+
+  // Verify task one, then land a descendant: task two's grant must be checked against the
+  // merge this engagement verified, which only reaches the observation through the CLI.
+  const current = store.read("cli");
+  store.complete("cli", "leader-one", current.revision, "one", current.tasks[0].token!,
+    { head: landed, base: landed, merge: landed, pr: "https://github.com/o/r/pull/1",
+      review: "https://github.com/o/r/pull/1#pullrequestreview-1", verifiedAt: new Date().toISOString(),
+      ticketState: "done", checks: [{ argv: ["true"], exitCode: 0, log: "/evidence/check.log" }] });
+  const third = land("later publisher push", second);
+  ready("two", 1);
+  const dependent = await integrate("two", 1, third);
+  assert.equal(dependent.code, 0, dependent.error);
+  assert.deepEqual(JSON.parse(dependent.out).tasks[1].baseEvidence.contains, [landed]);
+
+  // Nothing above left an invocation-owned ref in the leader's checkout.
+  assert.equal(git(repo, "for-each-ref", "--format=%(refname)", "refs/gru").trim(), "");
 });

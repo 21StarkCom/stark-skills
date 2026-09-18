@@ -108,6 +108,25 @@ export interface WorktreeAdoption {
 }
 export const ADOPTION_CHECKS = ["observed path is a worktree root", "linked worktree, not a primary checkout",
   "same repository identity", "directory or branch names the ticket"];
+/** Git facts behind an integration grant's base, gathered against the task's own repository.
+ * The store validates the SHA's shape; only this evidence can say the SHA is a commit that
+ * repository holds and is the tip the base branch actually has right now. */
+export interface BaseEvidence {
+  observedAt: string;
+  /** `canonicalRepository` of the task's repo, so a foreign checkout's tip cannot stand in. */
+  repositoryKey: string;
+  /** The base branch the tip was read from, without the `refs/heads/` prefix. */
+  ref: string;
+  /** `origin/<ref>` as this observation fetched it. */
+  tip: string;
+  /** The SHA the leader supplied, resolved to a commit in that repository. */
+  base: string;
+  /** Verified merges confirmed as ancestors of `base`; the store names the ones missing. */
+  contains: string[];
+  checks: string[];
+}
+export const BASE_CHECKS = ["base branch fetched from origin", "base resolves to a commit in the task repository",
+  "verified merges compared against the base"];
 /** The ticket as a whole name segment, so STARK-50 never matches STARK-501 or a longer word. */
 export function namesTicket(ticket: string, ...names: (string | undefined)[]): boolean {
   const literal = ticket.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -188,6 +207,9 @@ export interface Assignment {
   acknowledged?: string;
   report?: { kind: string; message: string; at: string };
   integrationBase?: string;
+  /** The git evidence `integrate` accepted for `integrationBase`; retained for audit, and
+   * read by the next grant in this repository to scope its verified-merge floor to one branch. */
+  baseEvidence?: BaseEvidence;
   stoppedFrom?: Phase;
   reconnect?: { id: string; startedAt: string; phase: Phase; pending: boolean };
   evidence?: CompletionEvidence;
@@ -418,6 +440,41 @@ function attachRefusal(run: Run, task: Assignment, worker: Worker): string | nul
   if (worker.session === run.config.leader) return "the leader cannot attach as its own worker";
   if (task.takeovers?.some(t => t.evidence.worker.id === worker.id ||
     t.evidence.worker.session === worker.session || t.evidence.worker.surface === worker.surface)) return "fenced worker cannot reattach after takeover";
+  return null;
+}
+
+/** Every merge this engagement has verified into `task`'s repository, in task order. The CLI
+ * calls it WITHOUT `ref` so the observation tests every one of them: it resolves the base ref
+ * itself, and a merge it cannot place is simply reported as not contained. `baseRefusal` calls
+ * it WITH the observed ref to get the subset this grant's base must actually contain. One
+ * predicate, two callers on purpose — the required set has to stay a subset of the tested set,
+ * and two hand-copied filters would drift into a refusal naming a merge nobody ever tested,
+ * which no amount of re-fetching can repair.
+ * A grant recorded before `baseEvidence` existed has no ref to compare, so it counts: fail closed. */
+export function verifiedMerges(run: Run, task: Assignment, ref?: string): string[] {
+  return run.tasks.filter(t => t !== task && t.phase === "done" && t.evidence &&
+    repositoryKey(t.spec) === repositoryKey(task.spec) &&
+    (ref === undefined || t.baseEvidence === undefined || t.baseEvidence.ref === ref))
+    .map(t => t.evidence!.merge);
+}
+/** Why `evidence` cannot authorize a grant of `base` for `task`, or null. Pure: the observation
+ * gathers git facts, this decides. The tip comparison is what closes the stale-base window —
+ * `verify` only requires the base in the merged head's ancestry, so a base that predates another
+ * task's merge lets a diff built without those changes squash cleanly whenever git sees no
+ * textual conflict. The verified-merge floor is the second, offline check: it holds even if the
+ * fetched tip is itself wrong (a force-pushed or mirrored base branch). */
+function baseRefusal(run: Run, task: Assignment, base: string, evidence: BaseEvidence): string | null {
+  if (!completeChecks(evidence.checks, BASE_CHECKS)) return "incomplete integration base evidence";
+  if (!fresh(evidence)) return "integration base evidence is stale; fetch the base branch again";
+  const expected = repositoryKey(task.spec);
+  if (evidence.repositoryKey !== expected) return `integration base observed in ${evidence.repositoryKey}, not ${expected}`;
+  if (evidence.base !== base) return "integration base evidence does not cover the supplied SHA";
+  if (!nonempty(evidence.ref)) return "integration base evidence names no base branch";
+  if (evidence.tip !== base) return `integration base ${base} is not the current ${evidence.ref} tip ${evidence.tip}; fetch again and grant at the tip`;
+  // Scope the floor to one base branch: a repository that also takes merges on a release
+  // branch must not refuse a perfectly current `main` tip for lacking them.
+  const missing = verifiedMerges(run, task, evidence.ref).filter(sha => !evidence.contains.includes(sha));
+  if (missing.length > 0) return `integration base ${base} does not contain verified merge ${missing[0]}; fetch again and grant at the tip`;
   return null;
 }
 
@@ -811,14 +868,18 @@ export class GruStore {
       this.event(run, "continued", "existing worker and token retained; send continuation through Hermod", taskId);
     });
   }
-  integrate(id: string, leader: string, revision: number, taskId: string, token: string, base: string): Run {
+  integrate(id: string, leader: string, revision: number, taskId: string, token: string, base: string, evidence: BaseEvidence): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
       requireValue(run.mode === "running" && run.reconciled && task.phase === "review", "task is not ready for integration");
       requireValue(/^[0-9a-f]{40,64}$/.test(base), "integration requires an observed base SHA");
+      // The shape check above admits a foreign-repository SHA, a typo, and an hour-stale tip
+      // alike; only the observation can tell them from the tip this repository has right now.
+      const refusal = baseRefusal(run, task, base, evidence);
+      requireValue(refusal === null, refusal!);
       // Repository-wide serialization also covers undeclared release-file seams.
       this.own(run, task, [`merge:${repositoryKey(task.spec)}`, ...task.spec.mergeResources.map(r => `merge-resource:${r}`)]);
-      task.integrationBase = base; task.phase = "integrating";
+      task.integrationBase = base; task.baseEvidence = structuredClone(evidence); task.phase = "integrating";
       this.event(run, "integration", base, taskId);
     });
   }

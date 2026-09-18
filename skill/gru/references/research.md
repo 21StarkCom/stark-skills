@@ -51,7 +51,8 @@ Exclusive resources constrain implementation concurrency; overlapping files do n
 because each worker edits its own worktree and overlap reconciles at the rebase before merge
 (revised by STARK-5049, after a dead engagement's file hold stranded unrelated dispatch).
 That reconciliation is sound only while each integration grant names the base branch tip
-the leader fetches and reads immediately before granting it.
+the leader fetches and reads immediately before granting it, which `integrate` enforces
+by fetching that branch itself and refusing any other SHA (STARK-5051).
 Shared release files require serialized integration, even across independent tasks.
 Gru independently verifies results before releasing dependent work.
 These studies do not establish Gru's optimal worker count.

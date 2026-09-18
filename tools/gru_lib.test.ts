@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { observations, observeOrphan, observeSweep, observeWorkers, packet, type Command, type HermodPeer, type SavedSession } from "./gru_runtime_lib.ts";
-import { ADOPTION_CHECKS, GruStore, namesTicket, parseEngagement, parseTakeover, readyReason, verificationReady, type CompletionEvidence, type Engagement, type Run, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, BASE_CHECKS, GruStore, namesTicket, parseEngagement, parseTakeover, readyReason, repositoryKey, verificationReady, verifiedMerges, type BaseEvidence, type CompletionEvidence, type Engagement, type Run, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
 
 // Compose the production observation builders with the store: a handwritten "dead"
 // observation would miss the orphaned-record failure that prompted STARK-5021.
@@ -22,7 +22,7 @@ async function orphanedRun(t: TestContext, integrating = false) {
   r = store.attach(c.id, c.leader, r.revision, "one", r.tasks[0].token!, { ...worker("one"), pid: 42 });
   r = report(store, r, "one", "ack");
   r = report(store, r, "one", "ready", "Existing draft PR 1075; inspect before editing");
-  if (integrating) r = store.integrate(c.id, c.leader, r.revision, "one", r.tasks[0].token!, "a".repeat(40));
+  if (integrating) r = grant(store, r, "one", "a".repeat(40));
   r = store.reconcile(c.id, c.leader, r.revision, await observeWorkers(r, absentHermod));
   return { store, file, r };
 }
@@ -130,7 +130,7 @@ test("a same-run task with overlapping files dispatches at once; only its integr
   r = store.reserve(c.id, c.leader, r.revision, "one");
   r = store.attach(c.id, c.leader, r.revision, "one", r.tasks[0].token!, { ...worker("one"), pid: 42 });
   r = report(store, r, "one", "ack"); r = report(store, r, "one", "ready");
-  r = store.integrate(c.id, c.leader, r.revision, "one", r.tasks[0].token!, BASE);
+  r = grant(store, r, "one", BASE);
   r = store.reconcile(c.id, c.leader, r.revision, await observeWorkers(r, absentHermod));
   const { limits: _limits, ...request } = takeoverRequest(r);
   const evidence = await observeOrphan(r.tasks[0], request.worktree, absentHermod);
@@ -141,12 +141,67 @@ test("a same-run task with overlapping files dispatches at once; only its integr
   next = store.attach(c.id, c.leader, next.revision, "two", next.tasks[1].token!, worker("two"));
   next = report(store, next, "two", "ack"); next = report(store, next, "two", "ready");
   // The retained grant still holds the repository's merge lock, so overlap is serialized where it lands.
-  assert.throws(() => store.integrate(c.id, c.leader, next.revision, "two", next.tasks[1].token!, BASE), /resource already owned: merge:/);
+  assert.throws(() => grant(store, next, "two", BASE), /resource already owned: merge:/);
   next = store.complete(c.id, c.leader, next.revision, "one", next.tasks[0].token!, landedProof(next));
-  // Grant two at the base one's merge produced: the store cannot see ancestry, so the leader's
-  // current-base grant is what makes two rebase over one's changes.
+  // Grant two at the base one's merge produced: the observation, not the store, sees the
+  // ancestry, and the current-base grant is what makes two rebase over one's changes.
   const merged = landedProof(next).merge;
-  assert.equal(store.integrate(c.id, c.leader, next.revision, "two", next.tasks[1].token!, merged).tasks[1].integrationBase, merged);
+  assert.equal(grant(store, next, "two", merged).tasks[1].integrationBase, merged);
+});
+
+test("an integration grant is checked against the repository's base branch, not the SHA's shape", t => {
+  const { store } = fixture(t);
+  const c = config(); c.tasks = c.tasks.slice(0, 2);
+  let run = start(store, observe(store, store.create(c)), "one");
+  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+  const tip = "b".repeat(40);
+  // The stale-base window STARK-5049 left open: a base that predates another task's merge
+  // still squash-merges cleanly whenever git sees no textual conflict. Name the tip to use.
+  assert.throws(() => grant(store, run, "one", BASE, { tip }),
+    new RegExp(`integration base ${BASE} is not the current main tip ${tip}; fetch again`));
+  // Evidence from another checkout, for another SHA, or without a branch cannot stand in.
+  assert.throws(() => grant(store, run, "one", BASE, { repositoryKey: "other/repo" }), /observed in other\/repo, not \/repo/);
+  assert.throws(() => grant(store, run, "one", BASE, { base: tip }), /does not cover the supplied SHA/);
+  assert.throws(() => grant(store, run, "one", BASE, { ref: "" }), /names no base branch/);
+  assert.throws(() => grant(store, run, "one", BASE, { checks: BASE_CHECKS.slice(1) }), /incomplete integration base evidence/);
+  // A tip read an hour ago reads exactly like a current one; only its age says otherwise.
+  assert.throws(() => grant(store, run, "one", BASE, { observedAt: new Date(Date.now() - 3_600_000).toISOString() }),
+    /integration base evidence is stale/);
+  assert.throws(() => grant(store, run, "one", "not-a-sha"), /integration requires an observed base SHA/);
+  // Every refusal above ran before `own`, so none of them took the repository's merge lock
+  // and the repaired grant still succeeds on the same revision.
+  assert.ok(!store.owned("demo", "one").some(r => r.startsWith("merge:")));
+  run = grant(store, run, "one", BASE);
+  assert.equal(run.tasks[0].phase, "integrating");
+  assert.deepEqual(run.tasks[0].baseEvidence, { ...run.tasks[0].baseEvidence!, ref: "main", tip: BASE, base: BASE, contains: [] });
+  assert.ok(store.owned("demo", "one").includes("merge:/repo"));
+});
+
+test("a grant's base must contain the merges this engagement verified on that same base branch", t => {
+  /** Task one verified with `ref` as its base branch; task two ready for its own grant. */
+  const afterFirstMerge = (store: GruStore, ref: string): Run => {
+    const c = config(); c.tasks = c.tasks.slice(0, 2);
+    let run = start(store, observe(store, store.create(c)), "one");
+    run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+    run = grant(store, run, "one", BASE, { ref });
+    run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, landedProof(run));
+    run = start(store, run, "two");
+    run = report(store, run, "two", "ack"); return report(store, run, "two", "ready");
+  };
+  const { store } = fixture(t);
+  let run = afterFirstMerge(store, "main");
+  const merged = landedProof(run).merge;
+  // The offline floor: even a tip the observation believes is current cannot be behind a
+  // merge this engagement has already verified onto that branch.
+  assert.throws(() => grant(store, run, "two", merged, { contains: [] }),
+    new RegExp(`integration base ${merged} does not contain verified merge ${merged}`));
+  run = grant(store, run, "two", merged);
+  assert.deepEqual(run.tasks[1].baseEvidence!.contains, [merged]);
+  // A merge that landed on a different base branch is not this branch's floor; requiring it
+  // would refuse a perfectly current tip for lacking commits that were never on it.
+  const { store: other } = fixture(t);
+  const release = afterFirstMerge(other, "release");
+  assert.equal(grant(other, release, "two", merged, { contains: [] }).tasks[1].phase, "integrating");
 });
 
 test("takeover transaction refuses a path occupied after the absence observation", async t => {
@@ -233,7 +288,7 @@ function report(store: GruStore, run: Run, id: string, kind: "ack" | "ready" | "
 function finish(store: GruStore, run: Run, id: string): Run {
   run = report(store, run, id, "ack"); run = report(store, run, id, "ready");
   const base = "a".repeat(40);
-  run = store.integrate(run.config.id, run.config.leader, run.revision, id, run.tasks.find(t => t.spec.id === id)!.token!, base);
+  run = grant(store, run, id, base);
   const task = run.tasks.find(t => t.spec.id === id)!;
   const evidence: CompletionEvidence = { head: "b".repeat(40), base, merge: "c".repeat(40), pr: "https://github.com/o/r/pull/1",
     review: "https://github.com/o/r/pull/1#pullrequestreview-1", verifiedAt: new Date().toISOString(), ticketState: "done",
@@ -241,12 +296,23 @@ function finish(store: GruStore, run: Run, id: string): Run {
   return store.complete(run.config.id, run.config.leader, run.revision, id, task.token!, evidence);
 }
 const BASE = "a".repeat(40);
+/** The git evidence `observeBase` records for a base that IS the current tip of `main`. */
+function baseProof(run: Run, id: string, base: string, overrides: Partial<BaseEvidence> = {}): BaseEvidence {
+  const task = run.tasks.find(t => t.spec.id === id)!;
+  return { observedAt: new Date().toISOString(), repositoryKey: repositoryKey(task.spec), ref: "main",
+    tip: base, base, contains: verifiedMerges(run, task), checks: [...BASE_CHECKS], ...overrides };
+}
+/** `integrate` at a base the repository confirms is its current tip. */
+function grant(store: GruStore, run: Run, id: string, base: string, overrides: Partial<BaseEvidence> = {}): Run {
+  return store.integrate(run.config.id, run.config.leader, run.revision, id,
+    run.tasks.find(t => t.spec.id === id)!.token!, base, baseProof(run, id, base, overrides));
+}
 /** Drive task `one` to an integration grant, then lose its worker to a replacement. */
 function grantThenLoseWorker(store: GruStore): Run {
   const c = config(); c.maxRecoveries = 0;
   let run = start(store, observe(store, store.create(c)), "one");
   run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
-  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, BASE);
+  run = grant(store, run, "one", BASE);
   run = observe(store, run, "dead");
   return store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!);
 }
@@ -610,14 +676,14 @@ test("replacement retains the pending merge grant but must re-earn integration t
   let run = start(store, observe(store, store.create(c)), "one");
   run = start(store, run, "two");
   for (const id of ["one", "two"]) { run = report(store, run, id, "ack"); run = report(store, run, id, "ready"); }
-  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "a".repeat(40));
+  run = grant(store, run, "one", "a".repeat(40));
   run = store.reconcile("demo", "leader-one", run.revision, Object.fromEntries(run.tasks.map(t => [t.spec.id,
     { observedAt: new Date().toISOString(), liveness: t.spec.id === "one" ? "dead" : "live", activity: "idle", evidence: ["Hermod observation"] }])));
   run = store.recover("demo", "leader-one", run.revision, "one", run.tasks[0].token!);
   run = start(store, run, "one");
   assert.equal(run.tasks[0].integrationBase, "a".repeat(40));
   assert.equal(run.tasks[0].report?.kind, "ready");
-  assert.throws(() => store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "a".repeat(40)), /already owned/);
+  assert.throws(() => grant(store, run, "two", "a".repeat(40)), /already owned/);
   const proof: CompletionEvidence = { base: "a".repeat(40), head: "b".repeat(40), merge: "c".repeat(40),
     pr: "https://github.com/o/r/pull/1", review: "https://github.com/o/r/pull/1#pullrequestreview-1",
     verifiedAt: new Date().toISOString(), ticketState: "done",
@@ -626,9 +692,9 @@ test("replacement retains the pending merge grant but must re-earn integration t
   run = report(store, run, "one", "ack");
   assert.throws(() => store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof), /integration and independent verification required/);
   run = report(store, run, "one", "ready");
-  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "a".repeat(40));
+  run = grant(store, run, "one", "a".repeat(40));
   run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, proof);
-  run = store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "c".repeat(40));
+  run = grant(store, run, "two", "c".repeat(40));
   assert.equal(run.tasks[1].phase, "integrating");
 });
 
@@ -779,8 +845,8 @@ test("shared integration resources serialize independently implemented tasks", t
   let run = start(store, observe(store, store.create(config())), "one");
   run = start(store, run, "two");
   for (const id of ["one", "two"]) { run = report(store, run, id, "ack"); run = report(store, run, id, "ready"); }
-  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, "a".repeat(40));
-  assert.throws(() => store.integrate("demo", "leader-one", run.revision, "two", run.tasks[1].token!, "a".repeat(40)), /already owned/);
+  run = grant(store, run, "one", "a".repeat(40));
+  assert.throws(() => grant(store, run, "two", "a".repeat(40)), /already owned/);
   assert.equal(store.read("demo").tasks[1].phase, "review");
 });
 
@@ -805,7 +871,7 @@ test("verified completion clears stoppedFrom when it settles a frozen integratio
   let run = start(store, reconcileLive(store, store.create(config())), "one");
   const token = run.tasks[0].token!;
   run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
-  run = store.integrate("demo", "leader-one", run.revision, "one", token, BASE);
+  run = grant(store, run, "one", BASE);
   // Cancellation freezes the in-flight integration; `verificationReady` still admits it,
   // because the merge may already have landed on the other side of the stop.
   run = store.stop("demo", "leader-one", run.revision);
@@ -916,7 +982,7 @@ test("duplicate intake is idempotent and late ready reports cannot revoke integr
   assert.equal(run.revision, acknowledgedRevision);
   assert.equal(run.received.length, 1);
   run = report(store, run, "one", "ready");
-  run = store.integrate("demo", "leader-one", run.revision, "one", token, "a".repeat(40));
+  run = grant(store, run, "one", "a".repeat(40));
   assert.throws(() => report(store, run, "one", "ready"), /in-flight integration/);
   run = report(store, run, "one", "blocked", "Merge outcome is uncertain");
   assert.equal(run.tasks[0].phase, "integrating");
@@ -935,8 +1001,8 @@ test("repository aliases share one merge lock, and non-normalized paths are refu
   assert.equal(readyReason(run, run.tasks[1]), null);
   run = start(store, run, "two");
   for (const id of ["one", "two"]) { run = report(store, run, id, "ack"); run = report(store, run, id, "ready"); }
-  run = store.integrate(c.id, c.leader, run.revision, "one", run.tasks[0].token!, BASE);
-  assert.throws(() => store.integrate(c.id, c.leader, run.revision, "two", run.tasks[1].token!, BASE), /resource already owned: merge:owner\/repo/);
+  run = grant(store, run, "one", BASE);
+  assert.throws(() => grant(store, run, "two", BASE), /resource already owned: merge:owner\/repo/);
   for (const file of ["src/", "src/./one.ts", "src//one.ts", "./src"]) {
     const malformed = config(); malformed.tasks[0].files = [file];
     assert.throws(() => parseEngagement(malformed), /normalized relative/);
@@ -1086,7 +1152,7 @@ test("sweep holds integration grants, uncertain reconnects, and launches Hermod 
   let run = observe(store, store.create(config()));
   run = start(store, run, "one"); run = start(store, run, "two");
   run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
-  run = store.integrate("demo", "leader-one", run.revision, "one", run.tasks[0].token!, BASE);
+  run = grant(store, run, "one", BASE);
   run = observe(store, run, "dead");
   run = store.beginReconnect("demo", "leader-one", run.revision, "two", run.tasks[1].token!);
   // A worker closes its ticket at merge, before Gru verifies; the grant is how `verify` settles it.
