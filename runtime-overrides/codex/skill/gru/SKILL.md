@@ -165,7 +165,9 @@ landed on that branch, so nothing walks history. The refusal names the current t
 of origin rather than read from this checkout's `refs/remotes/origin/HEAD`. An unreachable
 origin, a branch origin does not have, and an origin reporting no default branch each
 refuse and say which; none ever falls back to a local ref that reads exactly like a
-current one. A shallow checkout grants normally.
+current one. A shallow checkout refuses too, naming `git fetch --unshallow`: the tip
+check itself needs no history, but `verify` walks ancestry in that same checkout after the
+merge, and a grant cannot be retaken, so depth has to be caught here.
 Merge into the branch the grant was checked against: `verify` refuses a PR whose base
 branch is not the one `integrate` read the tip from, and a grant cannot be retaken once the
 task is `integrating`, so name the PR's own base branch the first time.

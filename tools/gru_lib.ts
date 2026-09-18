@@ -204,8 +204,8 @@ export interface Assignment {
   acknowledged?: string;
   report?: { kind: string; message: string; at: string };
   integrationBase?: string;
-  /** The git evidence `integrate` accepted for `integrationBase`; retained for audit, and
-   * read by the next grant in this repository to scope its verified-merge floor to one branch. */
+  /** The git evidence `integrate` accepted for `integrationBase`; retained for audit, and read
+   * by `verifyCompletion` so the PR's own base branch must be the one the tip was read from. */
   baseEvidence?: BaseEvidence;
   stoppedFrom?: Phase;
   reconnect?: { id: string; startedAt: string; phase: Phase; pending: boolean };
@@ -467,15 +467,25 @@ function attachRefusal(run: Run, task: Assignment, worker: Worker): string | nul
  * the freshly fetched tip closes exactly that window.
  *
  * There is deliberately no second "does the base contain every merge this engagement verified"
- * floor. One shipped briefly and was removed (STARK-5222): whenever the tip check passes the
+ * floor. One shipped briefly and was removed (STARK-5222). Whenever the tip check passes the
  * floor is already implied — a base that IS `origin/<ref>` contains everything merged onto that
- * branch — and every case where the two differ is a case where the floor is WRONG, each
- * producing a refusal with no in-band repair, because a grant cannot be retaken once the task
- * is `integrating`. A reverted or force-pushed merge is gone from the branch for good; a task
- * verified before `baseEvidence` existed has no branch to attribute its merge to; a shallow
- * clone cannot answer ancestry at all. The floor also cost the grant path an
- * `--is-shallow-repository` probe plus one `merge-base` subprocess per verified merge, all of
- * them discarded on the commonest refusal (a stale tip) before their result was ever read. */
+ * branch — so the two can only differ when the tip itself is not what origin's branch really
+ * holds, or when the floor is simply wrong about what to require.
+ *
+ * It IS wrong in three reachable cases, each producing a refusal with no in-band repair, since
+ * a grant cannot be retaken once the task is `integrating`: a reverted or force-pushed merge is
+ * gone from the branch for good; a task verified before `baseEvidence` existed has no branch to
+ * attribute its merge to, so counting it (the fail-closed reading) refuses every later grant in
+ * that repository forever; and a shallow clone cannot answer ancestry at all. It also cost the
+ * grant path one `merge-base` subprocess per verified merge, discarded unread on the commonest
+ * refusal, a stale tip.
+ *
+ * What removing it GIVES UP, stated plainly rather than argued away: an origin that serves a
+ * tip its branch has moved past — a lagging mirror, or a replica behind a rewrite — passes the
+ * tip check, and the floor would have caught the missing merge. That is accepted here because
+ * this fleet fetches GitHub directly, not through a mirror, and an unrepairable refusal in
+ * three real cases is the worse trade against one that needs a lying origin. Revisit if Gru
+ * ever grants against a replicated remote. */
 function baseRefusal(task: Assignment, base: string, evidence: BaseEvidence): string | null {
   if (!completeChecks(evidence.checks, BASE_CHECKS)) return "incomplete integration base evidence";
   if (!fresh(evidence)) return "integration base evidence is stale; fetch the base branch again";
@@ -771,7 +781,8 @@ export class GruStore {
         // Apply the exact window the worker's receipt check applies, against the timestamp this
         // record will actually carry: `fresh` tolerates an observation up to 5s in the FUTURE and
         // is evaluated before `at` is stamped, so at the boundary the store can persist a receipt
-        // its only reader ("observed ≤ transferred ≤ observed + 60s") must refuse forever.
+        // its only reader ("observed ≤ transferred ≤ observed + OBSERVATION_FRESHNESS_MS") must
+        // refuse forever. Both sides read the constant, so the window cannot drift apart again.
         const at = new Date();
         const observed = Date.parse(discovery.observedAt);
         requireValue(observed <= at.getTime() && at.getTime() - observed <= OBSERVATION_FRESHNESS_MS, "leadership discovery stale");

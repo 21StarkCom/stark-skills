@@ -600,9 +600,13 @@ export async function receive(run: Run, messageId: string, call: Command = comma
  * BEFORE the fetch (house rule: a slow command must not look fresh) and `fresh` rejects
  * evidence older than OBSERVATION_FRESHNESS_MS, so a fetch left on the 300 s default command
  * timeout can return perfectly good evidence the store then calls stale — and "fetch the base
- * branch again" only re-runs the same slow fetch. Half the window, so the fetch and the two
- * local rev-parses after it still fit inside the freshness the store will demand of them,
- * with the other half left as the age guard's headroom below that window. */
+ * branch again" only re-runs the same slow fetch. Half the window, with the other half left as
+ * the age guard's headroom below it. Note the two numbers now meet: a fetch may spend this
+ * whole budget, and the age guard trips at OBSERVATION_FRESHNESS_MS minus it — the same 30 s.
+ * Only the millisecond-scale local rev-parses sit between them, so a fetch that spends its
+ * last few hundred milliseconds is reported as a slow observation rather than a slow fetch.
+ * Shrink this budget (a third of the window, say) before adding any further work after the
+ * stamp, or the misattribution stops being a rounding error. */
 const NETWORK_BUDGET_MS = Math.floor(OBSERVATION_FRESHNESS_MS / 2);
 /** The base branch to read the tip from when the leader names none: origin's default branch,
  * asked of ORIGIN. Not the local `refs/remotes/origin/HEAD`: git writes that pointer once at
@@ -638,10 +642,11 @@ async function defaultBaseRef(repoDir: string, call: Command): Promise<string> {
 }
 /** Gather the three git facts `baseRefusal` judges: that the repository is the task's, that it
  * holds the supplied base as a commit, and what the base branch's tip is right now. Fail closed —
- * an unfetchable branch, an unresolvable ref, or a base this repository does not have refuses
- * here, naming which. Nothing walks history: the tip comparison already implies containment of
- * everything merged onto that branch, and the ancestry floor that briefly sat here only ever
- * differed from it by refusing valid grants (see `baseRefusal`). */
+ * an unfetchable branch, an unresolvable ref, a base this repository does not have, or a
+ * checkout this task's lifecycle cannot finish in refuses here, naming which. Nothing walks
+ * history: the tip comparison already implies containment of everything merged onto that
+ * branch, and the ancestry floor that briefly sat here only ever differed from it by refusing
+ * valid grants (see `baseRefusal`). */
 export async function observeBase(task: Assignment, base: string, ref?: string,
   call: Command = command): Promise<BaseEvidence> {
   if (!isRevision(base)) throw new Error("integration requires an observed base SHA");
@@ -649,6 +654,16 @@ export async function observeBase(task: Assignment, base: string, ref?: string,
   const repositoryKey = await canonicalRepository(repoDir, call);
   const expected = taskRepositoryKey(task.spec);
   if (repositoryKey !== expected) throw new Error(`integration base repository mismatch: ${repoDir} is ${repositoryKey}, not ${expected}`);
+  // This observation needs no history — the tip check is a SHA equality — but `verifyCompletion`
+  // does, in this same checkout, AFTER the PR has merged: `git merge-base --is-ancestor
+  // <integrationBase> <head>` on a commit outside the graft exits 128 ("Not a valid commit
+  // name"), not an answer. Granting here is the last moment the repair is still actionable —
+  // a grant cannot be retaken once the task is `integrating` — so a shallow clone discovered at
+  // verification time strands a merged PR behind a check that can never pass. One local probe
+  // per grant, before any network call; it is not the deleted containment floor returning.
+  if (await checked(call, ["git", "rev-parse", "--is-shallow-repository"], repoDir) === "true") {
+    throw new Error(`integration base cannot be granted in ${repoDir}: it is a shallow clone, and verification there cannot answer ancestry after the merge; run git fetch --unshallow there first`);
+  }
   const branch = ref ?? await defaultBaseRef(repoDir, call);
   // check-ref-format exits 1 silently on a malformed name, so say what was rejected.
   if ((await call(["git", "check-ref-format", `refs/heads/${branch}`], repoDir)).code !== 0) {
@@ -713,11 +728,11 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   // GitHub reports canonical case, and a deleted fork reports head.repo as null.
   const sameRepo = (r: { full_name?: string } | null | undefined) => r?.full_name?.toLowerCase() === repo.toLowerCase();
   if (!sameRepo(pr.head.repo) || !sameRepo(pr.base.repo)) throw new Error("PR repository mismatch");
-  // `observeBase` validated the grant against ONE base branch's tip, and scoped the
-  // verified-merge floor to that branch. Settling it with a PR merged into a different branch
-  // would reopen the exact window it closes: `--base-ref` is operator-supplied, so a grant
-  // taken at a quiet branch's tip (current by definition, empty floor) could otherwise be
-  // discharged by a merge into `main` that skipped every other task's changes.
+  // `observeBase` validated the grant against ONE base branch's tip. Settling it with a PR
+  // merged into a different branch would reopen the exact window it closes: `--base-ref` is
+  // operator-supplied, so a grant taken at a quiet branch's tip — current by definition, and
+  // saying nothing about any other branch — could otherwise be discharged by a merge into
+  // `main` that skipped every other task's changes.
   if (task.baseEvidence && task.baseEvidence.ref !== pr.base.ref) {
     // Name the repair, as every other refusal here does — and be honest that there is no
     // in-band one: `integrate` only grants from `review` and refuses a second call once the

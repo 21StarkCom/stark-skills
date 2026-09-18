@@ -90,19 +90,31 @@ engagement never merges into. Pass `--base-ref` whenever the task's PR does not 
 origin's default branch; `verify` refuses a grant whose branch is not the PR's base.
 The check is fail-closed: an unreachable origin, a branch origin does not have, and an
 origin that reports no default branch each refuse and say which, rather than falling back
-to a local ref. A shallow checkout grants normally — nothing here needs history.
+to a local ref. A shallow checkout refuses too, by name, on one local probe before any
+network call — `git fetch --unshallow` there first. Nothing in the grant itself needs
+history, but `verify` walks ancestry in that same checkout AFTER the PR merged, where a
+commit outside the graft exits 128 rather than answering; a grant cannot be retaken once
+the task is `integrating`, so depth discovered at verification time strands a merged PR
+behind a check that can never pass. Catching it at the grant is the last actionable moment.
 An earlier revision also required the base to contain every merge this engagement had
 verified onto that branch. That floor is gone (STARK-5222). Whenever the tip check passes
-the floor is already implied, and every case where the two differed was one where the floor
-was WRONG, each producing a refusal with no in-band repair because a grant cannot be retaken
-once the task is `integrating`: a reverted or force-pushed merge is off the branch for good,
-a task verified before base evidence existed has no branch to attribute its merge to, and a
-shallow clone cannot answer ancestry at all. It also cost every grant a depth probe and one
-`merge-base` per verified merge, all discarded on the commonest refusal.
-The fetch is bounded by half the evidence freshness window, so a slow one fails as a fetch
-instead of returning evidence the store then calls stale; an observation that outlives that
-window less the same budget fails as the slow observation it was, with headroom so evidence
-squeaking under the limit cannot trip the store's own check a millisecond later.
+the floor is already implied, so the two can only differ when the floor is wrong about what
+to require — which it is in three reachable cases, each refusing with no in-band repair
+because a grant cannot be retaken once the task is `integrating`: a reverted or force-pushed
+merge is off the branch for good; a task verified before base evidence existed has no branch
+to attribute its merge to, so counting it refuses every later grant in that repository
+forever; and a shallow clone cannot answer ancestry at all. It also cost every grant one
+`merge-base` per verified merge, discarded unread on the commonest refusal, a stale tip.
+What that gives up, stated rather than argued away: an origin serving a tip its branch has
+moved past — a lagging mirror, or a replica behind a rewrite — passes the tip check, and the
+floor would have caught the missing merge. Accepted because this fleet fetches GitHub
+directly; revisit if Gru ever grants against a replicated remote.
+The depth probe outlived the floor for the reason above, one local call per grant.
+Both network round trips are bounded by half the evidence freshness window, so a slow one
+fails as a fetch instead of returning evidence the store then calls stale; an observation
+that outlives that window less the same budget fails as the slow observation it was, with
+headroom so evidence squeaking under the limit cannot trip the store's own check a
+millisecond later.
 The stale-tip refusal names `--base-ref`, the one repair a leader on another branch needs.
 Name the PR's own base branch: a grant cannot be retaken once the task is `integrating`, so
 a grant taken on the wrong branch leaves a task only `recover` or operator takeover can

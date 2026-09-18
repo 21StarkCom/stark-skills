@@ -59,8 +59,10 @@ base branch from origin (--base-ref BRANCH, else the default branch origin repor
 of origin rather than read from the local refs/remotes/origin/HEAD) and refuses
 unless the SHA is a commit that repository holds and is that branch's current tip, which
 already implies every merge landed on that branch. A refusal names the current tip.
-A failed fetch, an unreachable origin, or an origin reporting no default branch refuses
-too, and says which. Pass --base-ref when the PR does not target the default branch:
+A failed fetch, an unreachable origin, an origin reporting no default branch, or a shallow
+checkout (which verify cannot walk after the merge) refuses too, and says which. It never
+walks history: the shallow probe is one local call, not an ancestry comparison.
+Pass --base-ref when the PR does not target the default branch:
 verify refuses a grant whose branch is not the PR's base, and a grant cannot be retaken
 once the task is integrating.
 reconcile never equates missing discovery with death. Keep uncertain reservations.

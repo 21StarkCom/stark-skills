@@ -162,20 +162,25 @@ jobs:
                 # Drop the blank that followed "## [Unreleased]"; the heading above supplied one.
                 for (start = 0; start < n && body[start] ~ /^[[:space:]]*$/; start++) ;
                 for (i = start; i < n; i++) {
-                  if (body[i] ~ /^### Changed[[:space:]]*$/) { print body[i]; refresh(); seen = 1; continue }
+                  # Only the FIRST one: a body carrying two "### Changed" headings would
+                  # otherwise get the Refresh bullet under each.
+                  if (!seen && body[i] ~ /^### Changed[[:space:]]*$/) { print body[i]; refresh(); seen = 1; continue }
                   print body[i]
                 }
                 if (!seen) { print "### Changed"; refresh(); print "" }
-                else if (n == 0 || body[n - 1] !~ /^[[:space:]]*$/) print ""
+                else if (body[n - 1] !~ /^[[:space:]]*$/) print ""   # seen implies n > 0
                 inserted = 1
               }
               # Keep [Unreleased] as an empty heading and buffer its body for replay below.
+              # Every rule below is guarded by !inserted: exactly one section is emitted, and a
+              # CHANGELOG whose first numbered heading somehow precedes [Unreleased] replays its
+              # body verbatim instead of either duplicating the section or swallowing the body.
               /^## \[[Uu]nreleased\]/ { print; print ""; unreleased = 1; next }
-              unreleased && /^## \[/ { flush_notes(); unreleased = 0 }
+              unreleased && !inserted && /^## \[/ { flush_notes(); unreleased = 0 }
               !unreleased && !inserted && /^## \[[0-9]/ { flush_notes() }
-              unreleased { body[n++] = $0; next }
+              unreleased && !inserted { body[n++] = $0; next }
               { print }
-              END { if (unreleased) flush_notes(); else if (!inserted) { print ""; flush_notes() } }
+              END { if (!inserted) { if (!unreleased) print ""; flush_notes() } }
             ' CHANGELOG.md > CHANGELOG.md.next
             mv CHANGELOG.md.next CHANGELOG.md
           fi
