@@ -4,8 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { realRunner } from "./jury_dispatch.ts";
 import { normalizeRepoUrl } from "./session_state_lib.ts";
-import { ADOPTION_CHECKS, assertAbsentWorktree, assertLeadershipTransfer, canonicalWorktree, fresh, integrationRepositoryKey, isRevision, namesTicket, OBSERVATION_FRESHNESS_MS, ORPHAN_CHECKS, repositoryKey as taskRepositoryKey, sweepCandidates, verificationReady } from "./gru_lib.ts";
-import type { Assignment, BaseEvidence, CompletionEvidence, LeadershipEvidence, LeadershipTransfer, Observation, OrphanEvidence, Provider, Run, SweepEvidence, Worker, WorktreeAdoption } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, assertAbsentWorktree, assertLeadershipTransfer, canonicalWorktree, fresh, integrationRepositoryKey, isRevision, namesTicket, OBSERVATION_FRESHNESS_MS, ORPHAN_CHECKS, parseSettlement, repositoryKey as taskRepositoryKey, sweepCandidates, ticketClosed, verificationReady } from "./gru_lib.ts";
+import type { Assignment, BaseEvidence, CompletionEvidence, LeadershipEvidence, LeadershipTransfer, Observation, OrphanEvidence, Provider, Run, SettlementEvidence, SettlementRequest, SweepEvidence, Worker, WorktreeAdoption } from "./gru_lib.ts";
 
 export interface CommandResult { code: number | null; stdout: string; stderr: string; timedOut?: boolean }
 export type Command = (argv: string[], cwd?: string, timeoutMs?: number) => Promise<CommandResult>;
@@ -780,13 +780,30 @@ export async function observeBase(task: Assignment, base: string, ref?: string,
 /** Read authoritative PR/commit state and rerun declared checks in a fresh verification worktree. */
 export async function verifyCompletion(task: Assignment, prNumber: number, reviewId: number, evidenceDir: string,
   call: Command = command): Promise<CompletionEvidence> {
+  if (!Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
+  return inspectCompletion(task, prNumber, { reviewId }, evidenceDir, call) as Promise<CompletionEvidence>;
+}
+
+/** The only review exception: an explicit request, plus independently observed zero reviews. */
+export async function inspectUnreviewedMerge(task: Assignment, input: SettlementRequest, evidenceDir: string,
+  call: Command = command): Promise<SettlementEvidence> {
+  const request = parseSettlement(input);
+  if (request.task !== task.spec.id || request.token !== task.token) throw new Error("settlement request does not match the current assignment");
+  const prNumber = Number(request.pr.split("/").at(-1));
+  return inspectCompletion(task, prNumber, { request }, evidenceDir, call) as Promise<SettlementEvidence>;
+}
+
+/** Both paths share every git, disposable-checkout, check, timeout and cleanup operation. */
+async function inspectCompletion(task: Assignment, prNumber: number,
+  authority: { reviewId: number } | { request: SettlementRequest }, evidenceDir: string, call: Command): Promise<CompletionEvidence | SettlementEvidence> {
   if (!verificationReady(task) || !task.token) throw new Error("integration reservation required");
-  if (!Number.isSafeInteger(prNumber) || prNumber < 1 || !Number.isSafeInteger(reviewId) || reviewId < 1) throw new Error("PR and posted review ids required");
+  if (!Number.isSafeInteger(prNumber) || prNumber < 1) throw new Error("PR and posted review ids required");
   const repoDir = task.spec.repo;
   const git = (args: string[]) => checked(call, ["git", ...args], repoDir);
   const repo = await originRepository(repoDir, call);
   const api = async (endpoint: string) => JSON.parse(await checked(call, ["gh", "api", `repos/${repo}/${endpoint}`], repoDir));
   const pr = await api(`pulls/${prNumber}`);
+  if ("request" in authority && pr.html_url?.toLowerCase() !== authority.request.pr.toLowerCase()) throw new Error("settlement PR does not match operator request");
   if (!pr.merged || !pr.merged_at || !isRevision(pr.merge_commit_sha)) throw new Error("PR is not confirmed merged");
   // GitHub reports canonical case, and a deleted fork reports head.repo as null.
   const sameRepo = (r: { full_name?: string } | null | undefined) => r?.full_name?.toLowerCase() === repo.toLowerCase();
@@ -817,8 +834,16 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
       task.spec.baseRef && task.spec.baseRef !== declared ? ` (the task declares baseRef ${task.spec.baseRef}; this grant overrode it with --base-ref ${declared})` : ""
     }. A grant cannot be retaken once the task is integrating, so this one needs recovery or operator takeover`);
   }
-  const review = await api(`pulls/${prNumber}/reviews/${reviewId}`);
-  if (review.commit_id !== pr.head.sha || !review.submitted_at || !["COMMENTED", "APPROVED"].includes(review.state)) throw new Error("posted review does not cover the merged PR head");
+  const noReviews = async () => {
+    const pages = JSON.parse(await checked(call, ["gh", "api", `repos/${repo}/pulls/${prNumber}/reviews`, "--paginate", "--slurp"], repoDir));
+    if (!Array.isArray(pages) || pages.length === 0 || !pages.every(p => Array.isArray(p) && p.length === 0)) {
+      throw new Error("settlement requires no posted review; use verify when review evidence exists");
+    }
+  };
+  const review = "reviewId" in authority ? await api(`pulls/${prNumber}/reviews/${authority.reviewId}`) : undefined;
+  if ("reviewId" in authority) {
+    if (review.commit_id !== pr.head.sha || !review.submitted_at || !["COMMENTED", "APPROVED"].includes(review.state)) throw new Error("posted review does not cover the merged PR head");
+  } else await noReviews();
   await git(["check-ref-format", `refs/heads/${pr.base.ref}`]);
   // Each invocation owns its refs, including concurrent verification of the same task.
   const prefix = `refs/gru/verification/${randomUUID()}`;
@@ -837,16 +862,30 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
     // Existing evidence remains untouched. A fresh directory prevents stale build products passing.
     await git(["worktree", "add", "--detach", verifyTree, baseTip]);
     cleanup.unshift(["worktree", "remove", "--force", verifyTree]);
-    const checks: CompletionEvidence["checks"] = [];
-    for (let i = 0; i < task.spec.checks.length; i++) {
-      const argv = task.spec.checks[i];
-      const result = await call(argv, verifyTree, task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS);
-      const log = path.join(evidenceDir, `check-${task.token}-${i}.log`);
-      fs.writeFileSync(log, JSON.stringify({ argv, cwd: verifyTree, head: baseTip, ...result }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-      if (result.code !== 0 || result.timedOut) throw new Error(`independent check ${result.timedOut ? "timed out" : "failed"}; evidence: ${log}`);
-      checks.push({ argv, exitCode: result.code, log });
-    }
+    const runCommands = async (commands: string[][], kind: "setup" | "check") => {
+      const results: CompletionEvidence["checks"] = [];
+      for (let i = 0; i < commands.length; i++) {
+        const argv = commands[i];
+        const result = await call(argv, verifyTree, task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS);
+        const log = path.join(evidenceDir, `${kind}-${task.token}-${i}.log`);
+        fs.writeFileSync(log, JSON.stringify({ ...(kind === "setup" ? { kind } : {}), argv, cwd: verifyTree, head: baseTip, ...result }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+        if (result.code !== 0 || result.timedOut) throw new Error(`independent ${kind} ${result.timedOut ? "timed out" : "failed"}; evidence: ${log}`);
+        results.push({ argv, exitCode: result.code, log });
+      }
+      return results;
+    };
+    const setup = "request" in authority ? await runCommands(authority.request.setup ?? [], "setup") : [];
+    const checks = await runCommands(task.spec.checks, "check");
     const ticketState = await readTicketState(task.spec.ticket, call, repoDir);
+    if ("request" in authority) {
+      if (!ticketClosed(ticketState)) throw new Error("repository completion milestone not recorded in Alfred");
+      // Checks can be long; a review posted while they ran must not become a false no-review attestation.
+      await noReviews();
+      const proof: SettlementEvidence = { head: pr.head.sha, base: task.integrationBase, merge: pr.merge_commit_sha,
+        pr: pr.html_url, checks, setup, checkedAt: new Date().toISOString(), ticketState, reviewCount: 0, baseTip };
+      fs.writeFileSync(path.join(evidenceDir, `settlement-${task.token}.json`), JSON.stringify({ ...proof, prRecord: pr, request: authority.request }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+      return proof;
+    }
     const proof = { head: pr.head.sha, base: task.integrationBase, merge: pr.merge_commit_sha,
       pr: pr.html_url, review: review.html_url, checks, verifiedAt: new Date().toISOString(), ticketState };
     fs.writeFileSync(path.join(evidenceDir, `completion-${task.token}.json`), JSON.stringify({ ...proof, verifiedMain: baseTip, prRecord: pr, reviewRecord: review }, null, 2) + "\n", { flag: "wx", mode: 0o600 });

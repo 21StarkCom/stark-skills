@@ -85,6 +85,18 @@ Gru preserves session worktrees and ownership after completion. Native worker ob
 
 ## Distribution
 
+Gru's `settle --file` accepts an operator-authored request bound to run/task/token/revision
+for a merged PR with zero reviews, retaining all other verification requirements.
+Optional setup in that same request runs before unchanged checks with separate evidence;
+it is never inferred, and any failure refuses settlement.
+Setup must match the target repo's documented install. Requests contain no secrets;
+the operator supplies Mimir-managed credentials through the environment, which is not audited.
+It records `settled-without-review`, releases only integration locks, and reports
+`released-unverified` with its reason in status and completion summaries. It never
+unblocks dependents. Sweep can release remaining reservations on its usual proof,
+while preserving the review gap. `verify` stays strict. See the
+[settlement contract](skill/gru/references/operations.md#operator-settlement-of-a-merged-grant-without-review).
+
 PR landing retains `--lead` as a compatibility argument, echoed in dry-run output only when supplied, and requires `--body` like every other documented-required flag. Authentication patterns return `skipped` with `operator_action_required` in auto mode, before guard commands, verification, budgets, or circuit accounting; in suggest mode they return `suggested` like any other pattern, so canary promotion history is real — while `healer_canary` refuses to promote that action, since auto mode would only ever refuse it. Both runtimes carry the same gate. Read-only GraphQL operations may retry once; uncertain mutations never retry.
 
 Skills + tools ship as separate self-contained **Claude Code** and native **Codex** plugin packages via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.

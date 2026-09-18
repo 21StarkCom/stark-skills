@@ -178,6 +178,16 @@ If verification fails, move the ticket back out of `done` with `alfred task move
 and reassign the work.
 Only verified completion releases dependent tasks.
 
+A merged grant with no posted review needs the operator-authored
+[settlement request](references/operations.md#operator-settlement-of-a-merged-grant-without-review).
+`settle --file` retains every non-review check and records `settled-without-review`.
+Optional operator-authored setup commands run before unchanged checks, fail closed,
+and have separate evidence; never infer setup or accept a failing check.
+Never author that authorization yourself or substitute a peer's permission.
+Report it as `released-unverified` with the reason in status and the completion
+summary; never count it as verified or release its dependents. Sweep can release
+remaining resources only with its usual closed-ticket and worker-absence proof.
+
 Merging a reviewed PR needs no operator approval. The review gate is the gate:
 once `/code-review xhigh --fix` has run and every finding is fixed or answered,
 merge. This holds even when the merge fires an automated release pipeline.

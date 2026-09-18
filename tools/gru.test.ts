@@ -14,6 +14,102 @@ import { BASE_CHECKS, GruStore } from "./gru_lib.ts";
 
 const CLI = path.join(import.meta.dirname, "gru.ts");
 
+// Repeatable negative controls. Never mutates the checkout or a real engagement.
+// GRU_SETTLEMENT_MUTATION_SWEEP=1 node --test --test-name-pattern='settlement mutation' tools/gru.test.ts
+test("settlement mutation sweep detects reverted protections", { skip: process.env.GRU_SETTLEMENT_MUTATION_SWEEP !== "1" }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-settlement-mutations-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const copy = path.join(dir, "tools");
+  fs.cpSync(import.meta.dirname, copy, { recursive: true, filter: source => path.basename(source) !== "node_modules" });
+  const originals = new Map(["gru.ts", "gru_lib.ts", "gru_runtime_lib.ts"].map(name => [name, fs.readFileSync(path.join(copy, name), "utf8")]));
+  const { NODE_TEST_CONTEXT: _context, ...env } = process.env;
+  const execute = (cli: boolean, pattern = cli ? "settle requires written|verifyBlocker" : "settlement ") => spawnSync(process.execPath, ["--test", "--test-reporter=spec", "--test-name-pattern",
+    pattern, path.join(copy, cli ? "gru.test.ts" : "gru_lib.test.ts")],
+  { encoding: "utf8", timeout: 120_000, env: { ...env, GRU_SETTLEMENT_MUTATION_SWEEP: "0" } });
+  for (const cli of [false, true]) {
+    const baseline = execute(cli);
+    assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
+  }
+  // Review regressions name their focused test and finding, so each has its own
+  // passing baseline and assertion failure rather than relying on a suite total.
+  const mutants: [string, string, string, boolean, string?, string?, string?][] = [
+    ["gru.ts", '      flag("file");', "", true],
+    ["gru_lib.ts", 'value.noReview === true', 'true', false],
+    ["gru_lib.ts", 'nonempty(value[key]), `settlement ${key} is required`', 'true, `settlement ${key} is required`', false],
+    ["gru_lib.ts", 'request.run === id && request.task === taskId && request.token === token && request.revision === revision', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.base === task.integrationBase', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'isRevision(sha)', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.pr.toLowerCase() === request.pr.toLowerCase()', 'true', false],
+    ["gru_lib.ts", 'evidence.reviewCount === 0 && !("review" in evidence) && !("verifiedAt" in evidence)', 'true', false],
+    ["gru_lib.ts", 'fresh({ observedAt: evidence.checkedAt })', 'true', false],
+    ["gru_lib.ts", 'ticketClosed(evidence.ticketState)', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.checks.length === task.spec.checks.length', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.checks[i].exitCode === 0', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'JSON.stringify(evidence.checks[i].argv) === JSON.stringify(argv)', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'nonempty(evidence.checks[i].log)', 'true', false, 'settleWithoutReview('],
+    ["gru_lib.ts", 'evidence.setup.length === setup.length', 'true', false],
+    ["gru_lib.ts", 'evidence.setup[i].exitCode === 0', 'true', false],
+    ["gru_lib.ts", 'JSON.stringify(evidence.setup[i].argv) === JSON.stringify(argv)', 'true', false],
+    ["gru_lib.ts", 'nonempty(evidence.setup[i].log)', 'true', false],
+    ["gru_lib.ts", 'this.event(run, "settled-without-review",', 'this.event(run, "verified",', false],
+    ["gru_lib.ts", 'task.phase = "released-unverified";', 'task.phase = "done";', false],
+    ["gru_lib.ts", 'task.integrationBase && !task.settlement', 'task.integrationBase', false],
+    ["gru_lib.ts", 'task.phase = task.settlement ? "released-unverified" : "swept";', 'task.phase = "swept";', false],
+    ["gru_lib.ts", '&& !t.swept && (t.phase', '&& (t.phase', false],
+    ["gru.ts", 'summary: completionSummary(run), ready:', 'ready:', true],
+    ["gru_runtime_lib.ts", 'if (!pr.merged || !pr.merged_at || !isRevision(pr.merge_commit_sha))', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'if (!sameRepo(pr.head.repo) || !sameRepo(pr.base.repo))', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'if (declared !== undefined && declared !== pr.base.ref)', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", pr.merge_commit_sha, baseTip]);', '', true],
+    ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);', '', true],
+    ["gru_runtime_lib.ts", '!pages.every(p => Array.isArray(p) && p.length === 0)', 'false', true],
+    ["gru_runtime_lib.ts", 'if (result.code !== 0 || result.timedOut)', 'if (false)', true],
+    ["gru_runtime_lib.ts", 'task.spec.checkTimeoutMs ?? DEFAULT_CHECK_TIMEOUT_MS', 'DEFAULT_CHECK_TIMEOUT_MS', false],
+    ["gru_runtime_lib.ts", 'await noReviews();\n      const proof:', 'const proof:', false],
+    ["gru.ts", '  if (task.phase === "released-unverified") return `task was released-unverified: ${task.settlement?.request.reason}; it cannot be verified`;', '', true,
+      undefined, 'verifyBlocker', '4046260579 terminal guidance'],
+    ["gru_lib.ts", ', "released-unverified"', '', false,
+      'const active =', 'settlement stays terminal', '4046260590 terminal task'],
+    ["gru_lib.ts", '["done", "released-unverified"].includes(t.phase)', '["done"].includes(t.phase)', false,
+      'const occupiesSlot =', 'settlement frees a worker slot', '4046260595 idle slot'],
+    ["gru_lib.ts", ' && !t.swept', '', false,
+      'private adopt(', 'settlement followed by sweep', '4046260600 swept adoption'],
+    ["gru_lib.ts", 'run.mode === "running" && run.reconciled && verificationReady(task)', 'true', false,
+      'settleWithoutReview(', 'settlement store refuses', '4046260606 store guard'],
+    ["gru_lib.ts", 'run.mode === "running" && ', '', false,
+      'settleWithoutReview(', 'settlement store refuses', '4046260606 running mode'],
+    ["gru_lib.ts", 'run.reconciled && ', '', false,
+      'settleWithoutReview(', 'settlement store refuses', '4046260606 reconciliation'],
+    ["gru_lib.ts", 'verificationReady(task)', 'true', false,
+      'settleWithoutReview(', 'settlement store refuses', '4046260606 settlement window'],
+    ["gru_runtime_lib.ts", 'if ("request" in authority && pr.html_url?.toLowerCase() !== authority.request.pr.toLowerCase())', 'if (false)', true,
+      undefined, 'settle requires written', '4046260612 PR before setup'],
+    ["gru_runtime_lib.ts", 'request.task !== task.spec.id || ', '', false,
+      'export async function inspectUnreviewedMerge(', 'settlement runtime refuses', '4046260612 task before commands'],
+    ["gru_runtime_lib.ts", ' || request.token !== task.token', '', false,
+      'export async function inspectUnreviewedMerge(', 'settlement runtime refuses', '4046260612 token before commands'],
+  ];
+  for (const [name, from, to, cli, scope, pattern, finding] of mutants) {
+    if (pattern) {
+      const baseline = execute(cli, pattern);
+      assert.equal(baseline.status, 0, `${finding} baseline: ${baseline.stdout}${baseline.stderr}`);
+      assert.match(baseline.stdout, /pass [1-9]/, `${finding} baseline must execute assertions`);
+    }
+    const original = originals.get(name)!;
+    const offset = scope ? original.indexOf(scope) : 0;
+    assert.ok(offset >= 0, `missing mutation scope ${scope}`);
+    const index = original.indexOf(from, offset);
+    assert.ok(index >= 0, `missing mutation ${from}`);
+    fs.writeFileSync(path.join(copy, name), original.slice(0, index) + to + original.slice(index + from.length));
+    const result = execute(cli, pattern);
+    fs.writeFileSync(path.join(copy, name), original);
+    assert.equal(result.status, 1, `mutation survived or did not execute: ${from}\n${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /AssertionError/, `expected assertion failure, not startup failure: ${from}\n${result.stdout}${result.stderr}`);
+    t.diagnostic(`KILLED: ${finding ? `${finding}: ` : ""}${name}: ${from}`);
+  }
+  t.diagnostic(`${mutants.length}/${mutants.length} settlement mutations rejected`);
+});
+
 test("rebrief-check is a worker command and succeeds without creating or opening Gru state", async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-rebrief-cli-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -287,6 +383,150 @@ function engagement(t: TestContext) {
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=gru", "-c", "user.email=gru@example.invalid",
   "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+
+test("gru CLI: settle requires written authority and all non-review proof; status never calls it verified", async t => {
+  const { dir, state, file } = engagement(t);
+  const unopened = path.join(dir, "must-stay-absent", "state.sqlite");
+  const noFile = await run(["settle", "--state", unopened], "leader-one");
+  assert.equal(noFile.code, 2);
+  assert.match(noFile.error, /--file is required/);
+  assert.equal(fs.existsSync(path.dirname(unopened)), false, "missing authority must not open state");
+  const config = JSON.parse(fs.readFileSync(file, "utf8"));
+  const repo = config.tasks[0].repo;
+  const origin = path.join(repo, "o", "r.git");
+  fs.mkdirSync(path.dirname(origin));
+  git(repo, "init", "-q", "--bare", "--initial-branch=main", origin);
+  git(repo, "remote", "set-url", "origin", "o/r.git");
+  git(repo, "checkout", "-b", "main");
+  git(repo, "commit", "--allow-empty", "-qm", "integration base");
+  const base = git(repo, "rev-parse", "HEAD").trim();
+  git(repo, "commit", "--allow-empty", "-qm", "merged change");
+  const head = git(repo, "rev-parse", "HEAD").trim();
+  const unrelated = git(repo, "commit-tree", "HEAD^{tree}", "-m", "unrelated history").trim();
+  git(repo, "push", "-q", "origin", "main", "HEAD:refs/pull/1/head");
+  config.tasks[0].repositoryKey = "o/r";
+  const setupMarker = path.join(dir, "setup-ran");
+  const setup = [
+    [process.execPath, "-e", "require('fs').writeFileSync(process.env.GRU_SETUP_RUN_MARKER, 'ran'); console.log('setup stage'); process.exit(Number(process.env.GRU_SETTLE_SETUP_FAIL || 0))"],
+    [process.execPath, "-e", "if (!require('fs').existsSync(process.env.GRU_SETUP_RUN_MARKER)) process.exit(8); require('fs').writeFileSync('setup-proof', 'installed')"],
+  ];
+  config.tasks[0].checks = [
+    [process.execPath, "-e", "if (!require('fs').existsSync('setup-proof')) process.exit(9); console.log('disposable checks passed'); process.exit(Number(process.env.GRU_SETTLE_CHECK_FAIL || 0))"],
+  ];
+  const store = new GruStore(state); t.after(() => store.close());
+  let current = store.reconcile("cli", "leader-one", store.create(config).revision, {});
+  current = store.reserve("cli", "leader-one", current.revision, "t");
+  const token = current.tasks[0].token!;
+  current = store.attach("cli", "leader-one", current.revision, "t", token, {
+    id: "codex:t", session: "worker", surface: "surface", workspace: "workspace", provider: "codex", worktree: config.tasks[0].worktree,
+  });
+  current = store.report("cli", "leader-one", current.revision, "t", token, "worker", "ack", "d");
+  current = store.report("cli", "leader-one", current.revision, "t", token, "worker", "ready", "d");
+  current = store.integrate("cli", "leader-one", current.revision, "t", token, base, {
+    observedAt: new Date().toISOString(), repositoryKey: "o/r", ref: "main", tip: base, base, checks: [...BASE_CHECKS],
+  });
+  const held = store.owned("cli", "t");
+  const bin = path.join(dir, "bin"); fs.mkdirSync(bin);
+  const records = path.join(dir, "api.json");
+  const pr = { merged: true, merged_at: new Date().toISOString(), merge_commit_sha: head,
+    head: { sha: head, repo: { full_name: "o/r" } }, base: { ref: "main", repo: { full_name: "o/r" } }, html_url: "https://github.com/o/r/pull/1" };
+  const world = { pr, reviews: [[]] as unknown, ticket: "Closed" };
+  const save = () => fs.writeFileSync(records, JSON.stringify(world)); save();
+  fs.writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env node
+const r = JSON.parse(require('fs').readFileSync(${JSON.stringify(records)}, 'utf8'));
+const args = process.argv.slice(2);
+if (args[1].endsWith('/reviews')) {
+  if (!args.includes('--paginate') || !args.includes('--slurp')) process.exit(8);
+  console.log(JSON.stringify(r.reviews));
+} else console.log(JSON.stringify(args[1].includes('/reviews/') ? {} : r.pr));
+`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, "alfred"), `#!/usr/bin/env node
+const r = JSON.parse(require('fs').readFileSync(${JSON.stringify(records)}, 'utf8'));
+console.log(JSON.stringify({item:{ref:{custom_id:'STARK-1'},state:r.ticket},comments:[],comments_read:true}));
+`, { mode: 0o755 });
+  const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}`, GRU_SETUP_RUN_MARKER: setupMarker };
+  const args = ["--run", "cli", "--revision", String(current.revision), "--task", "t", "--token", token, "--state", state];
+  // This is synthetic test authority against a throwaway store, never the live rehearsal file.
+  const authorization = path.join(dir, "fixture-operator.json");
+  const request = { run: "cli", task: "t", token, revision: current.revision, pr: pr.html_url, noReview: true, setup,
+    reason: "Legacy merge has no review", operatorRequest: "TEST FIXTURE: release this unreviewed grant" };
+  fs.writeFileSync(authorization, JSON.stringify(request));
+  const settledArgs = ["settle", ...args, "--file", authorization];
+  const refuses = async (expected: RegExp, input = settledArgs, extra = {}) => {
+    const result = await run(input, "leader-one", { ...env, ...extra });
+    assert.equal(result.code, 2, result.out);
+    assert.match(result.error, expected);
+    assert.equal(store.read("cli").revision, current.revision);
+    assert.deepEqual(store.owned("cli", "t"), held);
+    assert.equal(store.read("cli").events.some(e => e.kind === "settled-without-review"), false);
+  };
+  await refuses(/--file is required/, ["settle", ...args]);
+  await refuses(/does not apply to settle/, [...settledArgs, "--review", "1"]);
+  for (const [field, value] of [["token", "old"], ["task", "other"], ["run", "other"], ["revision", current.revision - 1]]) {
+    fs.writeFileSync(authorization, JSON.stringify({ ...request, [field]: value }));
+    await refuses(/does not match/);
+  }
+  assert.equal(fs.existsSync(setupMarker), false, "binding refuses before setup executes");
+  fs.writeFileSync(authorization, JSON.stringify({ ...request, noReview: false }));
+  await refuses(/noReview/);
+  fs.writeFileSync(authorization, JSON.stringify({ ...request, pr: "https://github.com/other/repo/pull/1" }));
+  await refuses(/PR does not match/);
+  assert.equal(fs.existsSync(setupMarker), false, "PR binding refuses before setup executes");
+  fs.writeFileSync(authorization, JSON.stringify(request));
+  // Ordinary verify still refuses a reviewless merge while keeping every owner row.
+  await refuses(/posted review does not cover/, ["verify", ...args, "--pr", "1", "--review", "1"]);
+  pr.merged = false; save(); await refuses(/not confirmed merged/); pr.merged = true;
+  pr.merged_at = ""; save(); await refuses(/not confirmed merged/); pr.merged_at = new Date().toISOString();
+  pr.base.repo.full_name = "foreign/repo"; save(); await refuses(/repository mismatch/); pr.base.repo.full_name = "o/r";
+  pr.base.ref = "release"; save(); await refuses(/granted on main/); pr.base.ref = "main";
+  pr.merge_commit_sha = unrelated; save(); await refuses(/git failed/); pr.merge_commit_sha = head;
+  pr.head.sha = base; save(); await refuses(/fetched PR head differs/); pr.head.sha = head;
+  git(repo, "push", "-q", "--force", "origin", `${unrelated}:refs/pull/1/head`);
+  pr.head.sha = unrelated; save(); await refuses(/git failed/);
+  git(repo, "push", "-q", "--force", "origin", `${head}:refs/pull/1/head`); pr.head.sha = head;
+  world.reviews = [[], [{ state: "COMMENTED", commit_id: head }]]; save(); await refuses(/no posted review/);
+  world.reviews = {}; save(); await refuses(/no posted review/);
+  world.reviews = [[]]; world.ticket = "in progress"; save(); await refuses(/completion milestone/);
+  world.ticket = "Closed"; save();
+  await refuses(/independent setup failed/, settledArgs, { GRU_SETTLE_SETUP_FAIL: "6" });
+  fs.writeFileSync(authorization, JSON.stringify({ ...request, setup: undefined }));
+  await refuses(/independent check failed/);
+  fs.writeFileSync(authorization, JSON.stringify(request));
+  await refuses(/independent check failed/, settledArgs, { GRU_SETTLE_CHECK_FAIL: "7" });
+  const result = await run(settledArgs, "leader-one", env);
+  assert.equal(result.code, 0, result.error);
+  const settled = store.read("cli");
+  assert.equal(settled.mode, "released-unverified");
+  assert.equal(settled.tasks[0].phase, "released-unverified");
+  assert.equal(settled.tasks[0].evidence, undefined);
+  assert.deepEqual(store.owned("cli", "t"), held.filter(r => !r.startsWith("merge:") && !r.startsWith("merge-resource:")));
+  assert.equal(settled.tasks[0].settlement!.evidence.checks.length, 1);
+  assert.deepEqual(settled.tasks[0].spec.checks, config.tasks[0].checks, "setup never rewrites declared checks");
+  const setupEvidence = settled.tasks[0].settlement!.evidence.setup;
+  assert.deepEqual(setupEvidence.map(c => c.argv), setup);
+  for (const entry of setupEvidence) {
+    const log = JSON.parse(fs.readFileSync(entry.log, "utf8"));
+    assert.equal(log.kind, "setup");
+    assert.match(path.basename(entry.log), /^setup-/);
+    assert.equal(log.code, 0);
+    assert.equal(log.cwd, JSON.parse(fs.readFileSync(settled.tasks[0].settlement!.evidence.checks[0].log, "utf8")).cwd);
+  }
+  for (const check of settled.tasks[0].settlement!.evidence.checks) {
+    const log = JSON.parse(fs.readFileSync(check.log, "utf8"));
+    assert.equal(log.head, head);
+    assert.equal(log.code, 0);
+    assert.notEqual(log.cwd, config.tasks[0].worktree);
+    assert.equal(fs.existsSync(log.cwd), false, "only disposable checkout was removed");
+  }
+  assert.ok(fs.existsSync(config.tasks[0].worktree));
+  assert.equal(git(repo, "for-each-ref", "refs/gru/verification").trim(), "");
+  const status = await run(["status", "--run", "cli", "--state", state], "leader-one");
+  assert.equal(status.code, 0, status.error);
+  const expectedSummary = { verified: [], releasedUnverified: [{ task: "t", state: "released-unverified", reason: request.reason, pr: request.pr }], swept: [] };
+  assert.deepEqual(JSON.parse(status.out).summary, expectedSummary);
+  assert.deepEqual(JSON.parse(result.out).summary, expectedSummary);
+  assert.deepEqual(JSON.parse(status.out).waiting, []);
+});
 /** A GitHub-origin repository with one commit, so `git worktree add` has a HEAD to cut from. */
 function originRepo(dir: string, origin: string): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -533,6 +773,9 @@ test("verifyBlocker names the command that actually repairs each phase", () => {
   assert.match(at("working"), /report ready and receive integration/);
   // Checked before any grant branch: a swept task has no repair, only an explanation.
   assert.match(at("swept"), /released by a proof-based sweep; it cannot be verified/);
+  const released = at("released-unverified", { settlement: { request: { reason: "No posted review for historical merge" } } });
+  assert.equal(released, "task was released-unverified: No posted review for historical merge; it cannot be verified");
+  assert.doesNotMatch(released, /report ready|receive integration|integrate/);
 
   // Reaching `review` IS the READY report, so the generic default told a task to take a
   // step it had already taken and never named `integrate` — the one command that applies.
