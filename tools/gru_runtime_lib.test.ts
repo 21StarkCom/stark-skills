@@ -514,6 +514,8 @@ const contract = (files: string[], clause: string, pattern: RegExp, from: string
 const minions = ["skill/minion/SKILL.md", "runtime-overrides/codex/skill/minion/SKILL.md"];
 const leaders = ["skill/gru/SKILL.md", "runtime-overrides/codex/skill/gru/SKILL.md"];
 const ops = "skill/gru/references/operations.md";
+const workers = ["tools/gru_runtime_lib.ts", ...minions];
+const protocol = [...workers, ...leaders, ops];
 contract(["tools/gru_runtime_lib.ts", ...minions], "unconditional rebase",
   /Before every merge, after the grant: fetch and rebase onto the PR's own base branch's current tip, even if you observed no other merge/,
   "Before every merge, after the grant:", "After another merge:");
@@ -547,6 +549,85 @@ contract(["tools/gru.ts"], "help base SHA",
 contract(["tools/gru.ts"], "stopped READY prerequisite",
   /if restored to review, integrate .* otherwise receive its worker's READY report first, then integrate/,
   "otherwise receive its worker's READY report first, then integrate", "otherwise integrate");
+// Pin the obligations on every surface that directs them, including dilution (not
+// only deletion): recording a pair is not using it, and settlement is not verification.
+contract(leaders, "unconditional rebase",
+  /Require the worker to fetch and rebase after every grant before merging, even without another observed merge/,
+  "after every grant before merging", "only after another observed merge");
+contract([ops], "unconditional rebase",
+  /After every grant, require the worker to fetch and rebase before merging, even if no other merge was observed/,
+  "After every grant, require", "After another merge, recommend");
+contract([...leaders, ops], "granted ancestry", /merged head must contain the granted base SHA/i,
+  "merged head must contain", "merged head must EQUAL");
+contract(workers, "mandatory ancestry", /merged head must contain the granted base SHA/,
+  "merged head must contain", "merged head should contain");
+contract([...leaders, ops], "fresh grant observation", /immediately before integrate/,
+  "immediately before", "at some point before");
+contract(protocol, "stop on ancestry failure", /and stop on failure/,
+  "and stop on failure", "and continue on failure");
+contract([...leaders, ops], "ready refusal", /ready.*?is refused while integrating/,
+  "is refused while", "is permitted while");
+contract(["tools/gru_runtime_lib.ts"], "repost new head", /Repost your review on any new head/,
+  "Repost your review on any new head, then ", "");
+contract(minions, "repost new head", /Repost the review on any new head/,
+  "Repost the review on any new head.", "");
+contract([...leaders, ops], "repost new head", /Require the worker to repost the review on any new head/,
+  "Require the worker to repost the review on any new head", "The worker may reuse an older review");
+contract(leaders, "use last review", /Use that last review id for verify --review/,
+  "Use that last review id", "Use the READY review id");
+contract([ops], "use last review", /pass the last review id to verify --review/,
+  "pass the last review id", "pass the READY review id");
+contract(leaders, "compare last head", /compare the actual PR head to that last reported head/,
+  "compare the actual PR head", "record the actual PR head");
+contract([ops], "compare last head", /Compare GitHub's actual PR head to that last reported head/,
+  "Compare GitHub's actual PR head", "Record GitHub's actual PR head");
+contract([...leaders, ops], "unknown is not dead", /unknown is not dead/i,
+  "is not dead", "is dead");
+contract([ops], "irreparable merged evidence",
+  /Neither a missing granted-base ancestor nor a wrong-head review can be repaired after merging/,
+  "can be repaired after merging", "can safely be repaired after merging");
+contract(leaders, "settlement eligibility", /already-merged grant with zero posted reviews/,
+  "with zero posted reviews", "with any number of posted reviews");
+contract([ops], "settlement eligibility", /already merged with zero posted reviews/,
+  "with zero posted reviews", "with any number of posted reviews");
+contract([...leaders, ops], "operator settlement authorization", /operator-authored request/,
+  "operator-authored request", "leader-authored request");
+contract(leaders, "settlement keeps checks", /Settlement retains ancestry, checks and ticket closure/,
+  "Settlement retains ancestry, checks and ticket closure", "Settlement bypasses normal verification");
+contract([ops], "settlement keeps checks", /Settlement still requires both ancestry checks, a closed ticket, and green declared checks/,
+  "Settlement still requires both ancestry checks", "Settlement waives both ancestry checks");
+contract([...leaders, ops], "settlement unverified release", /releases merge resources as released-unverified/i,
+  "merge resources as `released-unverified`", "merge resources as VERIFIED");
+contract([ops], "settlement never verified", /released-unverified, never verified/,
+  ", never\nverified,", ",");
+contract(leaders, "settlement blocks dependents", /keeps dependents blocked/,
+  "keeps dependents blocked", "releases dependents");
+contract([ops], "settlement blocks dependents", /dependents remain blocked/,
+  "dependents remain blocked", "dependents are released");
+contract([...leaders, ops], "settlement cannot repair evidence",
+  /An unmerged PR, wrong ancestry,? or an existing wrong-head review does not qualify/,
+  "does not qualify", "qualifies");
+contract(protocol, "structured progress pair",
+  /message is a JSON string containing \{"head":"<full PR head SHA>","review":<numeric review id>\}/,
+  "<numeric review id>", "<READY review id>");
+contract([...leaders, ops], "durable report events", /run.events as report:progress with the pair in detail/,
+  "`run.events` as `report:progress`", "`task.report` as latest message");
+contract([...leaders, ops], "recover latest post-grant pair",
+  /On resume or leadership transfer, read gru status --run ID: in event array order, find this task's latest integration event, then its last report:progress containing that pair after the grant. Never fall back to READY evidence/,
+  "after the grant. Never fall back to READY evidence", "before the grant. Fall back to READY evidence");
+contract(workers, "push rebased head", /Push the rebased branch with an explicit force-with-lease/,
+  "Push the rebased branch with an explicit force-with-lease", "Keep the rebased branch local");
+contract(workers, "GitHub head equals local head", /require PR_HEAD to equal local HEAD/,
+  "require PR_HEAD to equal local HEAD", "allow PR_HEAD to differ from local HEAD");
+contract([...leaders, ops], "push rebased head",
+  /Require an explicit force-with-lease push and a fetched GitHub PR head equal to local HEAD/,
+  "Require an explicit force-with-lease push", "Allow an unpushed local branch");
+contract(protocol, "GitHub head ancestry", /git merge-base --is-ancestor GRANTED_BASE PR_HEAD/,
+  "git merge-base --is-ancestor GRANTED_BASE PR_HEAD", "git merge-base --is-ancestor GRANTED_BASE HEAD");
+contract(["tools/gru_runtime_lib.ts", ...leaders, ops], "review matches GitHub head", /commit_id equals PR_HEAD/,
+  "equals PR_HEAD", "may differ from PR_HEAD");
+contract(minions, "review matches GitHub head", /commit_id equals PR_HEAD/,
+  "equals\nPR_HEAD", "may differ from PR_HEAD");
 
 for (const c of contractCases) test(`STARK-5052 contract: ${c.file} ${c.clause}`, async () => {
   const root = path.resolve(import.meta.dirname, "..");
@@ -592,6 +673,7 @@ test("STARK-5052 mutation sweep detects every reverted contract clause", {
   const guards: [string, string, string][] = [
     ["gru_lib.ts", '["working", "blocked", "review"].includes(task.phase)', 'true'],
     ["gru_lib.ts", 'task.report = { kind, message, at: new Date().toISOString() };', 'task.report ??= { kind, message, at: new Date().toISOString() };'],
+    ["gru_lib.ts", 'this.event(run, `report:${kind}`, message, taskId);', ''],
     ["gru_runtime_lib.ts", 'review.commit_id !== pr.head.sha', 'false'],
     ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);', ''],
     ["gru_lib.ts", "resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%' OR resource LIKE 'exclusive:%'", "resource LIKE 'exclusive:%'"],
@@ -714,7 +796,14 @@ test("STARK-5052 advanced base rebases, imports progress, verifies last review a
   const head = git("rev-parse", "HEAD");
   assert.notEqual(head, oldHead);
   git("merge-base", "--is-ancestor", base, "HEAD");
-  reviews.set(2, head);
+  assert.notEqual(pr.head.sha, head, "a local rebase has not updated GitHub's PR head");
+  await assert.rejects(verifyCompletion(current.tasks[0], 1, 1, path.join(dir, "unpushed"), call), /git failed \(1\)/);
+  git("push", `--force-with-lease=refs/pull/1/head:${oldHead}`, "origin", "HEAD:refs/pull/1/head");
+  pr.head.sha = git("ls-remote", "origin", "refs/pull/1/head").split(/\s/)[0];
+  assert.equal(pr.head.sha, head);
+  git("fetch", "origin", "refs/pull/1/head");
+  git("merge-base", "--is-ancestor", base, pr.head.sha);
+  reviews.set(2, pr.head.sha);
   const reportMessage = JSON.stringify({ head, review: 2 });
   const reportId = "12345678-1234-1234-1234-123456789012";
   const record = (kind: string) => ({ state: "submitted", delivery: "confirmed", from: peer().id,
@@ -729,13 +818,21 @@ test("STARK-5052 advanced base rebases, imports progress, verifies last review a
   assert.equal(current.tasks[0].phase, "integrating");
   assert.ok(current.received.includes(reportId));
   assert.equal(current.tasks[0].report?.message, reportMessage, "progress replaces the READY head/review pair");
-  const last = JSON.parse(current.tasks[0].report!.message);
-  assert.deepEqual(last, { head, review: 2 });
   const ownsMerge = () => Number(store.owned("run", "task").includes("merge:owner/repo"));
   assert.equal(ownsMerge(), 1, "progress retains integration ownership");
-  git("push", `--force-with-lease=refs/pull/1/head:${oldHead}`, "origin", "HEAD:refs/pull/1/head");
   gitDir = repo; git("merge", "--squash", "candidate"); git("commit", "-m", "squash candidate"); git("push", "origin", "main");
-  pr.head.sha = head; pr.merge_commit_sha = git("rev-parse", "HEAD");
+  pr.merge_commit_sha = git("rev-parse", "HEAD");
+  current = store.report("run", "leader", current.revision, "task", token, "session", "complete", `Merged ${pr.merge_commit_sha}`);
+  assert.match(current.tasks[0].report!.message, /^Merged /, "completion overwrites the task snapshot");
+  // A resumed/transferred leader reads durable status, not its old in-memory pair.
+  const resumed = JSON.parse(execFileSync(process.execPath, [path.join(import.meta.dirname, "gru.ts"), "status",
+    "--state", path.join(dir, "state.sqlite"), "--run", "run"], { encoding: "utf8" })) as Run;
+  const grantIndex = resumed.events.findLastIndex(e => e.task === "task" && e.kind === "integration");
+  assert.notEqual(grantIndex, -1);
+  const event = resumed.events.slice(grantIndex + 1).findLast(e => e.task === "task" && e.kind === "report:progress");
+  assert.ok(event, "received progress survives completion and a fresh status read");
+  const last = JSON.parse(event.detail);
+  assert.deepEqual(last, { head, review: 2 });
   await assert.rejects(verifyCompletion(current.tasks[0], 1, 1, path.join(dir, "stale"), call), /posted review does not cover/);
   assert.equal(ownsMerge(), 1, "stale READY review cannot settle the grant");
   const proof = await verifyCompletion(current.tasks[0], 1, last.review, path.join(dir, "verified"), call);

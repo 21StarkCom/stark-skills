@@ -441,10 +441,23 @@ Reserve integration using the PR's own base branch tip you fetch and read immedi
 After every grant, require the worker to fetch and rebase before merging, even if no
 other merge was observed. The merged head must contain the granted base SHA; the worker
 checks `git merge-base --is-ancestor GRANTED_BASE HEAD` and stops on failure.
-Regenerate, reconcile shared counts, rebuild, and retest; repost the review on any new head.
+Regenerate, reconcile shared counts, rebuild, and retest.
+Require an explicit force-with-lease push and a fetched GitHub PR head equal to local HEAD.
+Check `git merge-base --is-ancestor GRANTED_BASE PR_HEAD` and stop on failure.
+Require the worker to repost the review on any new head and check its `commit_id`
+equals PR_HEAD before reporting or merging.
 Before merge, `receive` the worker's post-grant `progress` report containing the final
 head SHA and review id, even if unchanged. `ready` is refused while `integrating`.
 Keep the last reported head and review id, replacing the pair captured at READY.
+The progress report's `message` is a JSON string containing
+`{"head":"<full PR head SHA>","review":<numeric review id>}`.
+`receive` preserves it in `run.events` as `report:progress` with the pair in `detail`;
+`task.report` is only the latest snapshot and later reports overwrite it.
+On resume or leadership transfer, read `gru status --run ID`: in event array order,
+find this task's latest `integration` event, then its last `report:progress` containing
+that pair after the grant. Never fall back to READY evidence. Missing or malformed
+pair evidence requires a fresh progress report before merge; if already merged,
+inspect the PR and report receipts and escalate missing evidence instead of guessing.
 Compare GitHub's actual PR head to that last reported head and pass the last review id
 to `verify --review`. There is no `--head` flag: the verifier reads the PR head itself.
 If the pair is stale, stop before merge and obtain the current evidence. Neither a
