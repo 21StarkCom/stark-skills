@@ -55,10 +55,13 @@ declaring it, no other task owning it, and no takeover having fenced it; attach 
 adopts that path, audited, and issues a new token for the fresh packet. Anything else
 refuses, as does the leader's own session; identity refusals are named before git is read.
 integrate checks --base against the repository, not just its hex shape: it fetches the
-base branch from origin (--base-ref BRANCH, else origin's default branch) and refuses
+base branch from origin (--base-ref BRANCH, else the default branch origin reports, asked
+of origin rather than read from the local refs/remotes/origin/HEAD) and refuses
 unless the SHA is a commit that repository holds, is that branch's current tip, and
 contains every merge this engagement has already verified there. A refusal names the
-current tip. A failed fetch or an unresolvable default branch refuses too, and says which.
+current tip. A failed fetch, an unreachable origin, or an origin reporting no default
+branch refuses too, and says which. Pass --base-ref when the PR does not target the
+default branch: verify refuses a grant whose branch is not the PR's base.
 reconcile never equates missing discovery with death. Keep uncertain reservations.
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
 verify reruns declared checks in a disposable detached worktree, on fetched main.
@@ -350,6 +353,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       case "integrate": {
         const assigned = task(flag("token"));
         const base = flag("base");
+        // integrate() will refuse these anyway; refuse before a network fetch that writes
+        // objects into the leader's own checkout, exactly as `verify` refuses below.
+        if (run.mode !== "running" || !run.reconciled || assigned.phase !== "review") throw new Error("task is not ready for integration");
         // Observe before the transaction: the store owns the verdict, but only git can say the
         // SHA is a commit this repository holds and is the base branch's current tip. Gathering
         // first also keeps a failed fetch from taking the merge lock.

@@ -444,13 +444,18 @@ function attachRefusal(run: Run, task: Assignment, worker: Worker): string | nul
 }
 
 /** Every merge this engagement has verified into `task`'s repository, in task order. The CLI
- * passes these to the observation so it can test each one's ancestry; the store then decides
- * which of them this grant's base must contain. Ancestry is checked against the whole
- * repository's verified merges rather than the ref-scoped subset below, because the observation
- * resolves the base ref itself and a merge it cannot place is simply reported as not contained. */
-export function verifiedMerges(run: Run, task: Assignment): string[] {
+ * calls it WITHOUT `ref` so the observation tests every one of them: it resolves the base ref
+ * itself, and a merge it cannot place is simply reported as not contained. `baseRefusal` calls
+ * it WITH the observed ref to get the subset this grant's base must actually contain. One
+ * predicate, two callers on purpose — the required set has to stay a subset of the tested set,
+ * and two hand-copied filters would drift into a refusal naming a merge nobody ever tested,
+ * which no amount of re-fetching can repair.
+ * A grant recorded before `baseEvidence` existed has no ref to compare, so it counts: fail closed. */
+export function verifiedMerges(run: Run, task: Assignment, ref?: string): string[] {
   return run.tasks.filter(t => t !== task && t.phase === "done" && t.evidence &&
-    repositoryKey(t.spec) === repositoryKey(task.spec)).map(t => t.evidence!.merge);
+    repositoryKey(t.spec) === repositoryKey(task.spec) &&
+    (ref === undefined || t.baseEvidence === undefined || t.baseEvidence.ref === ref))
+    .map(t => t.evidence!.merge);
 }
 /** Why `evidence` cannot authorize a grant of `base` for `task`, or null. Pure: the observation
  * gathers git facts, this decides. The tip comparison is what closes the stale-base window —
@@ -467,11 +472,8 @@ function baseRefusal(run: Run, task: Assignment, base: string, evidence: BaseEvi
   if (!nonempty(evidence.ref)) return "integration base evidence names no base branch";
   if (evidence.tip !== base) return `integration base ${base} is not the current ${evidence.ref} tip ${evidence.tip}; fetch again and grant at the tip`;
   // Scope the floor to one base branch: a repository that also takes merges on a release
-  // branch must not refuse a perfectly current `main` tip for lacking them. A grant recorded
-  // before this evidence existed has no ref to compare, so it counts — fail closed.
-  const missing = run.tasks.filter(t => t !== task && t.phase === "done" && t.evidence &&
-    repositoryKey(t.spec) === expected && (t.baseEvidence === undefined || t.baseEvidence.ref === evidence.ref))
-    .map(t => t.evidence!.merge).filter(sha => !evidence.contains.includes(sha));
+  // branch must not refuse a perfectly current `main` tip for lacking them.
+  const missing = verifiedMerges(run, task, evidence.ref).filter(sha => !evidence.contains.includes(sha));
   if (missing.length > 0) return `integration base ${base} does not contain verified merge ${missing[0]}; fetch again and grant at the tip`;
   return null;
 }

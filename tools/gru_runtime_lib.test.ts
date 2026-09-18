@@ -780,6 +780,20 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   assert.equal(proof.head, fixed);
   assert.equal(proof.checks[0].exitCode, 0);
   assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /behavior verified/);
+  // The grant was checked against ONE base branch's tip, with a verified-merge floor scoped
+  // to that branch. A PR merged into a different branch discharges a grant nothing on the
+  // merged branch ever checked — `--base-ref` is operator-supplied, so without this a grant
+  // taken at a quiet branch's tip settles a merge into `main` that skipped every other task.
+  const granted = { observedAt: new Date().toISOString(), repositoryKey: "owner/repo", ref: "release",
+    tip: fixed, base: fixed, contains: [], checks: [...BASE_CHECKS] };
+  task.baseEvidence = granted;
+  await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "wrong-base-branch"), call),
+    /integration base was granted on release, but PR 1 merged into main/);
+  assert.equal(fs.existsSync(path.join(dir, "wrong-base-branch")), false);
+  granted.ref = "main";
+  assert.equal((await verifyCompletion(task, 1, 1, path.join(dir, "matching-base-branch"), call)).merge, fixed);
+  // A grant recorded before this evidence existed has no ref to compare and still verifies.
+  task.baseEvidence = undefined;
   // A reserved replacement cannot settle the prior worker's merge; only the
   // window before replacement starts, or its own integration grant, can.
   task.phase = "intake";
@@ -904,12 +918,20 @@ test("the integration base is read from the real base branch, and every gap fail
   const call: Command = async (argv, cwd) => argv[0] === "git" && argv[1] === "remote"
     ? { code: 0, stdout: "git@github.com:Owner/Repo.git", stderr: "" } : exec(argv, cwd);
   const task = assignment(); task.spec.repo = repoDir; task.spec.repositoryKey = "owner/repo";
+
+  // Origin has no commits yet, so it reports no default branch at all. Refuse and name the
+  // repair rather than guessing one; the branch is resolved before the SHA is ever read.
+  await assert.rejects(observeBase(task, "a".repeat(40), [], undefined, call), /origin reports no default branch.*--base-ref/s);
   const first = land("first task merged");
 
-  // `git clone` of an empty bare repository records no refs/remotes/origin/HEAD, so the
-  // default base branch is genuinely unresolvable here. Refuse and name the repair.
-  await assert.rejects(observeBase(task, first, [], undefined, call), /cannot resolve origin's default branch.*--base-ref/s);
-  must(["git", "remote", "set-head", "origin", "main"], repoDir);
+  // The local refs/remotes/origin/HEAD is written at clone and then only by an explicit
+  // `git remote set-head`, so it can name a branch origin stopped defaulting to long ago.
+  // Point it at a frozen branch: reading the name from ORIGIN must still yield `main`.
+  // Reading it locally would compare every base against a branch nobody merges into, which
+  // passes each one as "the current tip" — the guard off while every message reports it on.
+  must(["git", "push", "origin", `${first}:refs/heads/stale-default`], repoDir);
+  must(["git", "fetch", "-q", "origin"], repoDir);
+  must(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/stale-default"], repoDir);
   const current = await observeBase(task, first, [], undefined, call);
   assert.deepEqual(current, { observedAt: current.observedAt, repositoryKey: "owner/repo", ref: "main",
     tip: first, base: first, contains: [], checks: [...BASE_CHECKS] });
@@ -952,7 +974,19 @@ test("the integration base is read from the real base branch, and every gap fail
   // Nothing above left an invocation-owned ref behind, including the refused fetches.
   assert.equal(must(["git", "for-each-ref", "--format=%(refname)", "refs/gru"], repoDir), "");
 
+  // Cleanup that throws is noise, not a verdict: an unguarded `await` in the `finally` would
+  // hand the operator the ref-deletion failure instead of the reason the base was refused.
+  // Both paths through the `finally` are covered — the refusal, and the successful gather.
+  const cleanupThrows: Command = async (argv, cwd) => {
+    if (argv[0] === "git" && argv[1] === "update-ref") throw new Error("simulated cleanup transport failure");
+    return call(argv, cwd);
+  };
+  await assert.rejects(observeBase(task, "f".repeat(40), [], undefined, cleanupThrows), /is not a commit in owner\/repo/);
+  assert.equal((await observeBase(task, landed, [], undefined, cleanupThrows)).tip, landed);
+
   // An unreachable origin refuses; it never falls back to a local ref that reads as current.
+  // Both round trips are covered: resolving the default branch name, and fetching the tip.
   fs.renameSync(origin, path.join(dir, "origin-moved.git"));
-  await assert.rejects(observeBase(task, landed, [], undefined, call), /cannot fetch refs\/heads\/main from origin/);
+  await assert.rejects(observeBase(task, landed, [], undefined, call), /cannot read origin's default branch/);
+  await assert.rejects(observeBase(task, landed, [], "main", call), /cannot fetch refs\/heads\/main from origin/);
 });

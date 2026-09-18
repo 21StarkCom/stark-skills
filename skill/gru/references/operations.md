@@ -79,11 +79,22 @@ tip. Without that check the store validated the SHA's shape alone (40 to 64 hex
 characters) while `verify` only requires that base in the merged head's ancestry, so a
 foreign-repository SHA, a typo, or an hour-stale tip all passed and let a diff built
 without the other task's changes squash cleanly whenever git sees no textual conflict.
-The base branch is origin's default branch unless `--base-ref BRANCH` names another.
+The base branch is origin's default branch unless `--base-ref BRANCH` names another, and
+that name is asked of origin (`git ls-remote --symref`), never read from the local
+`refs/remotes/origin/HEAD`. Git writes that pointer at clone and then only on an explicit
+`git remote set-head`, so a checkout made before a default-branch rename still names the
+old branch — which usually still exists and is frozen, so every supplied base passes as
+"the current tip" while the refusal text and `baseEvidence.ref` report a branch the
+engagement never merges into. Pass `--base-ref` whenever the task's PR does not target
+origin's default branch; `verify` refuses a grant whose branch is not the PR's base.
 The check is fail-closed: an unreachable origin, a branch origin does not have, and an
-unresolvable default branch each refuse and say which, rather than falling back to a
-local ref. The observation fetches into an invocation-owned `refs/gru/integration/<uuid>`
-and removes it, so it neither writes `FETCH_HEAD` nor moves the leader's checkout.
+origin that reports no default branch each refuse and say which, rather than falling back
+to a local ref. The observation fetches into an invocation-owned `refs/gru/integration/<uuid>`
+and removes it, so it neither writes `FETCH_HEAD` nor moves the leader's checkout. A task
+that is not in `review`, or an engagement that is not running and reconciled, refuses before
+that fetch rather than after it. `verify` closes the other end: the branch the grant was
+checked against must be the branch the PR actually merged into, so a grant taken at a quiet
+branch's tip cannot discharge a merge into a branch its floor never covered.
 
 ## Durable commands
 

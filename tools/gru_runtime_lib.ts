@@ -593,16 +593,24 @@ export async function receive(run: Run, messageId: string, call: Command = comma
     kind: body.kind as "ack" | "progress" | "blocked" | "ready" | "complete", message: body.message };
 }
 
-/** The base branch to read the tip from when the leader names none: origin's default branch.
- * Read the full ref and strip the known prefix — `--short` renders it `origin/main`, and
- * stripping `origin/` from that would also maul a branch genuinely named `origin/something`. */
+/** The base branch to read the tip from when the leader names none: origin's default branch,
+ * asked of ORIGIN. Not the local `refs/remotes/origin/HEAD`: git writes that pointer once at
+ * clone and then only on an explicit `git remote set-head`, so a checkout made before a
+ * default-branch rename still names the old branch. That branch usually still exists and is
+ * frozen, which makes every supplied base "the current tip" — the whole guard silently off
+ * while the refusal text, the docs, and the recorded `baseEvidence.ref` all report it on.
+ * A grant already costs one network round trip; reading the name over the same connection
+ * keeps the one local input that could lie out of the decision. */
 async function defaultBaseRef(repoDir: string, call: Command): Promise<string> {
-  const head = await call(["git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], repoDir);
-  const value = head.code === 0 ? head.stdout.trim().replace(/^refs\/remotes\/origin\//, "") : "";
-  if (!value || value.startsWith("refs/")) {
-    throw new Error(`cannot resolve origin's default branch in ${repoDir}; name the base branch with --base-ref (git remote set-head origin --auto records refs/remotes/origin/HEAD)`);
+  const head = await call(["git", "ls-remote", "--symref", "origin", "HEAD"], repoDir);
+  if (head.code !== 0) {
+    throw new Error(`cannot read origin's default branch in ${repoDir}: ${(head.stderr || head.stdout).trim() || `git exited ${head.code}`}; name the base branch with --base-ref`);
   }
-  return value;
+  // `ref: refs/heads/main\tHEAD`, then the SHA line. An origin with no commits yet reports
+  // neither, so an empty match is a real absence rather than a parse failure.
+  const symref = /^ref:\s+refs\/heads\/(\S+)\s+HEAD$/m.exec(head.stdout);
+  if (!symref) throw new Error(`origin reports no default branch for ${repoDir}; name the base branch with --base-ref`);
+  return symref[1];
 }
 /** Gather the git facts `baseRefusal` judges: that the repository is the task's, that it holds
  * the supplied base as a commit, what the base branch's tip is right now, and which of this
@@ -646,9 +654,17 @@ export async function observeBase(task: Assignment, base: string, priorMerges: s
     }
     return { observedAt, repositoryKey, ref: branch, tip, base, contains, checks: [...BASE_CHECKS] };
   } finally {
-    const removed = await call(["git", "update-ref", "-d", temp], repoDir);
     // The grant's verdict is already decided; a leftover private ref is noise, not a failure.
-    if (removed.code !== 0) process.stderr.write(`gru: could not remove ${temp}: ${(removed.stderr || removed.stdout).trim()}\n`);
+    // A cleanup that THROWS is the same noise, so catch it here: an unguarded `await` in a
+    // `finally` replaces the refusal the operator has to read ("not the current main tip X")
+    // with a spawn error from the ref deletion. `verifyCompletion` guards its cleanup for
+    // exactly this reason; the two must not drift.
+    try {
+      const removed = await call(["git", "update-ref", "-d", temp], repoDir);
+      if (removed.code !== 0) process.stderr.write(`gru: could not remove ${temp}: ${(removed.stderr || removed.stdout).trim()}\n`);
+    } catch (error) {
+      process.stderr.write(`gru: could not remove ${temp}: ${String(error)}\n`);
+    }
   }
 }
 
@@ -666,6 +682,14 @@ export async function verifyCompletion(task: Assignment, prNumber: number, revie
   // GitHub reports canonical case, and a deleted fork reports head.repo as null.
   const sameRepo = (r: { full_name?: string } | null | undefined) => r?.full_name?.toLowerCase() === repo.toLowerCase();
   if (!sameRepo(pr.head.repo) || !sameRepo(pr.base.repo)) throw new Error("PR repository mismatch");
+  // `observeBase` validated the grant against ONE base branch's tip, and scoped the
+  // verified-merge floor to that branch. Settling it with a PR merged into a different branch
+  // would reopen the exact window it closes: `--base-ref` is operator-supplied, so a grant
+  // taken at a quiet branch's tip (current by definition, empty floor) could otherwise be
+  // discharged by a merge into `main` that skipped every other task's changes.
+  if (task.baseEvidence && task.baseEvidence.ref !== pr.base.ref) {
+    throw new Error(`integration base was granted on ${task.baseEvidence.ref}, but PR ${prNumber} merged into ${pr.base.ref}`);
+  }
   const review = await api(`pulls/${prNumber}/reviews/${reviewId}`);
   if (review.commit_id !== pr.head.sha || !review.submitted_at || !["COMMENTED", "APPROVED"].includes(review.state)) throw new Error("posted review does not cover the merged PR head");
   await git(["check-ref-format", `refs/heads/${pr.base.ref}`]);

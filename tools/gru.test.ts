@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { verifyBlocker } from "./gru.ts";
-import { GruStore } from "./gru_lib.ts";
+import { BASE_CHECKS, GruStore } from "./gru_lib.ts";
 
 const CLI = path.join(import.meta.dirname, "gru.ts");
 
@@ -531,8 +531,9 @@ test("gru CLI: integrate fetches the base branch and refuses anything but its cu
     git(cwd, "push", "-q", "origin", "HEAD:main");
     return git(cwd, "rev-parse", "HEAD").trim();
   };
+  // No `git remote set-head`: the default branch is read from origin, so this checkout has
+  // no local refs/remotes/origin/HEAD at all and the CLI still resolves `main`.
   const first = land("first task merged");
-  git(repo, "remote", "set-head", "origin", "main");
   for (const name of ["wt-one", "wt-two"]) fs.mkdirSync(path.join(dir, name));
   const file = path.join(dir, "engagement.json");
   fs.writeFileSync(file, JSON.stringify({
@@ -564,7 +565,7 @@ test("gru CLI: integrate fetches the base branch and refuses anything but its cu
     }
     return current;
   };
-  let current = ready("one", 0);
+  ready("one", 0);
   const integrate = (id: string, index: number, base: string, ...extra: string[]) =>
     run(["integrate", "--run", "cli", "--revision", String(store.read("cli").revision), "--task", id,
       "--token", store.read("cli").tasks[index].token!, "--base", base, "--state", state, ...extra], "leader-one");
@@ -588,18 +589,31 @@ test("gru CLI: integrate fetches the base branch and refuses anything but its cu
   const granted = await integrate("one", 0, landed);
   assert.equal(granted.code, 0, granted.error);
   const evidence = JSON.parse(granted.out).tasks[0].baseEvidence;
+  // Every field but the timestamp is asserted against a literal. `checks: evidence.checks`
+  // would compare the field with itself and accept anything the CLI happened to record.
   assert.deepEqual({ ...evidence, observedAt: undefined },
-    { observedAt: undefined, repositoryKey: "o/r", ref: "main", tip: landed, base: landed, contains: [], checks: evidence.checks });
+    { observedAt: undefined, repositoryKey: "o/r", ref: "main", tip: landed, base: landed, contains: [], checks: [...BASE_CHECKS] });
+  assert.ok(Date.now() - Date.parse(evidence.observedAt) < 60_000);
+
+  // Phase is checked before the fetch. With origin unreachable, a task already integrating
+  // refuses for its phase — proof the CLI never spent a network round trip, and never wrote
+  // objects into the leader's checkout, for a grant the store was always going to refuse.
+  const moved = path.join(dir, "origin-moved.git");
+  fs.renameSync(origin, moved);
+  const reentrant = await integrate("one", 0, landed);
+  fs.renameSync(moved, origin);
+  assert.equal(reentrant.code, 2);
+  assert.match(reentrant.error, /task is not ready for integration/);
 
   // Verify task one, then land a descendant: task two's grant must be checked against the
   // merge this engagement verified, which only reaches the observation through the CLI.
-  current = store.read("cli");
+  const current = store.read("cli");
   store.complete("cli", "leader-one", current.revision, "one", current.tasks[0].token!,
     { head: landed, base: landed, merge: landed, pr: "https://github.com/o/r/pull/1",
       review: "https://github.com/o/r/pull/1#pullrequestreview-1", verifiedAt: new Date().toISOString(),
       ticketState: "done", checks: [{ argv: ["true"], exitCode: 0, log: "/evidence/check.log" }] });
   const third = land("later publisher push", second);
-  current = ready("two", 1);
+  ready("two", 1);
   const dependent = await integrate("two", 1, third);
   assert.equal(dependent.code, 0, dependent.error);
   assert.deepEqual(JSON.parse(dependent.out).tasks[1].baseEvidence.contains, [landed]);

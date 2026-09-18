@@ -161,9 +161,13 @@ mid-merge — wait for it, fetch again, and read the tip again.
 fetches the base branch from origin and refuses unless the SHA is a commit that
 repository holds, is that branch's current tip, and contains every merge this
 engagement already verified there. The refusal names the current tip. Pass
-`--base-ref BRANCH` when the base is not origin's default branch. An unreachable
-origin or an unresolvable branch refuses and says which; neither ever falls back to a
-local ref that reads exactly like a current one.
+`--base-ref BRANCH` when the PR does not target origin's default branch, which is asked
+of origin rather than read from this checkout's `refs/remotes/origin/HEAD`. An unreachable
+origin, a branch origin does not have, and an origin reporting no default branch each
+refuse and say which; none ever falls back to a local ref that reads exactly like a
+current one.
+Merge into the branch the grant was checked against: `verify` refuses a PR whose base
+branch is not the one `integrate` read the tip from.
 After merging, independently inspect the actual PR and merge ancestry.
 Rerun completion checks against the fetched base in an isolated verifier.
 Confirm review evidence covers the final PR head.
