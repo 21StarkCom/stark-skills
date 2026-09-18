@@ -4,13 +4,13 @@ import * as assert from "node:assert/strict";
 import {
   DEFAULT_GENERATED_PATHS,
   GH_MAX_BUFFER,
+  GITHUB_REVIEW_BODY_MAX,
+  bodyTooLarge,
   anchorableLinesFromPatch,
   bodyFor,
-  compileGeneratedMatchers,
   defaultRun,
   buildHumanSummary,
   flattenSlurped,
-  globToRegExp,
   isAnchorable,
   matchGeneratedPath,
   parseArgs,
@@ -22,6 +22,7 @@ import {
   type ReportFindingsPayload,
 } from "./findings_review_post.ts";
 import { partitionInlineVsBody, postReview, buildReviewBody } from "./stark_review.ts";
+import { buildMarker } from "./stark_review_lib.ts";
 
 // --- mapping -----------------------------------------------------------------
 
@@ -383,6 +384,7 @@ const SYNC_PR_FILES = JSON.stringify([
   { filename: "vendor/stark-skills/tools/gru.ts", patch: "@@ -10,2 +10,3 @@\n keep\n+regenerated\n ctx" },
   { filename: "dist/claude/stark-ops/skills/gru/SKILL.md", patch: "@@ -1,1 +1,2 @@\n a\n+b" },
   { filename: "index.json", patch: "@@ -3,1 +3,2 @@\n x\n+y" },
+  { filename: ".claude-plugin/marketplace.json", patch: "@@ -1,1 +1,2 @@\n a\n+b" },
   { filename: "web/src/__fixtures__/index.json", patch: "@@ -1,1 +1,2 @@\n a\n+b" },
   { filename: "engine/internal/install/install.go", patch: "@@ -40,2 +40,3 @@\n ctx\n+added\n tail" },
 ]);
@@ -393,12 +395,13 @@ const SYNC_PAYLOAD: ReportFindingsPayload = {
     { file: "vendor/stark-skills/tools/gru.ts", line: 11, short_summary: "vendor snapshot", summary: "s", verdict: "CONFIRMED" },
     { file: "dist/claude/stark-ops/skills/gru/SKILL.md", line: 2, short_summary: "dist copy", summary: "s" },
     { file: "index.json", line: 4, short_summary: "root index", summary: "s" },
+    { file: ".claude-plugin/marketplace.json", line: 2, short_summary: "marketplace index", summary: "s" },
     { file: "web/src/__fixtures__/index.json", line: 2, short_summary: "hand-written fixture", summary: "s" },
     { file: "engine/internal/install/install.go", line: 41, short_summary: "real source bug", summary: "s", verdict: "CONFIRMED" },
   ],
 };
 
-const GENERATED_PATHS = ["vendor/**", "dist/**", "index.json"] as const;
+const GENERATED_PATHS = ["vendor/**", "dist/**", ".claude-plugin/**", "index.json"] as const;
 
 function syncPlan(generatedPaths: readonly string[] = GENERATED_PATHS) {
   const ctx = parsePrContext("headsha", SYNC_PR_FILES);
@@ -416,7 +419,7 @@ describe("generated-path routing", () => {
     for (const c of inline) {
       assert.doesNotMatch(c.path, /^(vendor|dist)\//, `${c.path} must not open an inline thread`);
     }
-    // No finding is lost on the way: 3 demoted + 2 still anchored.
+    // No finding is lost on the way: 4 demoted + 2 still anchored.
     assert.equal(inline.length + bodyFindings.length, SYNC_PAYLOAD.findings.length);
   });
 
@@ -451,7 +454,7 @@ describe("generated-path routing", () => {
 
   test("the preamble states generated, upstream, and the shared-branch block", () => {
     const { plan } = syncPlan();
-    assert.match(plan.humanSummary, /3 findings on generated paths/);
+    assert.match(plan.humanSummary, /4 findings on generated paths/);
     assert.match(plan.humanSummary, /\*\*generated output\*\*/i);
     assert.match(plan.humanSummary, /\*\*upstream\*\*/i);
     assert.match(plan.humanSummary, /\*\*shared\*\*/i);
@@ -475,7 +478,7 @@ describe("generated-path routing", () => {
       dryRun: true,
     });
     assert.equal(result.payloadSummary.inlineCount, 2);
-    assert.equal(result.payloadSummary.bodyFindingsCount, 3);
+    assert.equal(result.payloadSummary.bodyFindingsCount, 4);
     assert.equal(plan.generated.enabled, true);
     assert.deepEqual(
       plan.generated.entries.map((e) => [e.file, e.line, e.pattern]),
@@ -483,6 +486,7 @@ describe("generated-path routing", () => {
         ["vendor/stark-skills/tools/gru.ts", 11, "vendor/**"],
         ["dist/claude/stark-ops/skills/gru/SKILL.md", 2, "dist/**"],
         ["index.json", 4, "index.json"],
+        [".claude-plugin/marketplace.json", 2, ".claude-plugin/**"],
       ],
     );
   });
@@ -491,10 +495,29 @@ describe("generated-path routing", () => {
     // Globs are anchored against the whole path. Under gitignore's basename
     // rule, `index.json` would also swallow bifrost's source fixtures — whose
     // findings ARE fixable where they are posted.
-    const matchers = compileGeneratedMatchers(DEFAULT_GENERATED_PATHS);
-    assert.equal(matchGeneratedPath("index.json", matchers), "index.json");
-    assert.equal(matchGeneratedPath("web/src/__fixtures__/index.json", matchers), null);
-    assert.equal(matchGeneratedPath("engine/internal/install/testdata/index.json", matchers), null);
+    assert.equal(matchGeneratedPath("index.json", DEFAULT_GENERATED_PATHS), "index.json");
+    assert.equal(matchGeneratedPath("web/src/__fixtures__/index.json", DEFAULT_GENERATED_PATHS), null);
+    assert.equal(matchGeneratedPath("engine/internal/install/testdata/index.json", DEFAULT_GENERATED_PATHS), null);
+  });
+
+  test("the default globs cover every path a bifrost sync PR machine-rewrites", () => {
+    // Taken from `git show --stat` on a real sync commit plus bifrost's
+    // `.gitattributes` `linguist-generated=true` rows. `.claude-plugin/**` was
+    // missing from the first cut of this list, so the one file every sync
+    // touches kept opening a gating thread — the exact failure the split exists
+    // to prevent. `CHANGELOG.md` is the counter-case: a sync writes it, but it
+    // is hand-reviewable, so it must keep its inline thread.
+    for (const f of [
+      "vendor/stark-skills/tools/gru.ts",
+      "dist/claude/stark-ops/skills/gru/SKILL.md",
+      "bundles/stark-ops.json",
+      "catalog/stark-ops/bundle.yaml",
+      ".claude-plugin/marketplace.json",
+      "index.json",
+    ]) {
+      assert.notEqual(matchGeneratedPath(f, DEFAULT_GENERATED_PATHS), null, `${f} must demote`);
+    }
+    assert.equal(matchGeneratedPath("CHANGELOG.md", DEFAULT_GENERATED_PATHS), null);
   });
 
   test("a generated finding outside every hunk still carries its declared line", () => {
@@ -527,46 +550,98 @@ describe("generated-path routing", () => {
   });
 
   test("a finding with no file is never treated as generated", () => {
-    const matchers = compileGeneratedMatchers(DEFAULT_GENERATED_PATHS);
-    assert.equal(matchGeneratedPath(null, matchers), null);
-    assert.equal(matchGeneratedPath(undefined, matchers), null);
-    assert.equal(matchGeneratedPath("", matchers), null);
+    assert.equal(matchGeneratedPath(null, DEFAULT_GENERATED_PATHS), null);
+    assert.equal(matchGeneratedPath(undefined, DEFAULT_GENERATED_PATHS), null);
+    assert.equal(matchGeneratedPath("", DEFAULT_GENERATED_PATHS), null);
   });
 
   test("a leading ./ is normalized before matching", () => {
-    const matchers = compileGeneratedMatchers(DEFAULT_GENERATED_PATHS);
-    assert.equal(matchGeneratedPath("./index.json", matchers), "index.json");
-    assert.equal(matchGeneratedPath("./vendor/a.ts", matchers), "vendor/**");
+    assert.equal(matchGeneratedPath("./index.json", DEFAULT_GENERATED_PATHS), "index.json");
+    assert.equal(matchGeneratedPath("./vendor/a.ts", DEFAULT_GENERATED_PATHS), "vendor/**");
   });
 });
 
-describe("globToRegExp", () => {
+describe("review-body size guard", () => {
+  test("a body at the cap passes and one char over refuses", () => {
+    assert.equal(bodyTooLarge(GITHUB_REVIEW_BODY_MAX), null);
+    assert.equal(bodyTooLarge(0), null);
+    const err = bodyTooLarge(GITHUB_REVIEW_BODY_MAX + 1);
+    assert.ok(err);
+    assert.match(err, /over GitHub's 65536-char limit/);
+  });
+
+  test("the refusal names both remedies, since the fallback would lose every finding", () => {
+    // Over the cap the POST 422s with no errors[].index, so extract422Indices
+    // returns [] and postReview folds the inline comments into the SAME body,
+    // retries larger and reports unposted — nothing posted at all. That is
+    // strictly worse than the gating threads this split exists to prevent.
+    const err = bodyTooLarge(200_000);
+    assert.ok(err);
+    assert.match(err, /smaller[\s\S]*batches/);
+    assert.match(err, /--generated-paths/);
+  });
+
+  test("the guard measures the body postReview actually builds, not an estimate", async () => {
+    const { ctx, plan } = syncPlan();
+    const result = await postReview({
+      repo: "o/r",
+      pr: 1,
+      round: 1,
+      agent: "claude",
+      runHash: "test",
+      findings: plan.findings,
+      changedFiles: plan.inlineEligibleFiles,
+      fixThreshold: "low",
+      humanSummary: plan.humanSummary,
+      prHeadSha: ctx.headSha,
+      dryRun: true,
+    });
+    const rebuilt = buildReviewBody(
+      buildMarker(1, "claude", "test"),
+      plan.humanSummary,
+      partitionInlineVsBody(plan.findings, plan.inlineEligibleFiles, "low").bodyFindings,
+    );
+    assert.equal(result.payloadSummary.bodyChars, rebuilt.length);
+  });
+});
+
+describe("generated-path glob matching", () => {
+  // `matchGeneratedPath` delegates to node:path's `matchesGlob`. These pin the
+  // semantics the split depends on, so a change in that matcher is caught here
+  // rather than by a finding silently losing (or gaining) a gating thread.
+  const hit = (file: string, pattern: string) =>
+    matchGeneratedPath(file, [pattern]) === pattern;
+
   test("a single star stays inside one path segment", () => {
-    assert.equal(globToRegExp("dist/*.js").test("dist/a.js"), true);
-    assert.equal(globToRegExp("dist/*.js").test("dist/nested/a.js"), false);
+    assert.equal(hit("dist/a.js", "dist/*.js"), true);
+    assert.equal(hit("dist/nested/a.js", "dist/*.js"), false);
   });
 
   test("a doubled star crosses path separators but needs at least one segment", () => {
-    assert.equal(globToRegExp("vendor/**").test("vendor/a/b/c.ts"), true);
-    assert.equal(globToRegExp("vendor/**").test("vendor/a.ts"), true);
-    assert.equal(globToRegExp("vendor/**").test("vendor"), false);
-    assert.equal(globToRegExp("vendor/**").test("my-vendor/a.ts"), false);
+    assert.equal(hit("vendor/a/b/c.ts", "vendor/**"), true);
+    assert.equal(hit("vendor/a.ts", "vendor/**"), true);
+    assert.equal(hit("vendor", "vendor/**"), false);
+    assert.equal(hit("my-vendor/a.ts", "vendor/**"), false);
   });
 
   test("a leading doubled star plus slash also matches zero segments", () => {
-    assert.equal(globToRegExp("**/index.json").test("index.json"), true);
-    assert.equal(globToRegExp("**/index.json").test("a/b/index.json"), true);
+    assert.equal(hit("index.json", "**/index.json"), true);
+    assert.equal(hit("a/b/index.json", "**/index.json"), true);
   });
 
-  test("regex metacharacters in a pattern are literal", () => {
-    assert.equal(globToRegExp("index.json").test("indexXjson"), false);
-    assert.equal(globToRegExp("a+b.json").test("a+b.json"), true);
-    assert.equal(globToRegExp("a+b.json").test("aab.json"), false);
+  test("a literal dot is not a wildcard", () => {
+    assert.equal(hit("indexXjson", "index.json"), false);
   });
 
   test("a pattern is anchored at both ends", () => {
-    assert.equal(globToRegExp("dist/**").test("x/dist/a.js"), false);
-    assert.equal(globToRegExp("index.json").test("index.json.bak"), false);
+    assert.equal(hit("x/dist/a.js", "dist/**"), false);
+    assert.equal(hit("index.json.bak", "index.json"), false);
+  });
+
+  test("a dotfile directory glob matches, so .claude-plugin is reachable", () => {
+    // A basename-blind or dot-skipping matcher would leave the one file every
+    // bifrost sync rewrites still opening a gating thread.
+    assert.equal(hit(".claude-plugin/marketplace.json", ".claude-plugin/**"), true);
   });
 });
 
@@ -591,6 +666,21 @@ describe("parseArgs generated-path flags", () => {
 
   test("--no-generated-split is the only way to disable the split", () => {
     assert.deepEqual(parseArgs([...base, "--no-generated-split"]).generatedPaths, []);
+  });
+
+  test("a flag whose value is omitted refuses instead of eating the next flag", () => {
+    // `--generated-paths --dry-run` used to parse to the glob list ["--dry-run"]:
+    // matching nothing, so every generated finding regained a gating thread,
+    // while --dry-run was consumed and never set, so the review really posted.
+    assert.throws(
+      () => parseArgs([...base, "--generated-paths", "--dry-run"]),
+      /--generated-paths requires a value, got the flag --dry-run/,
+    );
+    assert.throws(() => parseArgs(["--repo", "--pr", "1", "--findings", "-"]), /got the flag --pr/);
+  });
+
+  test("`-` stays legal — it is the documented stdin value for --findings", () => {
+    assert.equal(parseArgs(["--repo", "o/r", "--pr", "1", "--findings", "-"]).findingsPath, "-");
   });
 
   test("the last of the two flags wins", () => {

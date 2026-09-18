@@ -13,6 +13,7 @@
  * fallback behavior.
  */
 import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import { spawnSync } from "node:child_process";
 
 import {
@@ -149,117 +150,94 @@ export function toFindings(
  * The finding is not dropped, downgraded, or auto-resolved. It moves from a
  * gating inline thread to a non-gating body entry that keeps its file, line,
  * severity and disposition. Dispositioning stays the author's job.
+ *
+ * This list MIRRORS bifrost's `.gitattributes` `linguist-generated=true`
+ * entries (`dist/**`, `vendor/**`, `index.json`, `bundles/**`,
+ * `.claude-plugin/**`) plus `catalog/**`, which a sync PR machine-rewrites
+ * without declaring generated. Because it is a mirror it can drift — when a
+ * target repo declares a generated path this list does not carry, pass it with
+ * `--generated-paths` rather than assuming the default covers the repo.
  */
 export const DEFAULT_GENERATED_PATHS: readonly string[] = Object.freeze([
   "vendor/**",
   "dist/**",
   "bundles/**",
   "catalog/**",
+  // Every bifrost sync PR rewrites `.claude-plugin/marketplace.json`, and
+  // bifrost's `.gitattributes` marks the tree `linguist-generated=true`.
+  // Omitting it left the one machine-written file the sync touches on every
+  // run still opening a gating thread.
+  ".claude-plugin/**",
   "index.json",
 ]);
 
-/** A configured glob plus the regex it compiles to. */
-export interface GeneratedMatcher {
-  /** The glob exactly as configured, echoed back so a demotion can be explained. */
-  pattern: string;
-  re: RegExp;
-}
-
 /**
- * Compile one path glob, anchored against the WHOLE repo-relative path.
+ * The first configured glob `file` matches, or null when it matches none.
  *
- * - A doubled star crosses path separators. Followed by a slash it also matches
- *   zero segments, so a leading doubled-star slash makes the rest of the
- *   pattern match at any depth INCLUDING the repo root.
- * - A single star and `?` stay inside one path segment.
- * - Everything else is literal.
+ * Matching is `node:path`'s own `matchesGlob` — a doubled star crosses path
+ * separators, a single star and `?` stay inside one segment, and the pattern is
+ * anchored against the WHOLE repo-relative path.
  *
- * Anchoring the whole path is load-bearing, not a simplification. Under
+ * That whole-path anchoring is load-bearing, not a simplification. Under
  * gitignore's basename rule a bare `index.json` would also match bifrost's
  * `web/src/__fixtures__/index.json` and its `engine/internal/*` testdata copies
  * — hand-written source fixtures whose findings must keep their inline threads,
  * because those ARE fixable where they are posted. To match a generated file at
  * any depth, write the doubled-star prefix yourself.
  */
-export function globToRegExp(pattern: string): RegExp {
-  let out = "";
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i];
-    if (c === "*") {
-      if (pattern[i + 1] === "*") {
-        i += 1;
-        if (pattern[i + 1] === "/") {
-          i += 1;
-          out += "(?:.*/)?";
-        } else {
-          out += ".*";
-        }
-      } else {
-        out += "[^/]*";
-      }
-      continue;
-    }
-    if (c === "?") {
-      out += "[^/]";
-      continue;
-    }
-    out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  }
-  return new RegExp(`^${out}$`);
-}
-
-/** Compile a glob list once, so a run costs one regex per pattern, not per finding. */
-export function compileGeneratedMatchers(patterns: readonly string[]): GeneratedMatcher[] {
-  return patterns.map((pattern) => ({ pattern, re: globToRegExp(pattern) }));
-}
-
-/** The first glob `file` matches, or null when it matches none. */
 export function matchGeneratedPath(
   file: string | null | undefined,
-  matchers: readonly GeneratedMatcher[],
+  patterns: readonly string[],
 ): string | null {
   if (!file) return null;
-  const path = file.replace(/^\.\//, "");
-  for (const m of matchers) {
-    if (m.re.test(path)) return m.pattern;
+  // Compare in the shape GitHub reports a changed file: repo-relative, no `./`
+  // or `/` prefix. A finding that names `./vendor/x.ts` must demote exactly
+  // like the `vendor/x.ts` GitHub listed.
+  const rel = file.replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
+  if (!rel) return null;
+  for (const pattern of patterns) {
+    if (nodePath.matchesGlob(rel, pattern)) return pattern;
   }
   return null;
 }
 
 /** One finding held out of the inline set because its only anchor is generated. */
 export interface GeneratedEntry {
-  id: string;
   file: string;
   /** The line the finding declared — the line it would have anchored to. */
   line: number | null;
   /** Which configured glob matched, so the demotion is explainable. */
   pattern: string;
-  title: string;
 }
 
 export interface GeneratedSplit {
-  /** False only when the operator passed `--no-generated-split`. */
+  /** False when the glob list is empty — via `--no-generated-split` on the CLI. */
   enabled: boolean;
   patterns: string[];
   entries: GeneratedEntry[];
 }
 
 /**
- * The per-finding note prepended to a generated-path finding's body.
+ * The per-finding note prepended to a generated-path finding's body. It REPLACES
+ * `toFinding`'s `**Location:**` prefix rather than stacking on top of it, so a
+ * demoted finding carries one location line, not two contradictory ones.
  *
- * It repeats the file and line rather than leaning on `buildReviewBody`'s
- * `(file:line)` header, because that header drops the line whenever the anchor
- * was invalidated as out-of-hunk — exactly the case where the reader most needs
- * to know where the finding pointed.
+ * It states the file and line itself because `buildReviewBody`'s `(file:line)`
+ * header drops the line whenever the anchor was invalidated as out-of-hunk —
+ * exactly the case where the reader most needs to know where the finding
+ * pointed. It stays SHORT on purpose: the full rationale lives once in
+ * {@link generatedPathPreamble}, and this note is paid once per finding into a
+ * review body that has no size guard and a hard 65,536-char ceiling.
  */
 export function generatedFindingNote(
   file: string,
   declaredLine: number | null,
   pattern: string,
+  outsideDiff = false,
 ): string {
   const at = `\`${file}${declaredLine !== null ? `:${declaredLine}` : ""}\``;
-  return `**Generated output** ${at} (matched \`${pattern}\`) — reported here rather than as ` +
-    "an inline thread; fix it upstream, in the source this file is generated from.";
+  const where = outsideDiff ? ", outside this PR's diff" : "";
+  return `**Generated output** ${at} (matched \`${pattern}\`${where}) — fix it upstream; see the note above.`;
 }
 
 /** The review-body preamble explaining why these findings have no threads. */
@@ -344,22 +322,30 @@ export function planReview(
   opts: { agent: AgentName; generatedPaths: readonly string[] },
 ): ReviewPlan {
   const patterns = [...opts.generatedPaths];
-  const matchers = compileGeneratedMatchers(patterns);
   const entries: GeneratedEntry[] = [];
-  const findings = (payload.findings ?? []).map((raw) => {
+  const findings: Finding[] = [];
+  for (const raw of payload.findings ?? []) {
     const f = toFinding(raw, opts.agent, ctx.anchorable);
-    const pattern = matchGeneratedPath(f.file, matchers);
-    if (pattern === null) return f;
+    const pattern = matchGeneratedPath(f.file, patterns);
+    if (pattern === null) {
+      findings.push(f);
+      continue;
+    }
     const declaredLine = typeof raw.line === "number" ? raw.line : null;
     const file = f.file as string;
-    entries.push({ id: f.id, file, line: declaredLine, pattern, title: f.title });
-    return { ...f, body: `${generatedFindingNote(file, declaredLine, pattern)}\n\n${f.body}` };
-  });
+    entries.push({ file, line: declaredLine, pattern });
+    // Rebuild the body from `bodyFor` rather than prefixing `f.body`: for an
+    // out-of-hunk anchor `toFinding` has already prepended its own
+    // `**Location:**` line, and stacking the two reads as two different
+    // reasons for the same demotion.
+    const note = generatedFindingNote(file, declaredLine, pattern, f.line === null && declaredLine !== null);
+    findings.push({ ...f, body: `${note}\n\n${bodyFor(raw)}` });
+  }
   const generated: GeneratedSplit = { enabled: patterns.length > 0, patterns, entries };
   return {
     findings,
     inlineEligibleFiles: new Set(
-      [...ctx.changedFiles].filter((file) => matchGeneratedPath(file, matchers) === null),
+      [...ctx.changedFiles].filter((file) => matchGeneratedPath(file, patterns) === null),
     ),
     humanSummary: buildHumanSummary(findings, payload.level, opts.agent, generated),
     generated,
@@ -553,6 +539,16 @@ export function parseArgs(argv: string[]): CliArgs {
     const need = (): string => {
       const v = argv[++i];
       if (v === undefined) throw new Error(`${a} requires a value`);
+      // A flag's value must not be the NEXT flag. `--generated-paths --dry-run`
+      // would otherwise parse to the glob list ["--dry-run"] — matching nothing,
+      // so every generated finding regains a gating thread — while `--dry-run`
+      // itself is consumed and never set, so the review really posts. The
+      // empty-value guard below exists to stop a silent disable; this stops the
+      // same thing arriving one keystroke earlier. `-` stays legal: it is the
+      // documented stdin value for `--findings`.
+      if (v.startsWith("--")) {
+        throw new Error(`${a} requires a value, got the flag ${v}`);
+      }
       return v;
     };
     switch (a) {
@@ -610,6 +606,28 @@ export function readPayload(path: string): ReportFindingsPayload {
   return parsed;
 }
 
+/**
+ * GitHub's hard cap on a pull-request review body, in characters.
+ *
+ * This matters more since the generated-path split: a demoted finding's full
+ * text moves OUT of an inline comment, which carries its own budget, and INTO
+ * the one shared review body. Over the cap the POST 422s on `body is too long`
+ * with no `errors[].index`, so `extract422Indices` returns `[]` and
+ * `postReview`'s fallback demotes the REMAINING inline comments into that same
+ * body, retries it larger, 422s again and reports `unposted` — every finding
+ * lost, not one. Refusing up front turns that into one actionable message.
+ */
+export const GITHUB_REVIEW_BODY_MAX = 65536;
+
+/** The cap check, split out so a test can pin it without a network round trip. */
+export function bodyTooLarge(bodyChars: number): string | null {
+  if (bodyChars <= GITHUB_REVIEW_BODY_MAX) return null;
+  return `review body is ${bodyChars} chars, over GitHub's ${GITHUB_REVIEW_BODY_MAX}-char limit. ` +
+    "Posting would 422 on `body is too long`, and the fallback would fold the inline comments " +
+    "into the same body and fail again, losing every finding. Split the payload into smaller " +
+    "batches, or narrow --generated-paths so fewer findings are routed to the body.";
+}
+
 async function main(argv: string[]): Promise<number> {
   if (argv.some((a) => a === "-h" || a === "--help" || a === "help")) {
     console.log(HELP);
@@ -623,7 +641,7 @@ async function main(argv: string[]): Promise<number> {
     generatedPaths: args.generatedPaths,
   });
 
-  const result: PostReviewResult = await postReview({
+  const postOpts = {
     repo: args.repo,
     pr: args.pr,
     round: 1,
@@ -633,11 +651,22 @@ async function main(argv: string[]): Promise<number> {
     changedFiles: plan.inlineEligibleFiles,
     // "low" so severity never filters a finding out of the review — the
     // no-drop rule is the whole point of this path.
-    fixThreshold: "low",
+    fixThreshold: "low" as const,
     humanSummary: plan.humanSummary,
     prHeadSha: ctx.headSha,
-    dryRun: args.dryRun,
-  });
+  };
+
+  // Measure the body EXACTLY rather than estimating it: a dry-run postReview
+  // builds the real body — same marker, same renderer — and returns before any
+  // network call, so this costs one string build and cannot drift from what the
+  // real post would send.
+  const probe = await postReview({ ...postOpts, dryRun: true });
+  const oversize = bodyTooLarge(probe.payloadSummary.bodyChars);
+  if (oversize) throw new Error(oversize);
+
+  const result: PostReviewResult = args.dryRun
+    ? probe
+    : await postReview({ ...postOpts, dryRun: false });
   console.log(JSON.stringify({
     findings: plan.findings.length,
     generatedPathSplit: {
