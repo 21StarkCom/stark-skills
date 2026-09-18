@@ -73,9 +73,10 @@ simply the current one.
 
 `integrate` enforces this rather than trusting it. Before the transaction it fetches the
 base branch from origin in the task's own repository and refuses unless the SHA is a
-commit that repository holds, is that branch's current tip, and contains every merge
-this engagement has already verified onto the same branch. The refusal names the current
-tip. Without that check the store validated the SHA's shape alone (40 to 64 hex
+commit that repository holds and is that branch's current tip. The refusal names the
+current tip. That comparison is the whole guarantee: a base that IS `origin/<ref>` already
+contains everything merged onto that branch, so nothing walks history. Without that check
+the store validated the SHA's shape alone (40 to 64 hex
 characters) while `verify` only requires that base in the merged head's ancestry, so a
 foreign-repository SHA, a typo, or an hour-stale tip all passed and let a diff built
 without the other task's changes squash cleanly whenever git sees no textual conflict.
@@ -89,16 +90,20 @@ engagement never merges into. Pass `--base-ref` whenever the task's PR does not 
 origin's default branch; `verify` refuses a grant whose branch is not the PR's base.
 The check is fail-closed: an unreachable origin, a branch origin does not have, and an
 origin that reports no default branch each refuse and say which, rather than falling back
-to a local ref. A shallow checkout refuses by name too, on one probe of the repository
-before any merge is compared: `git fetch` honours the existing depth, so a merge outside it
-is either absent or cut off from the base by the graft, and neither reading is an answer —
-reporting them missing would loop the leader through "fetch again" forever. Run
-`git fetch --unshallow` there. A shallow clone with no verified merge to compare still grants.
-Both network round trips are bounded by half the evidence freshness window, so a slow fetch
-fails as a fetch instead of returning evidence the store then calls stale; an observation
-that outlives the whole window fails as the slow observation it was, for the same reason.
-The two refusals that can be reached for a reason no fetch repairs say so: the stale-tip one
-names `--base-ref`, and the verified-merge floor names a revert or force-push off the branch.
+to a local ref. A shallow checkout grants normally — nothing here needs history.
+An earlier revision also required the base to contain every merge this engagement had
+verified onto that branch. That floor is gone (STARK-5222). Whenever the tip check passes
+the floor is already implied, and every case where the two differed was one where the floor
+was WRONG, each producing a refusal with no in-band repair because a grant cannot be retaken
+once the task is `integrating`: a reverted or force-pushed merge is off the branch for good,
+a task verified before base evidence existed has no branch to attribute its merge to, and a
+shallow clone cannot answer ancestry at all. It also cost every grant a depth probe and one
+`merge-base` per verified merge, all discarded on the commonest refusal.
+The fetch is bounded by half the evidence freshness window, so a slow one fails as a fetch
+instead of returning evidence the store then calls stale; an observation that outlives that
+window less the same budget fails as the slow observation it was, with headroom so evidence
+squeaking under the limit cannot trip the store's own check a millisecond later.
+The stale-tip refusal names `--base-ref`, the one repair a leader on another branch needs.
 Name the PR's own base branch: a grant cannot be retaken once the task is `integrating`, so
 a grant taken on the wrong branch leaves a task only `recover` or operator takeover can
 move. A packet regenerated while a grant is pending names that branch to the worker.
@@ -107,7 +112,7 @@ and removes it, so it neither writes `FETCH_HEAD` nor moves the leader's checkou
 that is not in `review`, or an engagement that is not running and reconciled, refuses before
 that fetch rather than after it. `verify` closes the other end: the branch the grant was
 checked against must be the branch the PR actually merged into, so a grant taken at a quiet
-branch's tip cannot discharge a merge into a branch its floor never covered.
+branch's tip cannot discharge a merge into a branch it never read.
 
 ## Durable commands
 

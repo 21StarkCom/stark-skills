@@ -275,7 +275,7 @@ export async function observeOrphan(task: Assignment, replacementWorktree: strin
   ]);
   if (peers.incomplete) throw new Error("Hermod discovery incomplete; takeover withheld");
   const peerAge = Date.now() - Date.parse(peers.observedAt);
-  if (!Number.isFinite(peerAge) || peerAge > 60_000 || peerAge < -5_000) throw new Error("Hermod discovery stale; takeover withheld");
+  if (!Number.isFinite(peerAge) || peerAge > OBSERVATION_FRESHNESS_MS || peerAge < -5_000) throw new Error("Hermod discovery stale; takeover withheld");
   const sessions = parseSavedSessions(rawSessions);
   const tabs = JSON.parse(rawTabs) as { id: string }[];
   const processes = JSON.parse(rawProcesses) as { pid: number; cmuxSurfaceId?: string }[];
@@ -500,7 +500,7 @@ function transferReceipt(brief: BriefIdentity, previous: string, createdAt: stri
     const transferred = Date.parse(receipt.at);
     if (typeof receipt.current !== "string" || !receipt.current || !Number.isSafeInteger(receipt.epoch) ||
       receipt.epoch <= epoch || receipt.epoch > (brief.epoch ?? -1) || !Number.isFinite(transferred) || transferred < at ||
-      transferred > Date.parse(createdAt) || !Number.isFinite(observed) || observed > transferred || transferred - observed > 60_000) {
+      transferred > Date.parse(createdAt) || !Number.isFinite(observed) || observed > transferred || transferred - observed > OBSERVATION_FRESHNESS_MS) {
       throw new Error("invalid re-brief transfer receipt");
     }
     assertLeadershipTransfer(leader, receipt.discovery);
@@ -600,8 +600,9 @@ export async function receive(run: Run, messageId: string, call: Command = comma
  * BEFORE the fetch (house rule: a slow command must not look fresh) and `fresh` rejects
  * evidence older than OBSERVATION_FRESHNESS_MS, so a fetch left on the 300 s default command
  * timeout can return perfectly good evidence the store then calls stale — and "fetch the base
- * branch again" only re-runs the same slow fetch. Half the window, so the fetch plus the
- * ancestry comparisons still fit inside the freshness the store will demand of them. */
+ * branch again" only re-runs the same slow fetch. Half the window, so the fetch and the two
+ * local rev-parses after it still fit inside the freshness the store will demand of them,
+ * with the other half left as the age guard's headroom below that window. */
 const NETWORK_BUDGET_MS = Math.floor(OBSERVATION_FRESHNESS_MS / 2);
 /** The base branch to read the tip from when the leader names none: origin's default branch,
  * asked of ORIGIN. Not the local `refs/remotes/origin/HEAD`: git writes that pointer once at
@@ -611,16 +612,23 @@ const NETWORK_BUDGET_MS = Math.floor(OBSERVATION_FRESHNESS_MS / 2);
  * while the refusal text, the docs, and the recorded `baseEvidence.ref` all report it on.
  * This is a SECOND round trip, not a free ride on the fetch's connection: `ls-remote` and
  * `fetch` are separate processes and separate connections. Paying it is still right — the
- * alternative is the one local input that can lie — but `--base-ref` skips it, and the cost
- * is real enough that the observation's time budget has to account for both. */
+ * alternative is the one local input that can lie — but `--base-ref` skips it, and it is real
+ * enough to budget. It runs BEFORE `observedAt` is stamped, so its cost is deliberately
+ * outside the window the store measures: the tip is read after the stamp, so a stamp taken
+ * later would only ever make slow evidence look fresher than it is. */
 async function defaultBaseRef(repoDir: string, call: Command): Promise<string> {
   const head = await call(["git", "ls-remote", "--symref", "origin", "HEAD"], repoDir, NETWORK_BUDGET_MS);
   if (head.code !== 0) {
     // This round trip is bounded like the fetch below, so it fails like the fetch below:
     // an unexplained `git exited 124` would read as a git bug rather than the budget.
+    // No `--base-ref` hint here. This branch is a TRANSPORT failure — unreachable origin, auth,
+    // timeout — and the very next step is a fetch to the same origin that fails identically, so
+    // naming the flag spends a second full budget window on advice that cannot work. The hint
+    // belongs only on the parse failure below, where the connection worked and the answer was
+    // the thing missing.
     throw new Error(`cannot read origin's default branch in ${repoDir}: ${head.timedOut
       ? `timed out after ${NETWORK_BUDGET_MS / 1000}s, the freshness budget this evidence has to fit in`
-      : (head.stderr || head.stdout).trim() || `git exited ${head.code}`}; name the base branch with --base-ref`);
+      : (head.stderr || head.stdout).trim() || `git exited ${head.code}`}`);
   }
   // `ref: refs/heads/main\tHEAD`, then the SHA line. An origin with no commits yet reports
   // neither, so an empty match is a real absence rather than a parse failure.
@@ -628,11 +636,13 @@ async function defaultBaseRef(repoDir: string, call: Command): Promise<string> {
   if (!symref) throw new Error(`origin reports no default branch for ${repoDir}; name the base branch with --base-ref`);
   return symref[1];
 }
-/** Gather the git facts `baseRefusal` judges: that the repository is the task's, that it holds
- * the supplied base as a commit, what the base branch's tip is right now, and which of this
- * engagement's verified merges the base contains. Fail closed — an unfetchable branch, an
- * unresolvable ref, or a base this repository does not have refuses here, naming which. */
-export async function observeBase(task: Assignment, base: string, priorMerges: string[], ref?: string,
+/** Gather the three git facts `baseRefusal` judges: that the repository is the task's, that it
+ * holds the supplied base as a commit, and what the base branch's tip is right now. Fail closed —
+ * an unfetchable branch, an unresolvable ref, or a base this repository does not have refuses
+ * here, naming which. Nothing walks history: the tip comparison already implies containment of
+ * everything merged onto that branch, and the ancestry floor that briefly sat here only ever
+ * differed from it by refusing valid grants (see `baseRefusal`). */
+export async function observeBase(task: Assignment, base: string, ref?: string,
   call: Command = command): Promise<BaseEvidence> {
   if (!isRevision(base)) throw new Error("integration requires an observed base SHA");
   const repoDir = task.spec.repo;
@@ -660,39 +670,17 @@ export async function observeBase(task: Assignment, base: string, priorMerges: s
     // from another repository, or a typo, lands here rather than passing the shape check alone.
     const resolved = await call(["git", "rev-parse", "--verify", "--quiet", `${base}^{commit}`], repoDir);
     if (resolved.code !== 0 || resolved.stdout.trim() !== base) throw new Error(`integration base ${base} is not a commit in ${repositoryKey}`);
-    const contains: string[] = [];
-    const merges = [...new Set(priorMerges)];
-    // A shallow clone cannot answer containment AT ALL, and the two ways it fails to are not
-    // distinguishable after the fact. `git fetch` honours the existing depth, so a merge outside
-    // it is either absent — `merge-base --is-ancestor` exits 128 — or present while the graft
-    // cuts the walk between it and the base, which exits 1: an answer indistinguishable from an
-    // honest "not contained". Reading only the 128 half left the 1 half refusing with
-    // "does not contain verified merge X; fetch again and grant at the tip", the same
-    // cannot-work advice the 128 branch exists to avoid. One probe up front, before either
-    // reading can be produced, is both simpler and complete. (In a COMPLETE clone 128 IS an
-    // answer: the fetch above brought the base branch with its history, so a merge this
-    // repository still lacks cannot be in the base's ancestry either — not contained.)
-    if (merges.length > 0 && (await checked(call, ["git", "rev-parse", "--is-shallow-repository"], repoDir)) === "true") {
-      throw new Error(`cannot compare verified merge ${merges[0]} against ${base}: ${repoDir} is a shallow clone, so containment cannot be answered there; run git fetch --unshallow there`);
-    }
-    for (const sha of merges) {
-      const ancestor = await call(["git", "merge-base", "--is-ancestor", sha, base], repoDir);
-      // 0 contained, 1 not contained, 128 an object this complete clone does not hold, which
-      // cannot be in the base's ancestry either. Anything else (a timeout, a signal) is a failed
-      // observation, so refuse rather than record silence as a clean comparison.
-      if (ancestor.code === 0) { contains.push(sha); continue; }
-      if (ancestor.code === 1 || ancestor.code === 128) continue;
-      throw new Error(`cannot compare verified merge ${sha} against ${base}: ${(ancestor.stderr || ancestor.stdout).trim() || `git exited ${ancestor.code}`}`);
-    }
-    // Only the two network calls carry NETWORK_BUDGET_MS; everything after the stamp runs on the
-    // default command timeout. Evidence that has already outlived the store's freshness window
-    // comes back as "integration base evidence is stale; fetch the base branch again" — the very
-    // loop that budget exists to prevent, now blamed on the fetch. Fail as what it was instead.
+    // The fetch carries NETWORK_BUDGET_MS but the rev-parses after it run on the default command
+    // timeout, so the observation can still outlive the store's window. Evidence that has would
+    // come back as "integration base evidence is stale; fetch the base branch again" — the loop
+    // that budget exists to prevent, blamed on the fetch. Fail as what it was instead, and leave
+    // headroom: returning at 59.9s only hands `fresh()` a 60s ceiling to trip on ms later, so the
+    // guard fires a whole budget short of the store's limit rather than at it.
     const age = Date.now() - Date.parse(observedAt);
-    if (age >= OBSERVATION_FRESHNESS_MS) {
-      throw new Error(`integration base observation of ${branch} in ${repoDir} took ${Math.round(age / 1000)}s, past the ${OBSERVATION_FRESHNESS_MS / 1000}s window the store accepts; the repository or its origin is too slow to grant against right now`);
+    if (age > OBSERVATION_FRESHNESS_MS - NETWORK_BUDGET_MS) {
+      throw new Error(`integration base observation of ${branch} in ${repoDir} took ${Math.round(age / 1000)}s, leaving under ${NETWORK_BUDGET_MS / 1000}s of the ${OBSERVATION_FRESHNESS_MS / 1000}s window the store accepts; the repository or its origin is too slow to grant against right now`);
     }
-    return { observedAt, repositoryKey, ref: branch, tip, base, contains, checks: [...BASE_CHECKS] };
+    return { observedAt, repositoryKey, ref: branch, tip, base, checks: [...BASE_CHECKS] };
   } finally {
     // The grant's verdict is already decided; a leftover private ref is noise, not a failure.
     // A cleanup that THROWS is the same noise, so catch it here: an unguarded `await` in a
