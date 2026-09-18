@@ -53,6 +53,10 @@ test("explicit orphan takeover preserves unknown evidence, PR, budget and merge 
   next = store.reserve("demo", "leader-one", next.revision, "one");
   assert.equal(next.tasks[0].attempts, 2);
   assert.match(packet(next, next.tasks[0]), /Existing draft PR 1075/);
+  // The retained grant was checked against one base branch, and `verify` now refuses a PR that
+  // merged into any other — terminally. The packet is the only brief every worker gets, and a
+  // worker resuming an existing PR is the one who can still retarget it, so it has to name it.
+  assert.match(packet(next, next.tasks[0]), /on base branch main, which your PR must target/);
   const freshWorker = { ...worker("new"), provider: "claude" as const, id: "claude:new", worktree: request.worktree };
   assert.throws(() => store.attach("demo", "leader-one", next.revision, "one", next.tasks[0].token!,
     { ...freshWorker, session: worker("one").session }), /fenced worker/);
@@ -159,6 +163,10 @@ test("an integration grant is checked against the repository's base branch, not 
   // still squash-merges cleanly whenever git sees no textual conflict. Name the tip to use.
   assert.throws(() => grant(store, run, "one", BASE, { tip }),
     new RegExp(`integration base ${BASE} is not the current main tip ${tip}; fetch again`));
+  // A task whose PR targets another branch hits that same refusal, so it has to offer the
+  // repair that applies to it. "Grant at the tip" alone sends it to this branch's tip, which
+  // `verify` then refuses against the PR's real base — and no second grant can repair that.
+  assert.throws(() => grant(store, run, "one", BASE, { tip }), /pass --base-ref BRANCH if this task's PR targets another branch/);
   // Evidence from another checkout, for another SHA, or without a branch cannot stand in.
   assert.throws(() => grant(store, run, "one", BASE, { repositoryKey: "other/repo" }), /observed in other\/repo, not \/repo/);
   assert.throws(() => grant(store, run, "one", BASE, { base: tip }), /does not cover the supplied SHA/);
@@ -175,6 +183,26 @@ test("an integration grant is checked against the repository's base branch, not 
   assert.equal(run.tasks[0].phase, "integrating");
   assert.deepEqual(run.tasks[0].baseEvidence, { ...run.tasks[0].baseEvidence!, ref: "main", tip: BASE, base: BASE, contains: [] });
   assert.ok(store.owned("demo", "one").includes("merge:/repo"));
+});
+
+test("verifiedMerges excludes the subject task by id, not by object identity", t => {
+  const { store } = fixture(t);
+  let run = start(store, observe(store, store.create(config())), "one");
+  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+  run = grant(store, run, "one", BASE);
+  const merged = landedProof(run).merge;
+  run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, landedProof(run));
+  // The CLI gathers the tested set from its own read of the run; `baseRefusal` recomputes the
+  // required set inside the store's transaction, from a separate JSON.parse. The two see
+  // structurally equal tasks that are different objects, so a `!==` compare would put a task's
+  // own merge into its own containment floor — a refusal naming a merge no fetch can add.
+  const reparsed = JSON.parse(JSON.stringify(run)) as Run;
+  assert.notEqual(reparsed.tasks[0], run.tasks[0]);
+  assert.equal(reparsed.tasks[0].spec.id, run.tasks[0].spec.id);
+  assert.equal(reparsed.tasks[0].evidence!.merge, merged);
+  assert.ok(!verifiedMerges(run, reparsed.tasks[0]).includes(merged), "a task's own merge is never its own floor");
+  // A different task in the same repository still has to contain it.
+  assert.deepEqual(verifiedMerges(run, reparsed.tasks[1]), [merged]);
 });
 
 test("a grant's base must contain the merges this engagement verified on that same base branch", t => {
@@ -195,6 +223,11 @@ test("a grant's base must contain the merges this engagement verified on that sa
   // merge this engagement has already verified onto that branch.
   assert.throws(() => grant(store, run, "two", merged, { contains: [] }),
     new RegExp(`integration base ${merged} does not contain verified merge ${merged}`));
+  // "Fetch again" only repairs a merge still on the branch. A revert or force-push takes it
+  // off for good, and then this floor can never be satisfied — the refusal has to say so
+  // rather than send the leader round a loop that cannot terminate.
+  assert.throws(() => grant(store, run, "two", merged, { contains: [] }),
+    /unless that merge was reverted or force-pushed off main, which no fetch can repair/);
   run = grant(store, run, "two", merged);
   assert.deepEqual(run.tasks[1].baseEvidence!.contains, [merged]);
   // A merge that landed on a different base branch is not this branch's floor; requiring it
