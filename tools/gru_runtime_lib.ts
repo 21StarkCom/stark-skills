@@ -305,9 +305,14 @@ async function locateWorker(task: Assignment, call: Command, action: string): Pr
   const peer = peers.peers.find(p => p.id === task.worker!.id);
   // Positive live evidence always wins, including in an incomplete namespace. `incomplete` answers
   // only whether absence proves death, and `workerFromPeer` below is the identity bar a present
-  // peer must clear; an unenumerable other peer cannot make this one less real. Absence still
-  // refuses — the reconcile it asks for is the complete-view path.
-  if (!peer) throw new Error(`worker missing from Hermod; reconcile before ${action}`);
+  // peer must clear; an unenumerable other peer cannot make this one less real. Absence refuses
+  // either way, but the two absences are NOT the same fact: inside a complete view the worker is
+  // genuinely gone, while inside an incomplete one it may simply be an identity Hermod cannot
+  // enumerate (remote, desktop, other-user, container, or newly launched — the same boundary that
+  // sets the flag). Say which, or the refusal sends an operator to `reconcile`/`takeover` for a
+  // worker that never left, and `takeover` refuses that view anyway.
+  if (!peer) throw new Error(`worker missing from Hermod; reconcile before ${action}${
+    peers.incomplete ? "; the view was incomplete, so this absence is unproven" : ""}`);
   const actual = workerFromPeer(peer);
   if (actual.session !== task.worker.session || actual.surface !== task.worker.surface || actual.provider !== task.worker.provider ||
       canonicalWorktree(actual.worktree) !== canonicalWorktree(task.worker.worktree) || actual.workspace !== task.worker.workspace) {

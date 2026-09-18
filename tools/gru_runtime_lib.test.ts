@@ -310,9 +310,14 @@ test("a present live peer binds inside an incomplete namespace; only absence is 
     assert.deepEqual(retired.at(-1), ["hermod", "close", "surface", "--workspace", "workspace"]);
 
     // Absence still refuses, in either view: an incomplete one cannot prove death, and a
-    // complete one has nothing to bind. Both name the reconcile that resolves it.
-    await assert.rejects(interruptWorker(stopping, namespace([], incomplete)), /worker missing from Hermod; reconcile before interruption/);
-    await assert.rejects(retireWorker(done, namespace([], incomplete)), /worker missing from Hermod; reconcile before retirement/);
+    // complete one has nothing to bind. Both name the reconcile that resolves it, and the
+    // incomplete one says so — `reconcile` and `takeover` both need the view the refusal lacks,
+    // so an unqualified "missing" would send the operator at a worker that never left.
+    const qualified = (action: string) => incomplete
+      ? new RegExp(`worker missing from Hermod; reconcile before ${action}; the view was incomplete, so this absence is unproven`)
+      : new RegExp(`worker missing from Hermod; reconcile before ${action}$`);
+    await assert.rejects(interruptWorker(stopping, namespace([], incomplete)), qualified("interruption"));
+    await assert.rejects(retireWorker(done, namespace([], incomplete)), qualified("retirement"));
     // A present peer whose identity moved is a different refusal, not a bind.
     const moved = namespace([{ ...claudePeer(), surfaceId: "elsewhere" }], incomplete);
     await assert.rejects(interruptWorker(stopping, moved), /worker identity changed/);

@@ -399,7 +399,7 @@ test("gru CLI: adopting a late launch during stop points at interruption, not a 
 /** Hermod v0.18.1 reports `incomplete: true` whenever an identity it cannot inspect is present
  *  — remote, desktop, other-user, container, unregistered, and a just-launched worker. Gating a
  *  PRESENT peer on that flag made Claude workers intermittently unbindable (STARK-5230). */
-test("gru CLI: attach binds a live peer inside an incomplete namespace, and still refuses an absent one", async t => {
+test("gru CLI: attach binds a live peer inside an incomplete namespace", async t => {
   const { store, current, attach, dir, observed } = await strandedLaunch(t, "git@github.com:o/r.git");
   const result = await run(attach, "leader-one", hermodPeerAt(dir, observed, undefined, { incomplete: true }));
   assert.equal(result.code, 0, result.error);
@@ -416,6 +416,11 @@ test("gru CLI: attach refuses a peer absent from an incomplete namespace and pre
     const result = await run(attach, "leader-one", hermodPeerAt(dir, observed, undefined, { incomplete, present: false }));
     assert.equal(result.code, 2);
     assert.match(result.error, /Hermod peer missing; preserve launch reservation/);
+    // The two absences are different facts: a complete view proves the launch is gone, an
+    // incomplete one cannot. Say which, or the operator reaches for a takeover that refuses.
+    const unproven = /absence is unproven/;
+    if (incomplete) assert.match(result.error, unproven);
+    else assert.doesNotMatch(result.error, unproven);
     const after = store.read("cli");
     assert.equal(after.revision, current.revision);
     assert.equal(after.tasks[0].phase, "reserved");
