@@ -293,13 +293,15 @@ function originRepo(dir: string, origin: string): string {
   git(dir, "init", "-q"); git(dir, "remote", "add", "origin", origin); git(dir, "commit", "-q", "--allow-empty", "-m", "init");
   return fs.realpathSync(dir);
 }
-/** A fake `hermod` on PATH whose only Claude peer is live in `cwd`. */
-function hermodPeerAt(dir: string, cwd: string, sessionId = "7b0c1c9e-0000-4000-8000-000000000001"): Record<string, string> {
+/** A fake `hermod` on PATH whose only Claude peer is live in `cwd`. `incomplete` reproduces a
+ *  namespace Hermod could not fully enumerate; `present: false` empties it without moving the flag. */
+function hermodPeerAt(dir: string, cwd: string, sessionId = "7b0c1c9e-0000-4000-8000-000000000001",
+  { incomplete = false, present = true }: { incomplete?: boolean; present?: boolean } = {}): Record<string, string> {
   const bin = path.join(dir, "bin"); fs.mkdirSync(bin, { recursive: true });
   const peer = { id: "claude:minion", agent: "claude", sessionId, surfaceId: "surface-minion",
     workspaceId: "workspace", cwd, liveness: "live", activity: "busy", evidence: ["live-process"], messaging: { available: true } };
   fs.writeFileSync(path.join(bin, "hermod"), `#!/usr/bin/env node
-console.log(JSON.stringify({ peers: [${JSON.stringify(peer)}], observedAt: new Date().toISOString(), incomplete: false }));
+console.log(JSON.stringify({ peers: ${present ? `[${JSON.stringify(peer)}]` : "[]"}, observedAt: new Date().toISOString(), incomplete: ${incomplete} }));
 `, { mode: 0o755 });
   return { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
 }
@@ -329,7 +331,7 @@ async function strandedLaunch(t: TestContext, peerRepoOrigin: string) {
   current = store.reserve("cli", "leader-one", current.revision, "t");
   const attach = ["attach", "--run", "cli", "--revision", String(current.revision), "--task", "t",
     "--token", current.tasks[0].token!, "--peer", "claude:minion", "--state", state];
-  return { store, current, attach, env: hermodPeerAt(dir, observed), declared, observed };
+  return { store, current, attach, env: hermodPeerAt(dir, observed), dir, declared, observed };
 }
 
 test("gru CLI: attach adopts Hermod's actual worktree for the same repository and ticket", async t => {
@@ -392,6 +394,33 @@ test("gru CLI: adopting a late launch during stop points at interruption, not a 
   assert.equal(bound.stoppedFrom, "intake");
   assert.match(late.error, /token changed; interrupt the worker/);
   assert.doesNotMatch(late.error, /fresh packet/);
+});
+
+/** Hermod v0.18.1 reports `incomplete: true` whenever an identity it cannot inspect is present
+ *  — remote, desktop, other-user, container, unregistered, and a just-launched worker. Gating a
+ *  PRESENT peer on that flag made Claude workers intermittently unbindable (STARK-5230). */
+test("gru CLI: attach binds a live peer inside an incomplete namespace, and still refuses an absent one", async t => {
+  const { store, current, attach, dir, observed } = await strandedLaunch(t, "git@github.com:o/r.git");
+  const result = await run(attach, "leader-one", hermodPeerAt(dir, observed, undefined, { incomplete: true }));
+  assert.equal(result.code, 0, result.error);
+  const bound = JSON.parse(result.out).tasks[0];
+  assert.equal(bound.phase, "intake");
+  assert.equal(bound.worker.id, "claude:minion");
+  assert.equal(bound.worker.worktree, observed);
+  assert.equal(store.read("cli").revision, current.revision + 1);
+});
+
+test("gru CLI: attach refuses a peer absent from an incomplete namespace and preserves the reservation", async t => {
+  const { store, current, attach, dir, observed } = await strandedLaunch(t, "git@github.com:o/r.git");
+  for (const incomplete of [true, false]) {
+    const result = await run(attach, "leader-one", hermodPeerAt(dir, observed, undefined, { incomplete, present: false }));
+    assert.equal(result.code, 2);
+    assert.match(result.error, /Hermod peer missing; preserve launch reservation/);
+    const after = store.read("cli");
+    assert.equal(after.revision, current.revision);
+    assert.equal(after.tasks[0].phase, "reserved");
+    assert.equal(after.tasks[0].worker, undefined);
+  }
 });
 
 test("gru CLI: attach still refuses a peer whose worktree belongs to another repository", async t => {

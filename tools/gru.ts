@@ -300,7 +300,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       case "attach": {
         const assigned = task(flag("token"));
         const peers = await discoverWorker({ provider: assigned.spec.provider, id: flag("peer") });
-        if (peers.incomplete) throw new Error("Hermod discovery incomplete; preserve launch reservation");
+        // Positive live evidence always wins, including in an incomplete namespace. `incomplete`
+        // answers whether absence proves death; a returned peer is present, and `workerFromPeer`
+        // below is the identity bar it must clear. Only the absence refusal needs completeness,
+        // and it refuses either way — preserving the reservation is the safe direction.
         const peer = peers.peers.find(p => p.id === flag("peer"));
         if (!peer) throw new Error("Hermod peer missing; preserve launch reservation");
         const worker = workerFromPeer(peer);

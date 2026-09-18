@@ -67,6 +67,10 @@ test("orphan takeover requires complete cross-provider absence, not merely missi
     const data = snapshot(); change(data);
     await assert.rejects(observeOrphan(task, replacement, callFor(data)), name);
   }
+  // Takeover is the path whose authority genuinely rests on proving ABSENCE, so it keeps the
+  // completeness gate that attach/interrupt/retire dropped in STARK-5230. Pinned by message.
+  const tainted = snapshot(); tainted.peers.incomplete = true;
+  await assert.rejects(observeOrphan(task, replacement, callFor(tainted)), /discovery incomplete; takeover withheld/);
   await assert.rejects(observeOrphan(task, replacement, async () => ({ code: 1, stdout: "", stderr: "offline" })), /failed/);
   for (const unavailable of [ { code: 1, stdout: "", stderr: "permission denied" },
     { code: 124, stdout: "", stderr: "", timedOut: true }, { code: 0, stdout: "", stderr: "" } ]) {
@@ -262,20 +266,58 @@ test("non-native attachment selectors never narrow the discovery namespace", asy
   }
 });
 
-test("interruption requires a complete observation of the actual worker provider", async () => {
+test("interruption uses the actual worker provider's view and binds a present peer", async () => {
   const task = assignment(); task.phase = "stopping";
   const actions: string[][] = [];
-  let incomplete = false;
   const call: Command = async argv => {
     actions.push(argv);
-    return response({ peers: [peer()], observedAt: new Date().toISOString(), incomplete: incomplete || !argv.includes("--agent") });
+    return response({ peers: [peer()], observedAt: new Date().toISOString(), incomplete: !argv.includes("--agent") });
   };
   await interruptWorker(task, call);
   assert.deepEqual(actions.at(-1), ["hermod", "send-key", "surface", "escape"]);
-  actions.length = 0;
-  incomplete = true;
-  await assert.rejects(interruptWorker(task, call), /incomplete/);
-  assert.equal(actions.length, 1);
+  assert.ok(actions[0].includes("--agent"), "the scoped provider view is the one consulted");
+});
+
+/** Hermod v0.18.1 reports `incomplete: true` for the unscoped view routinely, and for a scoped
+ *  Claude view whenever an uninspectable identity is present (remote, desktop, other-user,
+ *  container, unregistered — a just-launched worker included). That is an argument about
+ *  ABSENCE. A returned live peer is present, so it binds under either value of the flag. */
+test("a present live peer binds inside an incomplete namespace; only absence is gated", async () => {
+  const claudePeer = (): HermodPeer => ({ ...peer(), id: "claude:session", agent: "claude", activity: "idle" });
+  const namespace = (peers: HermodPeer[], incomplete: boolean): Command => async () =>
+    response({ peers, observedAt: new Date().toISOString(), incomplete });
+  for (const incomplete of [true, false]) {
+    const stopping = assignment(); stopping.phase = "stopping";
+    stopping.spec = { ...stopping.spec, provider: "claude" };
+    stopping.worker = workerFromPeer(claudePeer());
+    const interrupted: string[][] = [];
+    await interruptWorker(stopping, async argv => {
+      interrupted.push(argv);
+      return response({ peers: [claudePeer()], observedAt: new Date().toISOString(), incomplete });
+    });
+    // `idle` needs no keystroke; reaching the activity check at all proves the peer bound.
+    assert.equal(interrupted.length, 1, `interrupt bound under incomplete=${incomplete}`);
+
+    const done = assignment(); done.phase = "done";
+    done.spec = { ...done.spec, provider: "claude" };
+    done.worker = workerFromPeer(claudePeer());
+    const retired: string[][] = [];
+    const surface = await retireWorker(done, async argv => {
+      retired.push(argv);
+      return response({ peers: [claudePeer()], observedAt: new Date().toISOString(), incomplete });
+    });
+    assert.equal(surface, "surface");
+    assert.deepEqual(retired.at(-1), ["hermod", "close", "surface", "--workspace", "workspace"]);
+
+    // Absence still refuses, in either view: an incomplete one cannot prove death, and a
+    // complete one has nothing to bind. Both name the reconcile that resolves it.
+    await assert.rejects(interruptWorker(stopping, namespace([], incomplete)), /worker missing from Hermod; reconcile before interruption/);
+    await assert.rejects(retireWorker(done, namespace([], incomplete)), /worker missing from Hermod; reconcile before retirement/);
+    // A present peer whose identity moved is a different refusal, not a bind.
+    const moved = namespace([{ ...claudePeer(), surfaceId: "elsewhere" }], incomplete);
+    await assert.rejects(interruptWorker(stopping, moved), /worker identity changed/);
+    await assert.rejects(retireWorker(done, moved), /worker identity changed/);
+  }
 });
 
 test("same-session resume retains ownership while leadership transfers require full discovery", async () => {

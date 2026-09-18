@@ -303,8 +303,10 @@ async function locateWorker(task: Assignment, call: Command, action: string): Pr
   if (!task.worker) throw new Error(`identify the worker before ${action}`);
   const peers = await discoverWorker(task.worker, call);
   const peer = peers.peers.find(p => p.id === task.worker!.id);
-  // A peer inside an incomplete namespace view is not a verified identity; withhold lifecycle actions.
-  if (peers.incomplete) throw new Error(`worker observation incomplete; ${action} withheld`);
+  // Positive live evidence always wins, including in an incomplete namespace. `incomplete` answers
+  // only whether absence proves death, and `workerFromPeer` below is the identity bar a present
+  // peer must clear; an unenumerable other peer cannot make this one less real. Absence still
+  // refuses — the reconcile it asks for is the complete-view path.
   if (!peer) throw new Error(`worker missing from Hermod; reconcile before ${action}`);
   const actual = workerFromPeer(peer);
   if (actual.session !== task.worker.session || actual.surface !== task.worker.surface || actual.provider !== task.worker.provider ||
