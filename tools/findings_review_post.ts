@@ -13,6 +13,7 @@
  * fallback behavior.
  */
 import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import { spawnSync } from "node:child_process";
 
 import {
@@ -79,7 +80,7 @@ export function bodyFor(f: ReportFinding): string {
 }
 
 /**
- * Map a `ReportFindings` payload into the `Finding[]` `postReview` consumes.
+ * Map ONE `ReportFindings` entry into the `Finding` `postReview` consumes.
  *
  * `classification: "fix"` is set on every finding deliberately and is
  * load-bearing: `partitionInlineVsBody` (`stark_review.ts:1487`) requires it
@@ -87,37 +88,178 @@ export function bodyFor(f: ReportFinding): string {
  * and nothing is ever anchored. `ReportFindings` only emits findings that
  * survived verification, so "fix" is the honest classification for all of them.
  */
+export function toFinding(
+  f: ReportFinding,
+  agent: AgentName,
+  anchorable?: AnchorableLines,
+): Finding {
+  const domain = (f.category ?? "").trim() || "correctness";
+  const title = titleFor(f);
+  const file = f.file ?? null;
+  const line = typeof f.line === "number" ? f.line : null;
+  // Drop an anchor GitHub would reject, and say where the finding pointed in
+  // the body instead. A single unanchorable line used to sink the whole batch:
+  // the API 422s naming no index, and postReview's fallback then posts
+  // body-only, demoting every valid anchor with it. Measured on PR #870 —
+  // three of four anchors sat in valid hunks and none survived.
+  const anchored = file !== null && line !== null &&
+    (anchorable === undefined || isAnchorable(anchorable, file, line));
+  return {
+    id: findingId(domain, agent, title),
+    domain,
+    agent,
+    severity: severityFromVerdict(f.verdict),
+    file,
+    line: anchored ? line : null,
+    title,
+    body: anchored || file === null
+      ? bodyFor(f)
+      : `**Location:** \`${file}${line !== null ? `:${line}` : ""}\` (outside this PR's diff — not anchorable)\n\n${bodyFor(f)}`,
+    classification: "fix" as const,
+  };
+}
+
+/** Map a whole `ReportFindings` payload. One `Finding` per entry, in order. */
 export function toFindings(
   payload: ReportFindingsPayload,
   agent: AgentName,
   anchorable?: AnchorableLines,
 ): Finding[] {
-  return (payload.findings ?? []).map((f) => {
-    const domain = (f.category ?? "").trim() || "correctness";
-    const title = titleFor(f);
-    const file = f.file ?? null;
-    const line = typeof f.line === "number" ? f.line : null;
-    // Drop an anchor GitHub would reject, and say where the finding pointed in
-    // the body instead. A single unanchorable line used to sink the whole batch:
-    // the API 422s naming no index, and postReview's fallback then posts
-    // body-only, demoting every valid anchor with it. Measured on PR #870 —
-    // three of four anchors sat in valid hunks and none survived.
-    const anchored = file !== null && line !== null &&
-      (anchorable === undefined || isAnchorable(anchorable, file, line));
-    return {
-      id: findingId(domain, agent, title),
-      domain,
-      agent,
-      severity: severityFromVerdict(f.verdict),
-      file,
-      line: anchored ? line : null,
-      title,
-      body: anchored || file === null
-        ? bodyFor(f)
-        : `**Location:** \`${file}${line !== null ? `:${line}` : ""}\` (outside this PR's diff — not anchorable)\n\n${bodyFor(f)}`,
-      classification: "fix" as const,
-    };
-  });
+  return (payload.findings ?? []).map((f) => toFinding(f, agent, anchorable));
+}
+
+// ─── generated-path routing ─────────────────────────────────────────────────
+
+/**
+ * Path globs whose findings are reported in the review BODY instead of as
+ * inline threads.
+ *
+ * Why this exists (STARK-5637, measured on bifrost#264): three reviews posted
+ * 34 inline threads against `vendor/stark-skills/tools/gru*.ts` and generated
+ * `dist` output. Every finding was real and every one already carried a
+ * disposition in its body, but bifrost `main` enforces
+ * `required_conversation_resolution`, so 34 open threads pinned the PR at
+ * `mergeStateStatus: BLOCKED` with all five checks green and
+ * `mergeable: MERGEABLE`. `auto/marketplace-sync` is a SHARED branch,
+ * force-updated by every sync from every session, so those threads blocked a
+ * DIFFERENT session's publish. And they could not have been fixed where they
+ * were posted: these paths are a generated snapshot of code already merged
+ * upstream, the drift gate rejects hand-edits, and the next regeneration
+ * overwrites the tree.
+ *
+ * The finding is not dropped, downgraded, or auto-resolved. It moves from a
+ * gating inline thread to a non-gating body entry that keeps its file, line,
+ * severity and disposition. Dispositioning stays the author's job.
+ *
+ * This list MIRRORS bifrost's `.gitattributes` `linguist-generated=true`
+ * entries (`dist/**`, `vendor/**`, `index.json`, `bundles/**`,
+ * `.claude-plugin/**`) plus `catalog/**`, which a sync PR machine-rewrites
+ * without declaring generated. Because it is a mirror it can drift — when a
+ * target repo declares a generated path this list does not carry, pass it with
+ * `--generated-paths` rather than assuming the default covers the repo.
+ */
+export const DEFAULT_GENERATED_PATHS: readonly string[] = Object.freeze([
+  "vendor/**",
+  "dist/**",
+  "bundles/**",
+  "catalog/**",
+  // Every bifrost sync PR rewrites `.claude-plugin/marketplace.json`, and
+  // bifrost's `.gitattributes` marks the tree `linguist-generated=true`.
+  // Omitting it left the one machine-written file the sync touches on every
+  // run still opening a gating thread.
+  ".claude-plugin/**",
+  "index.json",
+]);
+
+/**
+ * The first configured glob `file` matches, or null when it matches none.
+ *
+ * Matching is `node:path`'s own `matchesGlob` — a doubled star crosses path
+ * separators, a single star and `?` stay inside one segment, and the pattern is
+ * anchored against the WHOLE repo-relative path.
+ *
+ * That whole-path anchoring is load-bearing, not a simplification. Under
+ * gitignore's basename rule a bare `index.json` would also match bifrost's
+ * `web/src/__fixtures__/index.json` and its `engine/internal/*` testdata copies
+ * — hand-written source fixtures whose findings must keep their inline threads,
+ * because those ARE fixable where they are posted. To match a generated file at
+ * any depth, write the doubled-star prefix yourself.
+ */
+export function matchGeneratedPath(
+  file: string | null | undefined,
+  patterns: readonly string[],
+): string | null {
+  if (!file) return null;
+  // Compare in the shape GitHub reports a changed file: repo-relative, no `./`
+  // or `/` prefix. A finding that names `./vendor/x.ts` must demote exactly
+  // like the `vendor/x.ts` GitHub listed.
+  const rel = file.replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
+  if (!rel) return null;
+  for (const pattern of patterns) {
+    if (nodePath.matchesGlob(rel, pattern)) return pattern;
+  }
+  return null;
+}
+
+/** One finding held out of the inline set because its only anchor is generated. */
+export interface GeneratedEntry {
+  file: string;
+  /** The line the finding declared — the line it would have anchored to. */
+  line: number | null;
+  /** Which configured glob matched, so the demotion is explainable. */
+  pattern: string;
+}
+
+export interface GeneratedSplit {
+  /** False when the glob list is empty — via `--no-generated-split` on the CLI. */
+  enabled: boolean;
+  patterns: string[];
+  entries: GeneratedEntry[];
+}
+
+/**
+ * The per-finding note prepended to a generated-path finding's body. It REPLACES
+ * `toFinding`'s `**Location:**` prefix rather than stacking on top of it, so a
+ * demoted finding carries one location line, not two contradictory ones.
+ *
+ * It states the file and line itself because `buildReviewBody`'s `(file:line)`
+ * header drops the line whenever the anchor was invalidated as out-of-hunk —
+ * exactly the case where the reader most needs to know where the finding
+ * pointed. It stays SHORT on purpose: the full rationale lives once in
+ * {@link generatedPathPreamble}, and this note is paid once per finding into a
+ * review body that has no size guard and a hard 65,536-char ceiling.
+ */
+export function generatedFindingNote(
+  file: string,
+  declaredLine: number | null,
+  pattern: string,
+  outsideDiff = false,
+): string {
+  const at = `\`${file}${declaredLine !== null ? `:${declaredLine}` : ""}\``;
+  const where = outsideDiff ? ", outside this PR's diff" : "";
+  return `**Generated output** ${at} (matched \`${pattern}\`${where}) — fix it upstream; see the note above.`;
+}
+
+/** The review-body preamble explaining why these findings have no threads. */
+export function generatedPathPreamble(split: GeneratedSplit): string {
+  const n = split.entries.length;
+  if (n === 0) return "";
+  const patterns = [...new Set(split.entries.map((e) => e.pattern))].sort();
+  return [
+    `### ${n} finding${n === 1 ? "" : "s"} on generated paths — in this body, not inline`,
+    "",
+    `Matched ${patterns.map((p) => `\`${p}\``).join(", ")}. Each is listed below with the ` +
+      "file and line it would have anchored to.",
+    "",
+    "They are deliberately not inline threads. The path is **generated output**, so the fix " +
+      "belongs **upstream** in the source it is generated from — an edit here is overwritten " +
+      "by the next regeneration and rejected by the drift gate. And this is a **shared** " +
+      "branch, so an unresolved thread on it blocks every session's merge under " +
+      "`required_conversation_resolution`, not just this review's.",
+    "",
+    "Nothing is dropped, downgraded, or auto-resolved: every finding keeps its severity and " +
+      "its disposition. Only the gating thread is withheld.",
+  ].join("\n");
 }
 
 /** Human-facing preamble for the review body. */
@@ -125,6 +267,7 @@ export function buildHumanSummary(
   findings: Finding[],
   level: string | undefined,
   agent: AgentName = findings[0]?.agent ?? "claude",
+  generated?: GeneratedSplit,
 ): string {
   const bySeverity = new Map<Severity, number>();
   for (const f of findings) {
@@ -146,7 +289,67 @@ export function buildHumanSummary(
       "severity field. Treat it as a sort order, not a measurement.",
   ];
   if (level) lines.push("", `Review effort level: \`${level}\`.`);
+  if (generated) {
+    const preamble = generatedPathPreamble(generated);
+    if (preamble) lines.push("", preamble);
+  }
   return lines.join("\n");
+}
+
+/**
+ * Everything `postReview` needs, with the generated-path split already applied.
+ *
+ * Split mechanism: a generated path is removed from the `changedFiles` set
+ * handed to `postReview`. `partitionInlineVsBody` requires
+ * `changedFiles.has(f.file)` for inline eligibility and routes everything else
+ * to the review body WITH its file and line intact, so this demotes the thread
+ * and touches nothing else — not severity, not `classification`, not the
+ * finding's disposition. Reusing that seam rather than re-implementing the
+ * partition also means the 422 fallback still only ever demotes inline → body,
+ * so nothing can promote a generated-path finding back into a thread.
+ */
+export interface ReviewPlan {
+  findings: Finding[];
+  /** The PR's changed files minus every generated path. */
+  inlineEligibleFiles: Set<string>;
+  humanSummary: string;
+  generated: GeneratedSplit;
+}
+
+export function planReview(
+  payload: ReportFindingsPayload,
+  ctx: { changedFiles: Set<string>; anchorable?: AnchorableLines },
+  opts: { agent: AgentName; generatedPaths: readonly string[] },
+): ReviewPlan {
+  const patterns = [...opts.generatedPaths];
+  const entries: GeneratedEntry[] = [];
+  const findings: Finding[] = [];
+  for (const raw of payload.findings ?? []) {
+    const f = toFinding(raw, opts.agent, ctx.anchorable);
+    const pattern = matchGeneratedPath(f.file, patterns);
+    if (pattern === null) {
+      findings.push(f);
+      continue;
+    }
+    const declaredLine = typeof raw.line === "number" ? raw.line : null;
+    const file = f.file as string;
+    entries.push({ file, line: declaredLine, pattern });
+    // Rebuild the body from `bodyFor` rather than prefixing `f.body`: for an
+    // out-of-hunk anchor `toFinding` has already prepended its own
+    // `**Location:**` line, and stacking the two reads as two different
+    // reasons for the same demotion.
+    const note = generatedFindingNote(file, declaredLine, pattern, f.line === null && declaredLine !== null);
+    findings.push({ ...f, body: `${note}\n\n${bodyFor(raw)}` });
+  }
+  const generated: GeneratedSplit = { enabled: patterns.length > 0, patterns, entries };
+  return {
+    findings,
+    inlineEligibleFiles: new Set(
+      [...ctx.changedFiles].filter((file) => matchGeneratedPath(file, patterns) === null),
+    ),
+    humanSummary: buildHumanSummary(findings, payload.level, opts.agent, generated),
+    generated,
+  };
 }
 
 // ─── PR context ─────────────────────────────────────────────────────────────
@@ -296,8 +499,21 @@ options:
   --pr N            pull request number (required)
   --findings PATH   ReportFindings JSON; "-" reads stdin (required)
   --agent AGENT     review attribution: claude|codex|gemini (default: claude)
+  --generated-paths GLOB[,GLOB...]
+                    replace the generated-output glob list
+                    (default: ${DEFAULT_GENERATED_PATHS.join(",")})
+  --no-generated-split
+                    anchor generated-path findings inline like any other
   --dry-run         build the payload and print the plan without posting
   -h, --help        show this help message and exit
+
+A finding whose only anchor is a generated path is reported in the review BODY,
+with the file and line it would have anchored to, instead of as an inline
+thread: the fix belongs upstream, and an unresolved thread on a shared publish
+branch blocks every session's merge. Nothing is dropped, downgraded, or
+auto-resolved — only the gating thread is withheld. Globs are matched against
+the whole repo-relative path, so \`index.json\` means the root file, not every
+file with that name; write the doubled-star prefix to match at any depth.
 
 The review is posted as event=COMMENT through the existing gh login.
 The agent selects model attribution only; it never changes authentication.`;
@@ -308,6 +524,7 @@ export interface CliArgs {
   findingsPath: string;
   agent: AgentName;
   dryRun: boolean;
+  generatedPaths: string[];
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -316,11 +533,22 @@ export function parseArgs(argv: string[]): CliArgs {
   let findingsPath: string | undefined;
   let agent: AgentName = "claude";
   let dryRun = false;
+  let generatedPaths: string[] = [...DEFAULT_GENERATED_PATHS];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const need = (): string => {
       const v = argv[++i];
       if (v === undefined) throw new Error(`${a} requires a value`);
+      // A flag's value must not be the NEXT flag. `--generated-paths --dry-run`
+      // would otherwise parse to the glob list ["--dry-run"] — matching nothing,
+      // so every generated finding regains a gating thread — while `--dry-run`
+      // itself is consumed and never set, so the review really posts. The
+      // empty-value guard below exists to stop a silent disable; this stops the
+      // same thing arriving one keystroke earlier. `-` stays legal: it is the
+      // documented stdin value for `--findings`.
+      if (v.startsWith("--")) {
+        throw new Error(`${a} requires a value, got the flag ${v}`);
+      }
       return v;
     };
     switch (a) {
@@ -339,6 +567,21 @@ export function parseArgs(argv: string[]): CliArgs {
         agent = v;
         break;
       }
+      case "--generated-paths": {
+        const raw = need();
+        const list = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+        // An empty value must not silently disable the split — that is the
+        // failure this whole tool exists to stop, arriving as a typo instead.
+        // Disabling is an explicit flag.
+        if (list.length === 0) {
+          throw new Error(
+            "--generated-paths requires at least one glob; pass --no-generated-split to disable the split",
+          );
+        }
+        generatedPaths = list;
+        break;
+      }
+      case "--no-generated-split": generatedPaths = []; break;
       case "--dry-run": dryRun = true; break;
       default:
         throw new Error(`unknown argument: ${a}`);
@@ -347,7 +590,7 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!repo) throw new Error("--repo is required");
   if (pr === undefined) throw new Error("--pr is required");
   if (!findingsPath) throw new Error("--findings is required");
-  return { repo, pr, findingsPath, agent, dryRun };
+  return { repo, pr, findingsPath, agent, dryRun, generatedPaths };
 }
 
 export function readPayload(path: string): ReportFindingsPayload {
@@ -363,6 +606,28 @@ export function readPayload(path: string): ReportFindingsPayload {
   return parsed;
 }
 
+/**
+ * GitHub's hard cap on a pull-request review body, in characters.
+ *
+ * This matters more since the generated-path split: a demoted finding's full
+ * text moves OUT of an inline comment, which carries its own budget, and INTO
+ * the one shared review body. Over the cap the POST 422s on `body is too long`
+ * with no `errors[].index`, so `extract422Indices` returns `[]` and
+ * `postReview`'s fallback demotes the REMAINING inline comments into that same
+ * body, retries it larger, 422s again and reports `unposted` — every finding
+ * lost, not one. Refusing up front turns that into one actionable message.
+ */
+export const GITHUB_REVIEW_BODY_MAX = 65536;
+
+/** The cap check, split out so a test can pin it without a network round trip. */
+export function bodyTooLarge(bodyChars: number): string | null {
+  if (bodyChars <= GITHUB_REVIEW_BODY_MAX) return null;
+  return `review body is ${bodyChars} chars, over GitHub's ${GITHUB_REVIEW_BODY_MAX}-char limit. ` +
+    "Posting would 422 on `body is too long`, and the fallback would fold the inline comments " +
+    "into the same body and fail again, losing every finding. Split the payload into smaller " +
+    "batches, or narrow --generated-paths so fewer findings are routed to the body.";
+}
+
 async function main(argv: string[]): Promise<number> {
   if (argv.some((a) => a === "-h" || a === "--help" || a === "help")) {
     console.log(HELP);
@@ -371,24 +636,51 @@ async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const payload = readPayload(args.findingsPath);
   const ctx = await fetchPrContext(args.repo, args.pr);
-  const findings = toFindings(payload, args.agent, ctx.anchorable);
+  const plan = planReview(payload, ctx, {
+    agent: args.agent,
+    generatedPaths: args.generatedPaths,
+  });
 
-  const result: PostReviewResult = await postReview({
+  const postOpts = {
     repo: args.repo,
     pr: args.pr,
     round: 1,
     agent: args.agent,
-    runHash: findings.map((f) => f.id).join(",").slice(0, 40) || "empty",
-    findings,
-    changedFiles: ctx.changedFiles,
+    runHash: plan.findings.map((f) => f.id).join(",").slice(0, 40) || "empty",
+    findings: plan.findings,
+    changedFiles: plan.inlineEligibleFiles,
     // "low" so severity never filters a finding out of the review — the
     // no-drop rule is the whole point of this path.
-    fixThreshold: "low",
-    humanSummary: buildHumanSummary(findings, payload.level, args.agent),
+    fixThreshold: "low" as const,
+    humanSummary: plan.humanSummary,
     prHeadSha: ctx.headSha,
-    dryRun: args.dryRun,
-  });
-  console.log(JSON.stringify({ findings: findings.length, ...result }, null, 2));
+  };
+
+  // Measure the body EXACTLY rather than estimating it: a dry-run postReview
+  // builds the real body — same marker, same renderer — and returns before any
+  // network call, so this costs one string build and cannot drift from what the
+  // real post would send.
+  const probe = await postReview({ ...postOpts, dryRun: true });
+  const oversize = bodyTooLarge(probe.payloadSummary.bodyChars);
+  if (oversize) throw new Error(oversize);
+
+  const result: PostReviewResult = args.dryRun
+    ? probe
+    : await postReview({ ...postOpts, dryRun: false });
+  console.log(JSON.stringify({
+    findings: plan.findings.length,
+    generatedPathSplit: {
+      enabled: plan.generated.enabled,
+      patterns: plan.generated.patterns,
+      routedToBody: plan.generated.entries.length,
+      findings: plan.generated.entries.map((e) => ({
+        file: e.file,
+        line: e.line,
+        pattern: e.pattern,
+      })),
+    },
+    ...result,
+  }, null, 2));
   return result.unposted ? 1 : 0;
 }
 
