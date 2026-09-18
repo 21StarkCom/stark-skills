@@ -29,6 +29,7 @@ Usage: node tools/gru.ts <command> [options]
   takeover     --run ID --revision N --task ID --token TOKEN --file operator-request.json
   settle       --run ID --revision N --task ID --token TOKEN --file operator-request.json
   integrate    --run ID --revision N --task ID --token TOKEN --base SHA [--base-ref BRANCH]
+               SHA = freshly fetched tip of the PR's own base branch (40 to 64 lowercase hex characters)
   verify       --run ID --revision N --task ID --token TOKEN --pr N --review N
   stop         --run ID --revision N
   interrupt    --run ID --revision N --task ID --token TOKEN
@@ -73,7 +74,7 @@ merged into any other. Prefer declaring baseRef over reaching for --base-ref: a 
 cannot be retaken once the task is integrating.
 reconcile never equates missing discovery with death. Keep uncertain reservations.
 stop freezes dispatch; use Hermod to interrupt workers and observe termination.
-verify reruns declared checks in a disposable detached worktree, on fetched main.
+verify reruns declared checks in a disposable detached worktree, on the fetched PR base.
 It requires a merged PR, posted head-matching review, and Alfred completion.
 Replacement retains pending merge grants. verify can settle an earlier merge
 until the replacement attaches, or after stop froze an in-flight integration,
@@ -157,7 +158,7 @@ export function verifyBlocker(task: Assignment): string {
     // Do NOT name `reserve` here — `readyReason` refuses every phase except `pending`, so
     // suggesting it hands the operator a command that throws, which is the defect this
     // function exists to remove.
-    case "stopped": return `task was cancelled holding an unsettled integration grant; continue it once its worker is observed live and idle, then integrate ${GRANT_BASE}`;
+    case "stopped": return `task was cancelled holding an unsettled integration grant; continue it once its worker is observed live and idle; if restored to review, integrate ${GRANT_BASE}, otherwise receive its worker's READY report first, then integrate ${GRANT_BASE}`;
     default: return `task is ${task.phase}; its worker must report ready and receive integration before verification`;
   }
 }

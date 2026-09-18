@@ -155,10 +155,21 @@ Post every finding using the repository's approved review-posting path.
 Resolve or answer every finding before authorizing integration.
 
 Hold Gru's integration reservation across rebase, regeneration, tests, and merge.
-Grant integration to one specific assignment at the base branch tip you fetch and read
-immediately before `integrate`, never one observed earlier: `integrate` takes the merge
-lock itself, so its `resource already owned: merge:<repo>` refusal means another task is
-mid-merge — wait for it, fetch again, and read the tip again.
+Grant integration to one specific assignment at the PR's own base branch tip you fetch
+and read immediately before `integrate`. It takes the merge lock itself.
+A refusal `resource already owned: merge:<repo> (<run>/<task>)` or
+`resource already owned: merge-resource:<name> (<run>/<task>)` names the holder.
+Check that run's leader and worker with fresh Hermod observations. For a live holder,
+coordinate its completion, then fetch and read the tip again. A dead or unknown holder
+requires escalation to the operator with the named run/task and observed evidence;
+unknown is not dead. Do not wait indefinitely or delete ownership rows.
+For an already-merged grant with zero posted reviews, name the STARK-5062
+[`settle --file` path](references/operations.md#operator-settlement-of-a-merged-grant-without-review)
+(shipped in v0.30.7): resume leadership and reconcile under the normal rules, then use
+the operator-authored request. Settlement retains ancestry, checks and ticket closure,
+releases merge resources as `released-unverified`, and keeps dependents blocked.
+An unmerged PR, wrong ancestry or an existing wrong-head review does not qualify;
+escalate those facts instead of presenting settlement as a bypass.
 `integrate` checks that base against the repository instead of trusting you for it: it
 fetches the base branch from origin and refuses unless the SHA is a commit that
 repository holds and is that branch's current tip — which already implies every merge
@@ -175,6 +186,14 @@ merge, and a grant cannot be retaken, so depth has to be caught here.
 Merge into the branch the grant was checked against: `verify` refuses a PR whose base
 branch is not the one `integrate` read the tip from, and a grant cannot be retaken once the
 task is `integrating`, so name the PR's own base branch the first time.
+Require the worker to fetch and rebase after every grant before merging, even without
+another observed merge; the merged head must contain the granted base SHA.
+Before merge, `receive` its post-grant `progress` report with the final head SHA and
+review id, even if unchanged. A `ready` report is refused while `integrating`.
+Keep the last reported head and review id, replacing the pair captured at READY.
+Use that last review id for `verify --review` and compare the actual PR head to that
+last reported head. The CLI reads the head from GitHub; it has no `--head` flag.
+If they differ, stop and obtain the current evidence before merge.
 After merging, independently inspect the actual PR and merge ancestry.
 Rerun completion checks against the fetched base in an isolated verifier.
 Confirm review evidence covers the final PR head.

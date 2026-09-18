@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { canonicalRepository, checkLeadershipTransfer, checkRebrief, command, DEFAULT_CHECK_TIMEOUT_MS, discoverWorker, GRANT_FETCH as GRANT_FETCH_FLAGS, PRIVATE_FETCH as VERIFY_FETCH_FLAGS, inspectAdoption, interruptWorker, observations, observeBase, observeOrphan, observeSweep, observeWorkers, packet, PACKET_TRANSFER_WINDOW, receive, retireWorker, verifyCompletion, workerFromPeer, type Command, type HermodPeer } from "./gru_runtime_lib.ts";
-import { ADOPTION_CHECKS, BASE_CHECKS, type Assignment, type Engagement, type Run } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, BASE_CHECKS, GruStore, type Assignment, type Engagement, type Run } from "./gru_lib.ts";
 
 const peer = (): HermodPeer => ({ id: "codex:session", agent: "codex", threadId: "session",
   surfaceId: "surface", workspaceId: "workspace", cwd: "/worktree", liveness: "live",
@@ -505,6 +505,110 @@ test("dispatch packet uses the selected runtime and retains the full objective a
   assert.throws(() => workerFromPeer({ ...peer(), threadId: undefined }), /identity/);
 });
 
+// These prompts are the executable worker/leader protocol. Exercise the generated packet,
+// both installed skill sources, and the CLI help; each clause has its own negative control.
+const contractCases: { file: string; clause: string; pattern: RegExp; from: string; to: string }[] = [];
+const contract = (files: string[], clause: string, pattern: RegExp, from: string, to = "obsolete contract") => {
+  for (const file of files) contractCases.push({ file, clause, pattern, from, to });
+};
+const minions = ["skill/minion/SKILL.md", "runtime-overrides/codex/skill/minion/SKILL.md"];
+const leaders = ["skill/gru/SKILL.md", "runtime-overrides/codex/skill/gru/SKILL.md"];
+const ops = "skill/gru/references/operations.md";
+contract(["tools/gru_runtime_lib.ts", ...minions], "unconditional rebase",
+  /Before every merge, after the grant: fetch and rebase onto the PR's own base branch's current tip, even if you observed no other merge/,
+  "Before every merge, after the grant:", "After another merge:");
+contract(["tools/gru_runtime_lib.ts", ...minions], "granted ancestry",
+  /merged head must contain the granted base SHA/, "merged head must contain", "merged head may omit");
+contract(["tools/gru_runtime_lib.ts", ...minions], "ancestry command",
+  /git merge-base --is-ancestor GRANTED_BASE HEAD/, "git merge-base --is-ancestor GRANTED_BASE HEAD", "git status");
+contract(["tools/gru_runtime_lib.ts", ...minions], "progress report",
+  /head SHA and review id in a progress report before merging, even if unchanged/,
+  "head SHA and review id in a", "old head and review id in a");
+contract(["tools/gru_runtime_lib.ts", ...minions], "ready refusal",
+  /Do not send ready while integrating/, "Do not send", "Send");
+contract(leaders, "receive post-grant report",
+  /Before merge, receive its post-grant progress report with the final head SHA and review id, even if unchanged/,
+  "Before merge, `receive` its post-grant `progress`", "After merge, read its old ready");
+contract([...leaders, ops], "last report pair", /Keep the last reported head and review id, replacing the pair captured at READY/,
+  "Keep the last reported head and review id", "Keep the READY head and review id");
+contract([...leaders, ops], "merge-resource holder", /resource already owned: merge-resource:<name> \(<run>\/<task>\)/,
+  "merge-resource:<name> (<run>/<task>)", "merge-resource:<name>");
+contract(leaders, "dead holder escalation", /A dead or unknown holder requires escalation to the operator/,
+  "A dead or unknown holder", "A live holder");
+contract([...leaders, ops], "settlement path", /STARK-5062/, "STARK-5062", "historical");
+contract([ops], "post-grant import", /Before merge, receive the worker's post-grant progress report/,
+  "Before merge, `receive` the worker's post-grant `progress` report", "After merge, read the READY report");
+contract([ops], "dead holder escalation", /A dead or unknown holder requires escalation to the operator/,
+  "A dead or unknown holder", "A live holder");
+contract([ops], "lowercase SHA", /40 to 64 lowercase hex characters/, "40 to 64 lowercase hex", "40 to 64 hex");
+contract(["tools/gru.ts"], "help base SHA",
+  /SHA = freshly fetched tip of the PR's own base branch \(40 to 64 lowercase hex characters\)/,
+  "SHA = freshly fetched tip of the PR's own base branch (40 to 64 lowercase hex characters)", "SHA = commit");
+contract(["tools/gru.ts"], "stopped READY prerequisite",
+  /if restored to review, integrate .* otherwise receive its worker's READY report first, then integrate/,
+  "otherwise receive its worker's READY report first, then integrate", "otherwise integrate");
+
+for (const c of contractCases) test(`STARK-5052 contract: ${c.file} ${c.clause}`, async () => {
+  const root = path.resolve(import.meta.dirname, "..");
+  let text: string;
+  if (c.file === "tools/gru_runtime_lib.ts") text = packet(run(), assignment());
+  else if (c.file === "tools/gru.ts" && c.clause === "stopped READY prerequisite") {
+    const { verifyBlocker } = await import("./gru.ts");
+    text = verifyBlocker({ ...assignment(), phase: "stopped", stoppedFrom: "working" });
+  } else if (c.file === "tools/gru.ts") text = execFileSync(process.execPath, [path.join(root, c.file), "--help"], { encoding: "utf8" });
+  else text = fs.readFileSync(path.join(root, c.file), "utf8");
+  assert.match(text.replaceAll("`", "").replace(/\s+/g, " "), c.pattern);
+});
+
+test("STARK-5052 mutation sweep detects every reverted contract clause", {
+  skip: process.env.GRU_CONTRACT_MUTATION_SWEEP !== "1",
+}, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-contract-mutations-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const root = path.resolve(import.meta.dirname, "..");
+  for (const name of ["tools", "skill/gru", "skill/minion", "runtime-overrides/codex/skill/gru", "runtime-overrides/codex/skill/minion"]) {
+    fs.cpSync(path.join(root, name), path.join(dir, name), { recursive: true, filter: source => path.basename(source) !== "node_modules" });
+  }
+  const { NODE_TEST_CONTEXT: _context, ...env } = process.env;
+  const execute = (pattern = "STARK-5052 contract:") => spawnSync(process.execPath, ["--test", "--test-reporter=spec", `--test-name-pattern=${pattern}`,
+    path.join(dir, "tools/gru_runtime_lib.test.ts")], { encoding: "utf8", timeout: 30_000, env });
+  const baseline = execute();
+  assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
+  for (const c of contractCases) {
+    const file = path.join(dir, c.file), original = fs.readFileSync(file, "utf8");
+    assert.ok(original.includes(c.from), `missing mutation target: ${c.file} ${c.clause}`);
+    fs.writeFileSync(file, original.replaceAll(c.from, c.to));
+    const result = execute();
+    fs.writeFileSync(file, original);
+    assert.equal(result.status, 1, `mutation survived: ${c.file} ${c.clause}\n${result.stdout}${result.stderr}`);
+    assert.ok(result.stdout.includes(`✖ STARK-5052 contract: ${c.file} ${c.clause}`), result.stdout);
+    assert.match(result.stdout, /AssertionError/);
+    t.diagnostic(`KILLED: ${c.file} ${c.clause}`);
+  }
+  t.diagnostic(`${contractCases.length}/${contractCases.length} contract mutations rejected`);
+  const behavior = "STARK-5052 advanced base";
+  const liveBaseline = execute(behavior);
+  assert.equal(liveBaseline.status, 0, liveBaseline.stdout + liveBaseline.stderr);
+  const guards: [string, string, string][] = [
+    ["gru_lib.ts", '["working", "blocked", "review"].includes(task.phase)', 'true'],
+    ["gru_lib.ts", 'task.report = { kind, message, at: new Date().toISOString() };', 'task.report ??= { kind, message, at: new Date().toISOString() };'],
+    ["gru_runtime_lib.ts", 'review.commit_id !== pr.head.sha', 'false'],
+    ["gru_runtime_lib.ts", 'await git(["merge-base", "--is-ancestor", task.integrationBase, pr.head.sha]);', ''],
+    ["gru_lib.ts", "resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%' OR resource LIKE 'exclusive:%'", "resource LIKE 'exclusive:%'"],
+  ];
+  for (const [name, from, to] of guards) {
+    const file = path.join(dir, "tools", name), original = fs.readFileSync(file, "utf8");
+    assert.ok(original.includes(from), `missing behavioral guard: ${from}`);
+    fs.writeFileSync(file, original.replace(from, to));
+    const result = execute(behavior);
+    fs.writeFileSync(file, original);
+    assert.equal(result.status, 1, `behavior mutation survived: ${from}\n${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /AssertionError/);
+    t.diagnostic(`KILLED: ${name}: ${from}`);
+  }
+  t.diagnostic(`${guards.length}/${guards.length} behavioral mutations rejected`);
+});
+
 test("completed idle workers retire through Hermod without deleting session worktrees", async () => {
   const task = assignment(); task.phase = "done";
   let activity = "busy";
@@ -519,6 +623,95 @@ test("completed idle workers retire through Hermod without deleting session work
   await retireWorker(task, call);
   assert.deepEqual(actions.at(-1), ["hermod", "close", "surface", "--workspace", "workspace"]);
   assert.equal(await canonicalRepository("/repo", async () => ({ code: 0, stdout: "git@github.com:Owner/Repo.git\n", stderr: "" })), "owner/repo");
+});
+
+test("STARK-5052 advanced base rebases, imports progress, verifies last review and releases the lock", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-grant-contract-"));
+  const store = new GruStore(path.join(dir, "state.sqlite"));
+  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const repo = path.join(dir, "repo"), origin = path.join(dir, "origin.git"), worktree = path.join(dir, "worker");
+  fs.mkdirSync(repo);
+  let gitDir = repo;
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=Gru Test", "-c",
+    "user.email=gru@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: gitDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git("init", "--bare", "--initial-branch=main", origin);
+  git("init", "--initial-branch=main"); git("remote", "add", "origin", origin);
+  fs.writeFileSync(path.join(repo, "base.txt"), "initial\n");
+  git("add", "."); git("commit", "-m", "initial"); git("push", "origin", "main");
+  git("worktree", "add", "-b", "candidate", worktree); gitDir = worktree;
+  fs.writeFileSync(path.join(worktree, "feature.txt"), "feature\n");
+  git("add", "."); git("commit", "-m", "reviewed candidate");
+  const oldHead = git("rev-parse", "HEAD");
+  const spec = { ...assignment().spec, repo, worktree, repositoryKey: "owner/repo", baseRef: "main",
+    checks: [[process.execPath, "-e", "const a=require('node:assert/strict'),f=require('node:fs'); a.equal(f.readFileSync('base.txt','utf8'),'advanced\\n'); a.equal(f.readFileSync('feature.txt','utf8'),'feature\\n'); console.log('base and feature verified')"]] };
+  let current = store.create({ ...run().config, tasks: [spec] });
+  current = store.reconcile("run", "leader", current.revision, {});
+  current = store.reserve("run", "leader", current.revision, "task");
+  const token = current.tasks[0].token!;
+  current = store.attach("run", "leader", current.revision, "task", token, { ...workerFromPeer(peer()), worktree });
+  current = store.report("run", "leader", current.revision, "task", token, "session", "ack", spec.doneWhen);
+  current = store.report("run", "leader", current.revision, "task", token, "session", "ready", JSON.stringify({ head: oldHead, review: 1 }));
+
+  // main advances during review, before the grant; no later merge is needed to reproduce it.
+  gitDir = repo; fs.writeFileSync(path.join(repo, "base.txt"), "advanced\n");
+  git("add", "."); git("commit", "-m", "concurrent base change"); git("push", "origin", "main");
+  const base = git("rev-parse", "HEAD");
+  const apiRepo = { full_name: "owner/repo" };
+  const pr = { merged: true, merged_at: new Date().toISOString(), merge_commit_sha: "",
+    head: { sha: oldHead, repo: apiRepo }, base: { ref: "main", repo: apiRepo }, html_url: "https://github.com/owner/repo/pull/1" };
+  const reviews = new Map([[1, oldHead]]);
+  const call: Command = async (argv, cwd, options) => {
+    if (argv[0] === "git" && argv[1] === "remote") return { code: 0, stdout: "git@github.com:owner/repo.git", stderr: "" };
+    if (argv[0] === "gh") {
+      const id = Number(argv[2].split("/").at(-1));
+      return response(argv[2].includes("reviews/") ? { commit_id: reviews.get(id), submitted_at: new Date().toISOString(),
+        state: "COMMENTED", html_url: `${pr.html_url}#pullrequestreview-${id}` } : pr);
+    }
+    if (argv[0] === "alfred") return response({ item: { ref: { custom_id: spec.ticket }, state: "done" }, comments: [], comments_read: true });
+    return command(argv, cwd, options);
+  };
+  const observed = await observeBase(current.tasks[0], base, "main", call);
+  current = store.integrate("run", "leader", current.revision, "task", token, base, observed);
+  gitDir = worktree;
+  assert.equal(spawnSync("git", ["merge-base", "--is-ancestor", base, "HEAD"], { cwd: worktree }).status, 1);
+  // Counterfactual merged metadata for the old head proves that even its matching review
+  // cannot settle this grant. Git history and verifier checks are real; vendor replies are fixtures.
+  git("push", "origin", "HEAD:refs/pull/1/head"); pr.merge_commit_sha = base;
+  await assert.rejects(verifyCompletion(current.tasks[0], 1, 1, path.join(dir, "missing-base"), call), /git failed \(1\)/);
+  git("fetch", "origin", "main"); git("rebase", "origin/main");
+  const head = git("rev-parse", "HEAD");
+  assert.notEqual(head, oldHead);
+  git("merge-base", "--is-ancestor", base, "HEAD");
+  reviews.set(2, head);
+  const reportMessage = JSON.stringify({ head, review: 2 });
+  const reportId = "12345678-1234-1234-1234-123456789012";
+  const record = (kind: string) => ({ state: "submitted", delivery: "confirmed", from: peer().id,
+    sender: peer(), destination: { sessionId: "leader" }, body: JSON.stringify({ run: "run", task: "task", token, kind, message: reportMessage }) });
+  const importReport = async (kind: string) => {
+    const r = await receive(current, reportId, async () => response(record(kind)));
+    return store.report("run", "leader", current.revision, r.task, r.token, r.session, r.kind, r.message, reportId);
+  };
+  await assert.rejects(importReport("ready"), /in-flight integration/);
+  assert.equal(store.read("run").revision, current.revision, "refused ready must roll back");
+  current = await importReport("progress");
+  assert.equal(current.tasks[0].phase, "integrating");
+  assert.ok(current.received.includes(reportId));
+  assert.equal(current.tasks[0].report?.message, reportMessage, "progress replaces the READY head/review pair");
+  const last = JSON.parse(current.tasks[0].report!.message);
+  assert.deepEqual(last, { head, review: 2 });
+  const ownsMerge = () => Number(store.owned("run", "task").includes("merge:owner/repo"));
+  assert.equal(ownsMerge(), 1, "progress retains integration ownership");
+  git("push", `--force-with-lease=refs/pull/1/head:${oldHead}`, "origin", "HEAD:refs/pull/1/head");
+  gitDir = repo; git("merge", "--squash", "candidate"); git("commit", "-m", "squash candidate"); git("push", "origin", "main");
+  pr.head.sha = head; pr.merge_commit_sha = git("rev-parse", "HEAD");
+  await assert.rejects(verifyCompletion(current.tasks[0], 1, 1, path.join(dir, "stale"), call), /posted review does not cover/);
+  assert.equal(ownsMerge(), 1, "stale READY review cannot settle the grant");
+  const proof = await verifyCompletion(current.tasks[0], 1, last.review, path.join(dir, "verified"), call);
+  assert.equal(proof.head, last.head);
+  assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /base and feature verified/);
+  current = store.complete("run", "leader", current.revision, "task", token, proof);
+  assert.equal(current.tasks[0].phase, "done");
+  assert.equal(ownsMerge(), 0, "verification must release the repository merge lock");
 });
 
 const briefMessage = "12345678-1234-1234-1234-123456789012";
