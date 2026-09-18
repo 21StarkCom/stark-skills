@@ -33,6 +33,14 @@
             "command": "bash \"$HOME/.config/cmux/cmux-autoname.sh\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"$PWD\" in */.claude/worktrees/*) if [ -f .envrc ] && command -v direnv >/dev/null 2>&1; then direnv allow . >/dev/null 2>&1 || true; fi ;; esac"
+          }
+        ]
       }
     ]
   },
