@@ -147,14 +147,40 @@ jobs:
             # released section — aborting here would strand a legitimate publish.
             echo "release $release_version already has notes; syncing without new notes"
           else
+            # Keep a Changelog: the release ABSORBS whatever accumulated under [Unreleased].
+            # Inserting at the first NUMBERED heading instead (`!inserted && /^## \[[0-9]/`)
+            # leaves those bullets stranded above the new section forever, so the tag ships
+            # work its own notes never mention. Bifrost hand-repaired 13 such bullets in its
+            # PR #265, and the very next sync reproduced the defect — hence this rewrite.
             awk -v version="$release_version" -v source="$SRC_SHA" -v short="$short" -v date="$(date -u +%F)" '
-              function notes() {
-                print "## [" version "] - " date "\n\n### Changed"
-                print "- Refresh marketplace packages from [stark-skills@" short "](https://github.com/21StarkCom/stark-skills/commit/" source ").\n"
+              function refresh() {
+                print "- Refresh marketplace packages from [stark-skills@" short "](https://github.com/21StarkCom/stark-skills/commit/" source ")."
               }
-              !inserted && /^## \[[0-9]/ { notes(); inserted=1 }
+              # The Refresh bullet joins an existing "### Changed" rather than adding a second one.
+              function flush_notes(   i, start, seen) {
+                print "## [" version "] - " date "\n"
+                # Drop the blank that followed "## [Unreleased]"; the heading above supplied one.
+                for (start = 0; start < n && body[start] ~ /^[[:space:]]*$/; start++) ;
+                for (i = start; i < n; i++) {
+                  # Only the FIRST one: a body carrying two "### Changed" headings would
+                  # otherwise get the Refresh bullet under each.
+                  if (!seen && body[i] ~ /^### Changed[[:space:]]*$/) { print body[i]; refresh(); seen = 1; continue }
+                  print body[i]
+                }
+                if (!seen) { print "### Changed"; refresh(); print "" }
+                else if (body[n - 1] !~ /^[[:space:]]*$/) print ""   # seen implies n > 0
+                inserted = 1
+              }
+              # Keep [Unreleased] as an empty heading and buffer its body for replay below.
+              # Every rule below is guarded by !inserted: exactly one section is emitted, and a
+              # CHANGELOG whose first numbered heading somehow precedes [Unreleased] replays its
+              # body verbatim instead of either duplicating the section or swallowing the body.
+              /^## \[[Uu]nreleased\]/ { print; print ""; unreleased = 1; next }
+              unreleased && !inserted && /^## \[/ { flush_notes(); unreleased = 0 }
+              !unreleased && !inserted && /^## \[[0-9]/ { flush_notes() }
+              unreleased && !inserted { body[n++] = $0; next }
               { print }
-              END { if (!inserted) notes() }
+              END { if (!inserted) { if (!unreleased) print ""; flush_notes() } }
             ' CHANGELOG.md > CHANGELOG.md.next
             mv CHANGELOG.md.next CHANGELOG.md
           fi

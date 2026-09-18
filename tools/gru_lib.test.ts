@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { observations, observeOrphan, observeSweep, observeWorkers, packet, type Command, type HermodPeer, type SavedSession } from "./gru_runtime_lib.ts";
-import { ADOPTION_CHECKS, BASE_CHECKS, GruStore, namesTicket, parseEngagement, parseTakeover, readyReason, repositoryKey, verificationReady, verifiedMerges, type BaseEvidence, type CompletionEvidence, type Engagement, type Run, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, BASE_CHECKS, GruStore, namesTicket, parseEngagement, parseTakeover, readyReason, repositoryKey, verificationReady, type BaseEvidence, type CompletionEvidence, type Engagement, type Run, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
 
 // Compose the production observation builders with the store: a handwritten "dead"
 // observation would miss the orphaned-record failure that prompted STARK-5021.
@@ -181,60 +181,8 @@ test("an integration grant is checked against the repository's base branch, not 
   assert.ok(!store.owned("demo", "one").some(r => r.startsWith("merge:")));
   run = grant(store, run, "one", BASE);
   assert.equal(run.tasks[0].phase, "integrating");
-  assert.deepEqual(run.tasks[0].baseEvidence, { ...run.tasks[0].baseEvidence!, ref: "main", tip: BASE, base: BASE, contains: [] });
+  assert.deepEqual(run.tasks[0].baseEvidence, { ...run.tasks[0].baseEvidence!, ref: "main", tip: BASE, base: BASE });
   assert.ok(store.owned("demo", "one").includes("merge:/repo"));
-});
-
-test("verifiedMerges excludes the subject task by id, not by object identity", t => {
-  const { store } = fixture(t);
-  let run = start(store, observe(store, store.create(config())), "one");
-  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
-  run = grant(store, run, "one", BASE);
-  const merged = landedProof(run).merge;
-  run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, landedProof(run));
-  // The CLI gathers the tested set from its own read of the run; `baseRefusal` recomputes the
-  // required set inside the store's transaction, from a separate JSON.parse. The two see
-  // structurally equal tasks that are different objects, so a `!==` compare would put a task's
-  // own merge into its own containment floor — a refusal naming a merge no fetch can add.
-  const reparsed = JSON.parse(JSON.stringify(run)) as Run;
-  assert.notEqual(reparsed.tasks[0], run.tasks[0]);
-  assert.equal(reparsed.tasks[0].spec.id, run.tasks[0].spec.id);
-  assert.equal(reparsed.tasks[0].evidence!.merge, merged);
-  assert.ok(!verifiedMerges(run, reparsed.tasks[0]).includes(merged), "a task's own merge is never its own floor");
-  // A different task in the same repository still has to contain it.
-  assert.deepEqual(verifiedMerges(run, reparsed.tasks[1]), [merged]);
-});
-
-test("a grant's base must contain the merges this engagement verified on that same base branch", t => {
-  /** Task one verified with `ref` as its base branch; task two ready for its own grant. */
-  const afterFirstMerge = (store: GruStore, ref: string): Run => {
-    const c = config(); c.tasks = c.tasks.slice(0, 2);
-    let run = start(store, observe(store, store.create(c)), "one");
-    run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
-    run = grant(store, run, "one", BASE, { ref });
-    run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, landedProof(run));
-    run = start(store, run, "two");
-    run = report(store, run, "two", "ack"); return report(store, run, "two", "ready");
-  };
-  const { store } = fixture(t);
-  let run = afterFirstMerge(store, "main");
-  const merged = landedProof(run).merge;
-  // The offline floor: even a tip the observation believes is current cannot be behind a
-  // merge this engagement has already verified onto that branch.
-  assert.throws(() => grant(store, run, "two", merged, { contains: [] }),
-    new RegExp(`integration base ${merged} does not contain verified merge ${merged}`));
-  // "Fetch again" only repairs a merge still on the branch. A revert or force-push takes it
-  // off for good, and then this floor can never be satisfied — the refusal has to say so
-  // rather than send the leader round a loop that cannot terminate.
-  assert.throws(() => grant(store, run, "two", merged, { contains: [] }),
-    /unless that merge was reverted or force-pushed off main, which no fetch can repair/);
-  run = grant(store, run, "two", merged);
-  assert.deepEqual(run.tasks[1].baseEvidence!.contains, [merged]);
-  // A merge that landed on a different base branch is not this branch's floor; requiring it
-  // would refuse a perfectly current tip for lacking commits that were never on it.
-  const { store: other } = fixture(t);
-  const release = afterFirstMerge(other, "release");
-  assert.equal(grant(other, release, "two", merged, { contains: [] }).tasks[1].phase, "integrating");
 });
 
 test("takeover transaction refuses a path occupied after the absence observation", async t => {
@@ -333,7 +281,7 @@ const BASE = "a".repeat(40);
 function baseProof(run: Run, id: string, base: string, overrides: Partial<BaseEvidence> = {}): BaseEvidence {
   const task = run.tasks.find(t => t.spec.id === id)!;
   return { observedAt: new Date().toISOString(), repositoryKey: repositoryKey(task.spec), ref: "main",
-    tip: base, base, contains: verifiedMerges(run, task), checks: [...BASE_CHECKS], ...overrides };
+    tip: base, base, checks: [...BASE_CHECKS], ...overrides };
 }
 /** `integrate` at a base the repository confirms is its current tip. */
 function grant(store: GruStore, run: Run, id: string, base: string, overrides: Partial<BaseEvidence> = {}): Run {

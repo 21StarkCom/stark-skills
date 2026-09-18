@@ -643,6 +643,36 @@ test("packet free text cannot forge a second header, and the embedded transfer c
     : { code: 1, stdout: "", stderr: "ps denied" })).transfer, "resume-receipt");
 });
 
+/** The guards the mutation sweep below deletes one at a time. Each is matched as literal
+ * source text, so an ordinary refactor of the checker — renaming a variable, hoisting a
+ * magic number to a constant — silently unhooks one without touching this file. */
+const MUTATION_PREDICATES = [
+  "session(previous.destination) !== input.worker",
+  "session(previous.sender) !== current.leader",
+  "current.run !== input.run", "current.task !== input.task",
+  "brief.task !== input.task", "brief.run !== input.run",
+  "metadata.length > 1",
+  "receipt.epoch > (brief.epoch ?? -1)",
+  "observed > transferred", "transferred < at", "transferred > Date.parse(createdAt)",
+  "session(record.destination) !== input.worker", "session(record.sender) !== brief.leader",
+  'record.kind !== "note"', 'code === 4 || unusableMessage(record)',
+  "created <= Date.parse(previous.createdAt!)",
+  "brief.epoch < current.epoch", "brief.epoch === current.epoch",
+  "peers?.peers.some(p => session(p) === input.currentLeader && p.liveness === \"live\")",
+  "receipt.epoch <= epoch", "transferred - observed > OBSERVATION_FRESHNESS_MS",
+];
+
+// Runs on every `npm test`, unlike the sweep it feeds: the sweep is opt-in, so a predicate
+// that stops matching is invisible until someone remembers to run it — and by then the guard
+// has been unpinned for however many merges. Literal-text targets rot on any rename, so the
+// list is checked against the source here, in microseconds and with no subprocesses.
+test("every mutation target still names exactly one guard in the checker source", () => {
+  const original = fs.readFileSync(path.join(import.meta.dirname, "gru_runtime_lib.ts"), "utf8");
+  for (const predicate of MUTATION_PREDICATES) {
+    assert.equal(original.split(predicate).length, 2, `mutation must have one target: ${predicate}`);
+  }
+});
+
 // Reusable review verification: run explicitly with GRU_REBRIEF_MUTATION_SWEEP=1.
 // Mutations live only in a disposable copy; ordinary npm test does not pay for the sweep.
 test("checker mutation sweep rejects deleted guards", { skip: process.env.GRU_REBRIEF_MUTATION_SWEEP !== "1" }, t => {
@@ -652,21 +682,7 @@ test("checker mutation sweep rejects deleted guards", { skip: process.env.GRU_RE
   fs.cpSync(import.meta.dirname, copy, { recursive: true, filter: source => path.basename(source) !== "node_modules" });
   const source = path.join(copy, "gru_runtime_lib.ts");
   const original = fs.readFileSync(source, "utf8");
-  const predicates = [
-    "session(previous.destination) !== input.worker",
-    "session(previous.sender) !== current.leader",
-    "current.run !== input.run", "current.task !== input.task",
-    "brief.task !== input.task", "brief.run !== input.run",
-    "metadata.length > 1",
-    "receipt.epoch > (brief.epoch ?? -1)",
-    "observed > transferred", "transferred < at", "transferred > Date.parse(createdAt)",
-    "session(record.destination) !== input.worker", "session(record.sender) !== brief.leader",
-    'record.kind !== "note"', 'code === 4 || unusableMessage(record)',
-    "created <= Date.parse(previous.createdAt!)",
-    "brief.epoch < current.epoch", "brief.epoch === current.epoch",
-    "peers?.peers.some(p => session(p) === input.currentLeader && p.liveness === \"live\")",
-    "receipt.epoch <= epoch", "transferred - observed > 60_000",
-  ];
+  const predicates = MUTATION_PREDICATES;
   // Node marks test children; inheriting this marker makes a nested --test silently
   // skip every test with exit 0, which would invalidate the baseline and the sweep.
   const { NODE_TEST_CONTEXT: _testContext, ...childEnv } = process.env;
@@ -780,12 +796,12 @@ test("completion reruns behavior on fetched main and refuses an inaccurate green
   assert.equal(proof.head, fixed);
   assert.equal(proof.checks[0].exitCode, 0);
   assert.match(fs.readFileSync(proof.checks[0].log, "utf8"), /behavior verified/);
-  // The grant was checked against ONE base branch's tip, with a verified-merge floor scoped
-  // to that branch. A PR merged into a different branch discharges a grant nothing on the
-  // merged branch ever checked — `--base-ref` is operator-supplied, so without this a grant
-  // taken at a quiet branch's tip settles a merge into `main` that skipped every other task.
+  // The grant was checked against ONE base branch's tip. A PR merged into a different branch
+  // discharges a grant nothing on the merged branch ever checked — `--base-ref` is
+  // operator-supplied, so without this a grant taken at a quiet branch's tip settles a merge
+  // into `main` that skipped every other task.
   const granted = { observedAt: new Date().toISOString(), repositoryKey: "owner/repo", ref: "release",
-    tip: fixed, base: fixed, contains: [], checks: [...BASE_CHECKS] };
+    tip: fixed, base: fixed, checks: [...BASE_CHECKS] };
   task.baseEvidence = granted;
   await assert.rejects(verifyCompletion(task, 1, 1, path.join(dir, "wrong-base-branch"), call),
     /integration base was granted on release, but PR 1 merged into main/);
@@ -921,7 +937,7 @@ test("the integration base is read from the real base branch, and every gap fail
 
   // Origin has no commits yet, so it reports no default branch at all. Refuse and name the
   // repair rather than guessing one; the branch is resolved before the SHA is ever read.
-  await assert.rejects(observeBase(task, "a".repeat(40), [], undefined, call), /origin reports no default branch.*--base-ref/s);
+  await assert.rejects(observeBase(task, "a".repeat(40), undefined, call), /origin reports no default branch.*--base-ref/s);
   const first = land("first task merged");
 
   // The local refs/remotes/origin/HEAD is written at clone and then only by an explicit
@@ -932,44 +948,39 @@ test("the integration base is read from the real base branch, and every gap fail
   must(["git", "push", "origin", `${first}:refs/heads/stale-default`], repoDir);
   must(["git", "fetch", "-q", "origin"], repoDir);
   must(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/stale-default"], repoDir);
-  const current = await observeBase(task, first, [], undefined, call);
+  const current = await observeBase(task, first, undefined, call);
   assert.deepEqual(current, { observedAt: current.observedAt, repositoryKey: "owner/repo", ref: "main",
-    tip: first, base: first, contains: [], checks: [...BASE_CHECKS] });
+    tip: first, base: first, checks: [...BASE_CHECKS] });
   assert.ok(Date.now() - Date.parse(current.observedAt) < 60_000);
 
   // A SHA of the right shape that this repository does not hold — a foreign repo's tip, or a typo.
-  await assert.rejects(observeBase(task, "f".repeat(40), [], undefined, call), /integration base f{40} is not a commit in owner\/repo/);
-  await assert.rejects(observeBase(task, "not-a-sha", [], undefined, call), /integration requires an observed base SHA/);
+  await assert.rejects(observeBase(task, "f".repeat(40), undefined, call), /integration base f{40} is not a commit in owner\/repo/);
+  await assert.rejects(observeBase(task, "not-a-sha", undefined, call), /integration requires an observed base SHA/);
   // A tree object has the right shape and IS in the repository; only a commit can be a base.
   const tree = must(["git", "rev-parse", "HEAD^{tree}"], repoDir);
-  await assert.rejects(observeBase(task, tree, [], undefined, call), /is not a commit in owner\/repo/);
+  await assert.rejects(observeBase(task, tree, undefined, call), /is not a commit in owner\/repo/);
   const foreign = { ...task, spec: { ...task.spec, repositoryKey: "other/repo" } };
-  await assert.rejects(observeBase(foreign, first, [], undefined, call), /repository mismatch: .* is owner\/repo, not other\/repo/);
+  await assert.rejects(observeBase(foreign, first, undefined, call), /repository mismatch: .* is owner\/repo, not other\/repo/);
 
   // Another task's merge lands on origin while this one is in review: the grant's base is now stale.
   const second = path.join(dir, "second-worker");
   must(["git", "clone", origin, second]);
   for (const [key, value] of [["user.name", "Gru Test"], ["user.email", "gru@example.invalid"]]) must(["git", "config", key, value], second);
   const landed = land("second task merged", second);
-  const stale = await observeBase(task, first, [], undefined, call);
+  const stale = await observeBase(task, first, undefined, call);
   assert.equal(stale.tip, landed);
   assert.equal(stale.base, first);
   assert.notEqual(stale.tip, stale.base);
   // The observation fetched the new tip without the worker's checkout ever fetching it.
   assert.equal(must(["git", "rev-parse", "HEAD"], repoDir), first);
 
-  // Ancestry is reported per verified merge: present-and-contained, present-and-not, and absent.
-  const refreshed = await observeBase(task, landed, [first, landed, "f".repeat(40)], undefined, call);
-  assert.deepEqual(refreshed.contains, [first, landed]);
-  assert.deepEqual((await observeBase(task, first, [landed], undefined, call)).contains, []);
-
   // An explicitly named branch is fetched instead of the default one.
   must(["git", "push", "origin", `${first}:refs/heads/release`], repoDir);
-  const release = await observeBase(task, first, [], "release", call);
+  const release = await observeBase(task, first, "release", call);
   assert.equal(release.ref, "release");
   assert.equal(release.tip, first);
-  await assert.rejects(observeBase(task, landed, [], "no-such-branch", call), /cannot fetch refs\/heads\/no-such-branch from origin/);
-  await assert.rejects(observeBase(task, landed, [], "bad branch", call), /invalid base branch name "bad branch"/);
+  await assert.rejects(observeBase(task, landed, "no-such-branch", call), /cannot fetch refs\/heads\/no-such-branch from origin/);
+  await assert.rejects(observeBase(task, landed, "bad branch", call), /invalid base branch name "bad branch"/);
 
   // Nothing above left an invocation-owned ref behind, including the refused fetches.
   assert.equal(must(["git", "for-each-ref", "--format=%(refname)", "refs/gru"], repoDir), "");
@@ -981,58 +992,66 @@ test("the integration base is read from the real base branch, and every gap fail
     if (argv[0] === "git" && argv[1] === "update-ref") throw new Error("simulated cleanup transport failure");
     return call(argv, cwd);
   };
-  await assert.rejects(observeBase(task, "f".repeat(40), [], undefined, cleanupThrows), /is not a commit in owner\/repo/);
-  assert.equal((await observeBase(task, landed, [], undefined, cleanupThrows)).tip, landed);
+  await assert.rejects(observeBase(task, "f".repeat(40), undefined, cleanupThrows), /is not a commit in owner\/repo/);
+  assert.equal((await observeBase(task, landed, undefined, cleanupThrows)).tip, landed);
 
-  // A shallow clone cannot answer containment at all: fetch honours the existing depth, so a
-  // merge outside it is either absent (`merge-base --is-ancestor` exits 128) or present with
-  // the graft cutting the walk (exit 1, indistinguishable from an honest "not contained").
-  // Either reading refuses forever with "fetch again and grant at the tip" — advice that
-  // cannot work. One probe up front, before either reading exists; name the clone, not a merge.
+  // A shallow clone refuses AT THE GRANT, which is the last actionable moment. This
+  // observation needs no history (the tip check is a SHA equality), but `verifyCompletion`
+  // runs `merge-base --is-ancestor` in this same checkout after the PR merged, where a commit
+  // outside the graft exits 128 rather than answering — and a grant cannot be retaken once the
+  // task is `integrating`, so discovering the depth then strands a merged PR forever.
   const shallowDir = path.join(dir, "shallow");
   must(["git", "clone", "--depth", "1", `file://${origin}`, shallowDir]);
   const shallowTask = { ...task, spec: { ...task.spec, repo: shallowDir } };
   const shallowTip = must(["git", "rev-parse", "HEAD"], shallowDir);
   assert.equal(must(["git", "rev-parse", "--is-shallow-repository"], shallowDir), "true");
-  await assert.rejects(observeBase(shallowTask, shallowTip, [first], undefined, call),
-    new RegExp(`cannot compare verified merge ${first} against ${shallowTip}: .*shallow clone.*--unshallow`));
-  // The merge the shallow clone DOES hold is the case a per-comparison probe misses: it exits
-  // 0, so the old reading recorded a clean containment in a repository whose remaining
-  // comparisons it could not have answered. The probe is per repository, not per merge.
-  await assert.rejects(observeBase(shallowTask, shallowTip, [shallowTip], undefined, call),
-    new RegExp(`cannot compare verified merge ${shallowTip} against ${shallowTip}: .*shallow clone.*--unshallow`));
-  // With no merges to compare there is nothing the depth can hide, so a shallow clone still grants.
-  assert.equal((await observeBase(shallowTask, shallowTip, [], undefined, call)).tip, shallowTip);
-  // A complete clone keeps the old reading: an object it does not hold cannot be in the base's
-  // history either, so it is simply reported as not contained.
-  assert.deepEqual((await observeBase(task, landed, ["f".repeat(40)], undefined, call)).contains, []);
+  await assert.rejects(observeBase(shallowTask, shallowTip, undefined, call),
+    /is a shallow clone.*verification there cannot answer ancestry.*--unshallow/s);
+  // The depth probe is local and runs before any network call, so a shallow checkout never
+  // spends a round trip on a grant it cannot keep.
+  const shallowSpawn: string[] = [];
+  await assert.rejects(observeBase(shallowTask, shallowTip, undefined,
+    async (argv, cwd, timeoutMs) => { shallowSpawn.push(argv.join(" ")); return call(argv, cwd, timeoutMs); }), /shallow clone/);
+  assert.deepEqual(shallowSpawn.filter(a => a.includes("ls-remote") || a.includes("fetch")), []);
+  // And the grant path still walks no history: the deleted containment floor's `merge-base`
+  // per verified merge is gone, and the one depth probe replacing it is a single local call.
+  const spawned: string[] = [];
+  const recording: Command = async (argv, cwd, timeoutMs) => { spawned.push(argv.join(" ")); return call(argv, cwd, timeoutMs); };
+  await observeBase(task, landed, undefined, recording);
+  assert.deepEqual(spawned.filter(a => a.includes("merge-base")), []);
+  assert.equal(spawned.filter(a => a.includes("is-shallow-repository")).length, 1);
 
   // Both round trips are bounded by half the freshness window, and BOTH say so. An unexplained
   // `git exited 124` from the symref read would send the operator hunting a git bug.
   const timedOutAt = (verb: string): Command => async (argv, cwd, timeoutMs) => argv[0] === "git" && argv[1] === verb
     ? { code: 124, stdout: "", stderr: "", timedOut: true } : call(argv, cwd, timeoutMs);
-  await assert.rejects(observeBase(task, landed, [], undefined, timedOutAt("ls-remote")),
-    /cannot read origin's default branch .*timed out after 30s, the freshness budget/s);
-  await assert.rejects(observeBase(task, landed, [], "main", timedOutAt("fetch")),
+  // The transport failure must NOT suggest --base-ref. The next step is a fetch to the same
+  // unreachable origin, so the flag spends a second full budget window on advice that cannot
+  // work; only the parse failure above — connection fine, answer missing — earns that hint.
+  await assert.rejects(observeBase(task, landed, undefined, timedOutAt("ls-remote")),
+    (error: Error) => /cannot read origin's default branch .*timed out after 30s, the freshness budget/s.test(error.message)
+      && !/--base-ref/.test(error.message));
+  await assert.rejects(observeBase(task, landed, "main", timedOutAt("fetch")),
     /cannot fetch refs\/heads\/main from origin .*timed out after 30s, the freshness budget/s);
 
-  // Only the network calls carry that budget; the ancestry comparisons run on the default
-  // command timeout. Evidence that outlived the store's window must fail as the slow
-  // observation it was, not come back for the store to reject with "fetch the base branch
-  // again" — the same loop the budget exists to prevent, blamed on the wrong command.
+  // Only the fetch carries that budget; the rev-parses after it run on the default command
+  // timeout. Evidence that outlived the store's window must fail as the slow observation it
+  // was, not come back for the store to reject with "fetch the base branch again" — the same
+  // loop the budget exists to prevent, blamed on the wrong command. The guard fires with a
+  // whole budget of headroom, so evidence that squeaks under 60s cannot trip `fresh()` after.
   const slow: Command = async (argv, cwd, timeoutMs) => {
     const result = await call(argv, cwd, timeoutMs);
-    if (argv[0] === "git" && argv[1] === "merge-base") t.mock.timers.tick(61_000);
+    if (argv[0] === "git" && argv[1] === "rev-parse") t.mock.timers.tick(31_000);
     return result;
   };
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   try {
-    await assert.rejects(observeBase(task, landed, [first], undefined, slow), /past the 60s window the store accepts/);
+    await assert.rejects(observeBase(task, landed, undefined, slow), /leaving under 30s of the 60s window the store accepts/);
   } finally { t.mock.timers.reset(); }
 
   // An unreachable origin refuses; it never falls back to a local ref that reads as current.
   // Both round trips are covered: resolving the default branch name, and fetching the tip.
   fs.renameSync(origin, path.join(dir, "origin-moved.git"));
-  await assert.rejects(observeBase(task, landed, [], undefined, call), /cannot read origin's default branch/);
-  await assert.rejects(observeBase(task, landed, [], "main", call), /cannot fetch refs\/heads\/main from origin/);
+  await assert.rejects(observeBase(task, landed, undefined, call), /cannot read origin's default branch/);
+  await assert.rejects(observeBase(task, landed, "main", call), /cannot fetch refs\/heads\/main from origin/);
 });

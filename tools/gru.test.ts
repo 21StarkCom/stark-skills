@@ -609,7 +609,7 @@ test("gru CLI: integrate fetches the base branch and refuses anything but its cu
   // Every field but the timestamp is asserted against a literal. `checks: evidence.checks`
   // would compare the field with itself and accept anything the CLI happened to record.
   assert.deepEqual({ ...evidence, observedAt: undefined },
-    { observedAt: undefined, repositoryKey: "o/r", ref: "main", tip: landed, base: landed, contains: [], checks: [...BASE_CHECKS] });
+    { observedAt: undefined, repositoryKey: "o/r", ref: "main", tip: landed, base: landed, checks: [...BASE_CHECKS] });
   assert.ok(Date.now() - Date.parse(evidence.observedAt) < 60_000);
 
   // Phase is checked before the fetch. With origin unreachable, a task already integrating
@@ -622,8 +622,10 @@ test("gru CLI: integrate fetches the base branch and refuses anything but its cu
   assert.equal(reentrant.code, 2);
   assert.match(reentrant.error, /task is not ready for integration/);
 
-  // Verify task one, then land a descendant: task two's grant must be checked against the
-  // merge this engagement verified, which only reaches the observation through the CLI.
+  // A second task grants against the same repository after the first verified. Nothing about
+  // the earlier merge constrains it beyond the tip it must name: the floor that once required
+  // containment is gone (STARK-5222), because a base that IS the freshly fetched tip already
+  // holds everything merged onto that branch.
   const current = store.read("cli");
   store.complete("cli", "leader-one", current.revision, "one", current.tasks[0].token!,
     { head: landed, base: landed, merge: landed, pr: "https://github.com/o/r/pull/1",
@@ -631,9 +633,13 @@ test("gru CLI: integrate fetches the base branch and refuses anything but its cu
       ticketState: "done", checks: [{ argv: ["true"], exitCode: 0, log: "/evidence/check.log" }] });
   const third = land("later publisher push", second);
   ready("two", 1);
+  // The tip moved, so the first task's merge SHA is now a stale base and is refused as one.
+  const behind = await integrate("two", 1, landed);
+  assert.equal(behind.code, 2);
+  assert.match(behind.error, new RegExp(`is not the current main tip ${third}`));
   const dependent = await integrate("two", 1, third);
   assert.equal(dependent.code, 0, dependent.error);
-  assert.deepEqual(JSON.parse(dependent.out).tasks[1].baseEvidence.contains, [landed]);
+  assert.equal(JSON.parse(dependent.out).tasks[1].baseEvidence.tip, third);
 
   // Nothing above left an invocation-owned ref in the leader's checkout.
   assert.equal(git(repo, "for-each-ref", "--format=%(refname)", "refs/gru").trim(), "");

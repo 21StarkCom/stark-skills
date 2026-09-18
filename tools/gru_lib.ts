@@ -121,12 +121,9 @@ export interface BaseEvidence {
   tip: string;
   /** The SHA the leader supplied, resolved to a commit in that repository. */
   base: string;
-  /** Verified merges confirmed as ancestors of `base`; the store names the ones missing. */
-  contains: string[];
   checks: string[];
 }
-export const BASE_CHECKS = ["base branch fetched from origin", "base resolves to a commit in the task repository",
-  "verified merges compared against the base"];
+export const BASE_CHECKS = ["base branch fetched from origin", "base resolves to a commit in the task repository"];
 /** The ticket as a whole name segment, so STARK-50 never matches STARK-501 or a longer word. */
 export function namesTicket(ticket: string, ...names: (string | undefined)[]): boolean {
   const literal = ticket.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -207,8 +204,8 @@ export interface Assignment {
   acknowledged?: string;
   report?: { kind: string; message: string; at: string };
   integrationBase?: string;
-  /** The git evidence `integrate` accepted for `integrationBase`; retained for audit, and
-   * read by the next grant in this repository to scope its verified-merge floor to one branch. */
+  /** The git evidence `integrate` accepted for `integrationBase`; retained for audit, and read
+   * by `verifyCompletion` so the PR's own base branch must be the one the tip was read from. */
   baseEvidence?: BaseEvidence;
   stoppedFrom?: Phase;
   reconnect?: { id: string; startedAt: string; phase: Phase; pending: boolean };
@@ -461,31 +458,35 @@ function attachRefusal(run: Run, task: Assignment, worker: Worker): string | nul
   return null;
 }
 
-/** Every merge this engagement has verified into `task`'s repository, in task order. The CLI
- * calls it WITHOUT `ref` so the observation tests every one of them: it resolves the base ref
- * itself, and a merge it cannot place is simply reported as not contained. `baseRefusal` calls
- * it WITH the observed ref to get the subset this grant's base must actually contain. One
- * predicate, two callers on purpose — the required set has to stay a subset of the tested set,
- * and two hand-copied filters would drift into a refusal naming a merge nobody ever tested,
- * which no amount of re-fetching can repair.
- * A grant recorded before `baseEvidence` existed has no ref to compare, so it counts: fail closed. */
-export function verifiedMerges(run: Run, task: Assignment, ref?: string): string[] {
-  // Exclude the subject by id, not by object reference: the CLI gathers the tested set from
-  // its own read of the run and `baseRefusal` recomputes the required set inside the store's
-  // transaction, so the two see structurally equal tasks from different parses. A reference
-  // compare there would put a task's own merge in its own floor.
-  return run.tasks.filter(t => t.spec.id !== task.spec.id && t.phase === "done" && t.evidence &&
-    repositoryKey(t.spec) === repositoryKey(task.spec) &&
-    (ref === undefined || t.baseEvidence === undefined || t.baseEvidence.ref === ref))
-    .map(t => t.evidence!.merge);
-}
 /** Why `evidence` cannot authorize a grant of `base` for `task`, or null. Pure: the observation
- * gathers git facts, this decides. The tip comparison is what closes the stale-base window —
- * `verify` only requires the base in the merged head's ancestry, so a base that predates another
- * task's merge lets a diff built without those changes squash cleanly whenever git sees no
- * textual conflict. The verified-merge floor is the second, offline check: it holds even if the
- * fetched tip is itself wrong (a force-pushed or mirrored base branch). */
-function baseRefusal(run: Run, task: Assignment, base: string, evidence: BaseEvidence): string | null {
+ * gathers git facts, this decides.
+ *
+ * The tip comparison is the whole guarantee, and it is sufficient. `verify` only requires the
+ * base in the merged head's ancestry, so a base that predates another task's merge lets a diff
+ * built without those changes squash cleanly whenever git sees no textual conflict; requiring
+ * the freshly fetched tip closes exactly that window.
+ *
+ * There is deliberately no second "does the base contain every merge this engagement verified"
+ * floor. One shipped briefly and was removed (STARK-5222). Whenever the tip check passes the
+ * floor is already implied — a base that IS `origin/<ref>` contains everything merged onto that
+ * branch — so the two can only differ when the tip itself is not what origin's branch really
+ * holds, or when the floor is simply wrong about what to require.
+ *
+ * It IS wrong in three reachable cases, each producing a refusal with no in-band repair, since
+ * a grant cannot be retaken once the task is `integrating`: a reverted or force-pushed merge is
+ * gone from the branch for good; a task verified before `baseEvidence` existed has no branch to
+ * attribute its merge to, so counting it (the fail-closed reading) refuses every later grant in
+ * that repository forever; and a shallow clone cannot answer ancestry at all. It also cost the
+ * grant path one `merge-base` subprocess per verified merge, discarded unread on the commonest
+ * refusal, a stale tip.
+ *
+ * What removing it GIVES UP, stated plainly rather than argued away: an origin that serves a
+ * tip its branch has moved past — a lagging mirror, or a replica behind a rewrite — passes the
+ * tip check, and the floor would have caught the missing merge. That is accepted here because
+ * this fleet fetches GitHub directly, not through a mirror, and an unrepairable refusal in
+ * three real cases is the worse trade against one that needs a lying origin. Revisit if Gru
+ * ever grants against a replicated remote. */
+function baseRefusal(task: Assignment, base: string, evidence: BaseEvidence): string | null {
   if (!completeChecks(evidence.checks, BASE_CHECKS)) return "incomplete integration base evidence";
   if (!fresh(evidence)) return "integration base evidence is stale; fetch the base branch again";
   const expected = repositoryKey(task.spec);
@@ -498,13 +499,6 @@ function baseRefusal(run: Run, task: Assignment, base: string, evidence: BaseEvi
   // the PR's real base, terminally, since a grant cannot be retaken once the task is
   // `integrating`. The refusal has to offer the repair that is actually available.
   if (evidence.tip !== base) return `integration base ${base} is not the current ${evidence.ref} tip ${evidence.tip}; fetch again and grant at the tip, or pass --base-ref BRANCH if this task's PR targets another branch`;
-  // Scope the floor to one base branch: a repository that also takes merges on a release
-  // branch must not refuse a perfectly current `main` tip for lacking them.
-  const missing = verifiedMerges(run, task, evidence.ref).filter(sha => !evidence.contains.includes(sha));
-  // "Fetch again" is the repair only while the merge is still on the branch. A revert or a
-  // force-push takes it off, and then no fetch can ever satisfy this floor — say so, rather
-  // than looping the leader through advice that cannot work.
-  if (missing.length > 0) return `integration base ${base} does not contain verified merge ${missing[0]}; fetch again and grant at the tip, unless that merge was reverted or force-pushed off ${evidence.ref}, which no fetch can repair`;
   return null;
 }
 
@@ -787,10 +781,11 @@ export class GruStore {
         // Apply the exact window the worker's receipt check applies, against the timestamp this
         // record will actually carry: `fresh` tolerates an observation up to 5s in the FUTURE and
         // is evaluated before `at` is stamped, so at the boundary the store can persist a receipt
-        // its only reader ("observed ≤ transferred ≤ observed + 60s") must refuse forever.
+        // its only reader ("observed ≤ transferred ≤ observed + OBSERVATION_FRESHNESS_MS") must
+        // refuse forever. Both sides read the constant, so the window cannot drift apart again.
         const at = new Date();
         const observed = Date.parse(discovery.observedAt);
-        requireValue(observed <= at.getTime() && at.getTime() - observed <= 60_000, "leadership discovery stale");
+        requireValue(observed <= at.getTime() && at.getTime() - observed <= OBSERVATION_FRESHNESS_MS, "leadership discovery stale");
         (run.transfers ??= []).push({ previous: oldLeader, current: newLeader, epoch: run.epoch + 1,
           at: at.toISOString(), discovery: structuredClone(discovery) });
       }
@@ -905,7 +900,7 @@ export class GruStore {
       requireValue(isRevision(base), "integration requires an observed base SHA");
       // The shape check above admits a foreign-repository SHA, a typo, and an hour-stale tip
       // alike; only the observation can tell them from the tip this repository has right now.
-      const refusal = baseRefusal(run, task, base, evidence);
+      const refusal = baseRefusal(task, base, evidence);
       requireValue(refusal === null, refusal!);
       // Repository-wide serialization also covers undeclared release-file seams.
       this.own(run, task, [`merge:${repositoryKey(task.spec)}`, ...task.spec.mergeResources.map(r => `merge-resource:${r}`)]);
