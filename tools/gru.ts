@@ -4,9 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { canonicalWorktree, GruStore, integrationReady, parseEngagement, parseTakeover, verificationReady } from "./gru_lib.ts";
+import { canonicalWorktree, completionSummary, GruStore, integrationReady, parseEngagement, parseSettlement, parseTakeover, verificationReady } from "./gru_lib.ts";
 import type { Assignment, Engagement } from "./gru_lib.ts";
-import { canonicalRepository, checkLeadershipTransfer, checkRebrief, defaultBaseRef, discoverWorker, inspectAdoption, interruptWorker, observeBase, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
+import { canonicalRepository, checkLeadershipTransfer, checkRebrief, defaultBaseRef, discoverWorker, inspectAdoption, inspectUnreviewedMerge, interruptWorker, observeBase, observeOrphan, observeSweep, observeWorkers, packet, receive, reconnectWorker, retireWorker, validateReconnect, verifyCompletion, workerFromPeer } from "./gru_runtime_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Gru: durable Minion ownership, recovery, and verification.
@@ -27,6 +27,7 @@ Usage: node tools/gru.ts <command> [options]
   reconnected  --run ID --revision N --task ID --token TOKEN
   recover      --run ID --revision N --task ID --token TOKEN
   takeover     --run ID --revision N --task ID --token TOKEN --file operator-request.json
+  settle       --run ID --revision N --task ID --token TOKEN --file operator-request.json
   integrate    --run ID --revision N --task ID --token TOKEN --base SHA [--base-ref BRANCH]
   verify       --run ID --revision N --task ID --token TOKEN --pr N --review N
   stop         --run ID --revision N
@@ -86,6 +87,13 @@ No command publishes, changes authentication, or deletes worker/session worktree
 takeover requires explicit operator authorization bound to the run/task/token/revision.
 It checks complete Hermod absence, fences the old worker, preserves budgets and merge
 ownership, and permits an explicitly selected provider/new worktree. Unknown stays unknown.
+settle requires --file with run/task/token/revision, a GitHub pr URL, noReview: true,
+reason, and the operator's actual operatorRequest. Never author your own authorization.
+It requires the current leader, running/reconciled state, the same integration phase,
+merged PR, both ancestry checks, closed ticket and green disposable checks as verify.
+GitHub must report zero reviews. It records settled-without-review, releases only merge
+resources, and reports released-unverified with the reason, never verified. Dependencies
+remain blocked. A fully settled engagement is terminal released-unverified, not complete.
 sweep releases a held task only on proof, never on elapsed time: Alfred (read from a
 recorded repository, else this directory, that reads the handle) reports its ticket
 done or Closed, it holds no integration grant or uncertain reconnect, it is not a
@@ -96,6 +104,8 @@ Without --run it evaluates every engagement.
 It is a read-only dry run unless --apply; --apply fences on the exact revision, records
 a swept event naming the proof, and ends a run whose tasks are all verified or
 released. Alfred or Hermod failure exits non-zero with nothing released.
+After settlement sweep can release the remaining resources on that same proof; status
+and the completion summary retain released-unverified and the reason even after sweep.
 `;
 
 /** The one base a grant may name, shared by the three hints below so they cannot drift.
@@ -120,6 +130,7 @@ const GRANT_BASE = "at the base branch tip fetched immediately before the grant"
  * can never reach this function; a branch for it is dead text that reads as live guidance.
  * `gru_lib.test.ts` pins that invariant. */
 export function verifyBlocker(task: Assignment): string {
+  if (task.phase === "released-unverified") return `task was released-unverified: ${task.settlement?.request.reason}; it cannot be verified`;
   if (task.phase === "swept") return "task was released by a proof-based sweep; it cannot be verified";
   if (task.reconnect?.pending) return "reconnect outcome is uncertain; observe it before verification";
   if (!task.integrationBase) {
@@ -210,7 +221,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (verb !== "resume" && values["limits-file"] !== undefined) {
       throw new Error(`--limits-file applies to resume, not ${verb}`);
     }
-    if (!["init", "takeover"].includes(verb) && values.file !== undefined) throw new Error(`--file applies to init or takeover, not ${verb}`);
+    if (!["init", "takeover", "settle"].includes(verb) && values.file !== undefined) throw new Error(`--file applies to init or takeover or settle, not ${verb}`);
+    // Fail before opening state or starting any network/check work without written authority.
+    if (verb === "settle") {
+      flag("file");
+      const unused = Object.keys(values).find(key => !["file", "run", "revision", "task", "token", "state", "leader"].includes(key));
+      if (unused) throw new Error(`--${unused} does not apply to settle`);
+    }
     // Same trap as --limits-file: a --base-ref parsed but ignored would read as a grant checked
     // against the named branch while the tip actually came from origin's default one.
     for (const key of ["base", "base-ref"]) {
@@ -309,8 +326,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const run = store.read(id);
     if (verb === "status") {
       const reasons = store.readyReasons(run);
-      emit({ ...run, ready: run.tasks.filter(t => reasons.get(t.spec.id) === null).map(t => t.spec.id),
-        waiting: run.tasks.filter(t => t.phase !== "done" && t.phase !== "swept").map(t => ({ task: t.spec.id, reason: reasons.get(t.spec.id) })) }); return 0;
+      emit({ ...run, summary: completionSummary(run), ready: run.tasks.filter(t => reasons.get(t.spec.id) === null).map(t => t.spec.id),
+        waiting: run.tasks.filter(t => !["done", "swept", "released-unverified"].includes(t.phase)).map(t => ({ task: t.spec.id, reason: reasons.get(t.spec.id) })) }); return 0;
     }
     const task = (token?: string) => {
       const found = run.tasks.find(t => t.spec.id === flag("task"));
@@ -414,7 +431,22 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
         const evidenceDir = fs.mkdtempSync(path.join(evidenceRoot, "verification-"));
         const proof = await verifyCompletion(assigned, integer("pr"), integer("review"), evidenceDir);
-        emit(store.complete(id, identity, revision, assigned.spec.id, assigned.token!, proof)); break;
+        const completed = store.complete(id, identity, revision, assigned.spec.id, assigned.token!, proof);
+        emit({ ...completed, summary: completionSummary(completed) }); break;
+      }
+      case "settle": {
+        const request = parseSettlement(readJsonFlag("file"));
+        const assigned = task(flag("token"));
+        if (request.run !== id || request.task !== assigned.spec.id || request.token !== assigned.token || request.revision !== revision) {
+          throw new Error("settlement request does not match the current assignment revision");
+        }
+        if (run.mode !== "running" || !run.reconciled) throw new Error("resume and reconcile before settlement");
+        if (!verificationReady(assigned)) throw new Error(verifyBlocker(assigned));
+        const evidenceRoot = path.join(path.dirname(statePath), "evidence", id);
+        fs.mkdirSync(evidenceRoot, { recursive: true, mode: 0o700 });
+        const proof = await inspectUnreviewedMerge(assigned, request, fs.mkdtempSync(path.join(evidenceRoot, "settlement-")));
+        const settled = store.settleWithoutReview(id, identity, revision, assigned.spec.id, assigned.token!, request, proof);
+        emit({ ...settled, summary: completionSummary(settled) }); break;
       }
       case "stop": emit(store.stop(id, identity, revision)); break;
       case "interrupt": {

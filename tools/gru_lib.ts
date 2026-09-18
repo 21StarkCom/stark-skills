@@ -14,7 +14,7 @@ export function assertAbsentWorktree(value: string): void {
 
 export type Provider = "claude" | "codex";
 export type Phase = "pending" | "reserved" | "intake" | "working" | "blocked" |
-  "review" | "integrating" | "done" | "stopping" | "stopped" | "swept";
+  "review" | "integrating" | "done" | "stopping" | "stopped" | "swept" | "released-unverified";
 export interface TaskSpec {
   id: string;
   ticket: string;
@@ -77,6 +77,28 @@ export interface CompletionEvidence {
   checks: { argv: string[]; exitCode: number; log: string }[];
   verifiedAt: string;
   ticketState: string;
+}
+/** Written by the operator, never synthesized by the worker or inferred from a ticket. */
+export interface SettlementRequest {
+  run: string;
+  task: string;
+  token: string;
+  revision: number;
+  pr: string;
+  noReview: true;
+  reason: string;
+  operatorRequest: string;
+}
+export interface SettlementEvidence extends Omit<CompletionEvidence, "review" | "verifiedAt"> {
+  checkedAt: string;
+  reviewCount: 0;
+  baseTip: string;
+}
+export interface SettlementRecord {
+  request: SettlementRequest;
+  evidence: SettlementEvidence;
+  invokedBy: string;
+  released: string[];
 }
 /** An operator attestation, not independently authenticated proof of human identity. */
 export interface TakeoverRequest {
@@ -224,6 +246,7 @@ export interface Assignment {
   stoppedFrom?: Phase;
   reconnect?: { id: string; startedAt: string; phase: Phase; pending: boolean };
   evidence?: CompletionEvidence;
+  settlement?: SettlementRecord;
   takeovers?: TakeoverRecord[];
   swept?: SweepRecord;
 }
@@ -253,7 +276,7 @@ export interface Run {
   config: Engagement;
   revision: number;
   epoch: number;
-  mode: "running" | "stopping" | "stopped" | "complete" | "swept";
+  mode: "running" | "stopping" | "stopped" | "complete" | "swept" | "released-unverified";
   reconciled: boolean;
   received: string[];
   transfers?: LeadershipTransfer[];
@@ -283,6 +306,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isProvider(value: unknown): value is Provider {
   return value === "codex" || value === "claude";
 }
+export function parseSettlement(value: unknown): SettlementRequest {
+  requireValue(isRecord(value), "settlement request must be an object");
+  const keys = ["run", "task", "token", "revision", "pr", "noReview", "reason", "operatorRequest"];
+  requireValue(Object.keys(value).every(k => keys.includes(k)), "unknown settlement request field");
+  for (const key of ["run", "task", "token", "pr", "reason", "operatorRequest"]) requireValue(nonempty(value[key]), `settlement ${key} is required`);
+  requireValue(Number.isSafeInteger(value.revision) && Number(value.revision) >= 0, "settlement revision is required");
+  requireValue(/^https:\/\/github\.com\/[^/?#]+\/[^/?#]+\/pull\/[1-9]\d*$/.test(value.pr as string), "settlement requires a GitHub PR URL");
+  requireValue(value.noReview === true, "settlement must explicitly state noReview: true");
+  return structuredClone(value) as unknown as SettlementRequest;
+}
+/** A release can finish an engagement, but can never enter its verified count. */
+export function completionSummary(run: Run) {
+  return {
+    verified: run.tasks.filter(t => t.phase === "done").map(t => t.spec.id),
+    releasedUnverified: run.tasks.filter(t => t.settlement).map(t => ({ task: t.spec.id,
+      state: "released-unverified", reason: t.settlement!.request.reason, pr: t.settlement!.request.pr })),
+    swept: run.tasks.filter(t => t.swept).map(t => t.spec.id),
+  };
+}
 export function parseTakeover(value: unknown): TakeoverRequest {
   requireValue(isRecord(value), "takeover request must be an object");
   const keys = ["run", "task", "token", "revision", "operatorRequest", "provider", "worktree", "model", "effort", "limits"];
@@ -295,12 +337,12 @@ export function parseTakeover(value: unknown): TakeoverRequest {
   if (value.limits !== undefined) requireLimits(value.limits, "takeover limits must be a non-empty list of strings");
   return structuredClone(value) as unknown as TakeoverRequest;
 }
-const active = (t: Assignment) => !["pending", "done", "stopped", "swept"].includes(t.phase);
+const active = (t: Assignment) => !["pending", "done", "stopped", "swept", "released-unverified"].includes(t.phase);
 // Completed workers release slots with fresh idle/dead or confirmed-retirement
 // evidence. Unconfirmed or still-busy workers count toward the concurrency limit.
 const occupiesSlot = (t: Assignment) => active(t) || Boolean(t.worker &&
   !(fresh(t.observation) && (t.observation?.liveness === "dead" ||
-    (t.phase === "done" && (t.observation?.retired ||
+    (["done", "released-unverified"].includes(t.phase) && (t.observation?.retired ||
       (t.observation?.liveness === "live" && t.observation.activity === "idle"))))));
 /** The ownership key for a task's repository. The `?? t.repo` fallback is for a record
  * written before `init` resolved origin identity; `observeBase` cannot use it, because it
@@ -359,7 +401,7 @@ export const ticketClosed = (state: string) => state === "done" || state === "Cl
  * `reserve` writes the first owner rows and spends the first attempt. `done` stays out on
  * purpose — completion retains ticket, worktree, and saved-session ownership by design. */
 export function sweepCandidates(run: Run): Assignment[] {
-  return run.tasks.filter(t => t.phase !== "done" && t.phase !== "swept" && (t.phase !== "pending" || t.attempts > 0));
+  return run.tasks.filter(t => t.phase !== "done" && t.phase !== "swept" && !t.swept && (t.phase !== "pending" || t.attempts > 0));
 }
 
 /** The release rule. Alfred must report the ticket closed AND no live Hermod peer may be
@@ -382,7 +424,7 @@ export function sweepVerdicts(run: Run, evidence: SweepEvidence, owned: (taskId:
     // A worker closes its ticket at merge, before Gru verifies, and `verify` settles a
     // retained merge. Releasing that grant would strand the verification and its dependents.
     // `verify` needs a merged PR, so a grant whose PR never merged stays held here too.
-    if (task.integrationBase) return verdict("held", `holds an integration grant at ${task.integrationBase}; settle it with verify once its PR merges`);
+    if (task.integrationBase && !task.settlement) return verdict("held", `holds an integration grant at ${task.integrationBase}; settle it with verify once its PR merges, or operator-authorized settle if no review exists`);
     if (task.reconnect?.pending) return verdict("held", "reconnect outcome is uncertain; old process death does not settle startup");
     // `reserve` records intent, not startup. A running engagement's leader may still be
     // launching into this reservation, and Hermod cannot show a launch before it registers.
@@ -716,7 +758,7 @@ export class GruStore {
     // its lingering declaration must not refuse the same path to adoption alone.
     const declaredBy = [run, ...this.others(run.config.id)].flatMap(r => r.tasks)
       // Stored worktrees are canonical already; compare them as `tree:` ownership keys do, off the filesystem.
-      .find(t => t !== task && t.phase !== "swept" && path.resolve(t.spec.worktree) === observed);
+      .find(t => t !== task && t.phase !== "swept" && !t.swept && path.resolve(t.spec.worktree) === observed);
     requireValue(!declaredBy, `worker worktree mismatch: ${observed} is declared by ${declaredBy?.spec.ticket}`);
     this.own(run, task, [`tree:${observed}`]);
     this.respec(run, task, { ...task.spec, worktree: observed });
@@ -791,6 +833,7 @@ export class GruStore {
       requireValue(nonempty(newLeader), "leader identity is required");
       requireValue(run.mode !== "complete", "engagement already complete");
       requireValue(run.mode !== "swept", "engagement was swept; it is terminal");
+      requireValue(run.mode !== "released-unverified", "engagement is released-unverified; it is terminal");
       let replaced: string[] | undefined;
       if (limits !== undefined) {
         // A same-session resume is a legal no-op transfer, so without this the sitting
@@ -959,6 +1002,31 @@ export class GruStore {
       this.settle(run);
     });
   }
+  settleWithoutReview(id: string, leader: string, revision: number, taskId: string, token: string,
+    input: unknown, evidence: SettlementEvidence): Run {
+    const request = parseSettlement(input);
+    return this.transaction(id, leader, revision, run => {
+      const task = this.task(run, taskId, token);
+      requireValue(request.run === id && request.task === taskId && request.token === token && request.revision === revision,
+        "settlement request does not match the current assignment revision");
+      requireValue(run.mode === "running" && run.reconciled && verificationReady(task), "integration and independent verification required");
+      requireValue(evidence.base === task.integrationBase, "integration base changed; rebase and reverify");
+      for (const sha of [evidence.head, evidence.base, evidence.merge, evidence.baseTip]) requireValue(isRevision(sha), "invalid evidence revision");
+      requireValue(evidence.pr.toLowerCase() === request.pr.toLowerCase(), "settlement PR does not match operator request");
+      requireValue(evidence.reviewCount === 0 && !("review" in evidence) && !("verifiedAt" in evidence), "settlement requires absence of posted reviews");
+      requireValue(fresh({ observedAt: evidence.checkedAt }), "settlement evidence is stale; rerun checks");
+      requireValue(ticketClosed(evidence.ticketState), "repository completion milestone not recorded in Alfred");
+      requireValue(evidence.checks.length === task.spec.checks.length, "missing completion checks");
+      task.spec.checks.forEach((argv, i) => requireValue(JSON.stringify(evidence.checks[i].argv) === JSON.stringify(argv) && evidence.checks[i].exitCode === 0 && nonempty(evidence.checks[i].log), "check failed, changed, or missing output"));
+      const released = this.owned(id, taskId).filter(r => r.startsWith("merge:") || r.startsWith("merge-resource:"));
+      requireValue(released.includes(`merge:${repositoryKey(task.spec)}`) && task.spec.mergeResources.every(r => released.includes(`merge-resource:${r}`)), "integration ownership missing");
+      task.settlement = { request, evidence: structuredClone(evidence), invokedBy: leader, released };
+      task.phase = "released-unverified"; task.stoppedFrom = undefined;
+      this.db.prepare("DELETE FROM owners WHERE run=? AND task=? AND (resource LIKE 'merge:%' OR resource LIKE 'merge-resource:%')").run(id, taskId);
+      this.event(run, "settled-without-review", JSON.stringify(task.settlement), taskId);
+      this.settle(run);
+    });
+  }
   retire(id: string, leader: string, revision: number, taskId: string, token: string, surface: string): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
@@ -972,6 +1040,7 @@ export class GruStore {
     return this.transaction(id, leader, revision, run => {
       requireValue(run.mode !== "complete", "engagement already complete");
       requireValue(run.mode !== "swept", "engagement was swept; it is terminal");
+      requireValue(run.mode !== "released-unverified", "engagement is released-unverified; it is terminal");
       run.mode = "stopping";
       for (const task of run.tasks.filter(active)) {
         if (task.phase !== "stopping") task.stoppedFrom = task.phase;
@@ -1017,7 +1086,7 @@ export class GruStore {
         this.db.prepare("DELETE FROM owners WHERE run=? AND task=?").run(id, task.spec.id);
         // The record keeps the worker for audit; the task drops it, so no capacity rule or
         // later reconcile keeps observing a released identity.
-        task.phase = "swept"; task.stoppedFrom = undefined; task.worker = undefined; task.observation = undefined; task.swept = record;
+        task.phase = task.settlement ? "released-unverified" : "swept"; task.stoppedFrom = undefined; task.worker = undefined; task.observation = undefined; task.swept = record;
         this.event(run, "swept", JSON.stringify(record), task.spec.id);
       }
       if (!this.settle(run) && run.mode === "stopping" && !run.tasks.some(active)) run.mode = "stopped";
@@ -1030,7 +1099,12 @@ export class GruStore {
    * verified: `sweep` then has no candidate left, so it never runs again to settle the mode. */
   private settle(run: Run): boolean {
     if (run.tasks.every(t => t.phase === "done")) { run.mode = "complete"; return true; }
-    if (!run.tasks.every(t => t.phase === "done" || t.phase === "swept")) return false;
+    if (!run.tasks.every(t => ["done", "swept", "released-unverified"].includes(t.phase))) return false;
+    if (run.tasks.some(t => t.settlement)) {
+      run.mode = "released-unverified";
+      this.event(run, "released-unverified", JSON.stringify(completionSummary(run)));
+      return true;
+    }
     run.mode = "swept";
     this.event(run, "swept", `every task verified or released; engagement terminal (${SWEEP_AUTHORITY})`);
     return true;

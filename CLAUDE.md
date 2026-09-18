@@ -23,6 +23,14 @@ This is a **personal playground**, not production. No customers depend on it; th
 
 ## Distribution
 
+Gru's `settle --file` accepts an operator-authored request bound to run/task/token/revision
+for a merged PR with zero reviews, retaining all other verification requirements.
+It records `settled-without-review`, releases only integration locks, and reports
+`released-unverified` with its reason in status and completion summaries. It never
+unblocks dependents. Sweep can release remaining reservations on its usual proof,
+while preserving the review gap. `verify` stays strict. See the
+[settlement contract](skill/gru/references/operations.md#operator-settlement-of-a-merged-grant-without-review).
+
 This repo is the **source of truth** for the skills + tools. Distribution is **marketplace-only** — there is no local symlink install step.
 
 - **bifrost** (the marketplace) — the `bifrost` repo packages these skills as separate self-contained Claude Code and native Codex plugins. Claude installs with `/plugin marketplace add 21StarkCom/bifrost` then `/plugin install <bundle>@bifrost`; Codex installs with `codex plugin marketplace add 21StarkCom/bifrost` then `codex plugin add <bundle>@bifrost`. Canonical `skill/` and shared assets remain Claude-authored. Complete Codex variants live only under `runtime-overrides/codex/`, which Bifrost imports into a separate `dist/codex-plugins/` package surface; Codex overlays must never enter `dist/claude/`. `marketplace-sync` prepares versioned release notes and opens a draft Bifrost sync PR. It waits up to 20 minutes for `aryeh-stark`'s completed review attestation on the exact head, then runs the ready/CI/merge chain. CI alone never authorizes publication. See the [review attestation contract](skill/gru/references/operations.md#verification-and-integration). Every changed runtime advances Bifrost's root release version, including Claude-only changes.

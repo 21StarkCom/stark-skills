@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { observations, observeOrphan, observeSweep, observeWorkers, packet, type Command, type HermodPeer, type SavedSession } from "./gru_runtime_lib.ts";
-import { ADOPTION_CHECKS, BASE_CHECKS, GruStore, namesTicket, parseEngagement, parseTakeover, readyReason, repositoryKey, verificationReady, type BaseEvidence, type CompletionEvidence, type Engagement, type Run, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
+import { ADOPTION_CHECKS, BASE_CHECKS, completionSummary, GruStore, namesTicket, parseEngagement, parseSettlement, parseTakeover, readyReason, repositoryKey, sweepCandidates, verificationReady, type BaseEvidence, type CompletionEvidence, type Engagement, type Run, type SettlementEvidence, type Worker, type WorktreeAdoption } from "./gru_lib.ts";
 
 // Compose the production observation builders with the store: a handwritten "dead"
 // observation would miss the orphaned-record failure that prompted STARK-5021.
@@ -331,6 +331,83 @@ const landedProof = (run: Run): CompletionEvidence => ({ base: BASE, head: "b".r
   pr: "https://github.com/o/r/pull/1", review: "https://github.com/o/r/pull/1#pullrequestreview-1",
   verifiedAt: new Date().toISOString(), ticketState: "done",
   checks: run.tasks[0].spec.checks.map(argv => ({ argv, exitCode: 0, log: "/evidence/check.log" })) });
+
+// Synthetic test authority only; never usable against an operator's engagement.
+const settlementRequest = (r: Run) => ({ run: r.config.id, task: "one", token: r.tasks[0].token!, revision: r.revision,
+  pr: "https://github.com/o/r/pull/1", noReview: true as const, reason: "Historical merge has no posted review",
+  operatorRequest: "TEST FIXTURE: release the unreviewed merge while preserving the review gap." });
+function settlementProof(r: Run): SettlementEvidence {
+  const { review: _review, verifiedAt: _at, ...proof } = landedProof(r);
+  return { ...proof, checkedAt: new Date().toISOString(), reviewCount: 0, baseTip: "d".repeat(40) };
+}
+
+test("settlement records an audited release, never verification or dependency readiness, and sweep preserves its reason", async t => {
+  const { store, file, r } = await orphanedRun(t, true);
+  const request = settlementRequest(r), proof = settlementProof(r);
+  const held = store.owned("demo", "one");
+  const released = held.filter(x => x.startsWith("merge:") || x.startsWith("merge-resource:"));
+  let result = store.settleWithoutReview("demo", "leader-one", r.revision, "one", request.token, request, proof);
+  const assignment = result.tasks[0];
+  assert.equal(assignment.phase, "released-unverified");
+  assert.equal(result.mode, "released-unverified");
+  assert.equal(assignment.evidence, undefined);
+  assert.equal(assignment.stoppedFrom, undefined);
+  assert.equal(verificationReady(assignment), false);
+  assert.deepEqual(store.owned("demo", "one"), held.filter(x => !released.includes(x)));
+  assert.deepEqual(assignment.settlement, { request, evidence: proof, invokedBy: "leader-one", released });
+  assert.equal(result.events.some(e => e.kind === "verified"), false);
+  assert.deepEqual(JSON.parse(result.events.find(e => e.kind === "settled-without-review")!.detail), assignment.settlement);
+  assert.deepEqual(completionSummary(result), { verified: [], releasedUnverified: [{ task: "one", state: "released-unverified", reason: request.reason, pr: request.pr }], swept: [] });
+  const reopened = new GruStore(file); t.after(() => reopened.close());
+  assert.deepEqual(reopened.read("demo").tasks[0].settlement, assignment.settlement);
+  assert.throws(() => store.complete("demo", "leader-one", result.revision, "one", request.token, landedProof(r)), /integration/);
+  assert.throws(() => store.resume("demo", "leader-one", result.revision, "leader-one"), /released-unverified/);
+  assert.throws(() => store.stop("demo", "leader-one", result.revision), /released-unverified/);
+  const dependent = config().tasks[2];
+  const running: Run = { ...result, mode: "running", tasks: [assignment, { spec: dependent, phase: "pending", attempts: 0, recoveries: 0 }] };
+  assert.match(readyReason(running, running.tasks[1])!, /prerequisite one is unverified/);
+  assert.deepEqual(sweepCandidates(result).map(t => t.spec.id), ["one"]);
+  const unknown = await sweepEvidence(result, { tickets: { "STARK-100": "Closed" } });
+  assert.match(store.sweepVerdicts(result, unknown)[0].reason, /unknown/);
+  const evidence = await sweepEvidence(result, { tickets: { "STARK-100": "Closed" }, sessions: [terminated("one")] });
+  assert.equal(store.sweepVerdicts(result, evidence)[0].action, "release");
+  result = store.sweep("demo", result.revision, evidence, "operator-test").run;
+  assert.equal(result.tasks[0].phase, "released-unverified");
+  assert.equal(result.mode, "released-unverified");
+  assert.deepEqual(result.tasks[0].settlement, assignment.settlement);
+  assert.deepEqual(store.owned("demo", "one"), []);
+  assert.deepEqual(sweepCandidates(result), []);
+  assert.equal(completionSummary(result).releasedUnverified[0].reason, request.reason);
+});
+
+test("settlement refuses missing authority, mismatched binding, invalid proof and stale evidence atomically", async t => {
+  const { store, r } = await orphanedRun(t, true);
+  const request = settlementRequest(r), proof = settlementProof(r);
+  const held = store.owned("demo", "one");
+  for (const input of [undefined, {}, ...["operatorRequest", "reason", "run", "task", "token", "pr"].map(k => ({ ...request, [k]: "" })),
+    { ...request, noReview: false }, { ...request, noReview: undefined }, { ...request, revision: -1 }, { ...request, extra: "authority" },
+    { ...request, pr: "https://github.com/o/r/pull/0" }]) assert.throws(() => parseSettlement(input));
+  for (const changed of [{ ...request, run: "other" }, { ...request, task: "two" }, { ...request, token: "old" }, { ...request, revision: r.revision - 1 }]) {
+    assert.throws(() => store.settleWithoutReview("demo", "leader-one", r.revision, "one", request.token, changed, proof), /does not match/);
+  }
+  const invalid = [
+    { ...proof, base: "e".repeat(40) }, { ...proof, head: "bad" }, { ...proof, merge: "bad" }, { ...proof, baseTip: "bad" },
+    { ...proof, pr: "https://github.com/o/r/pull/2" }, { ...proof, reviewCount: 1 }, { ...proof, review: "review" },
+    { ...proof, verifiedAt: new Date().toISOString() }, { ...proof, checkedAt: new Date(Date.now() - 120_000).toISOString() },
+    { ...proof, ticketState: "in progress" }, { ...proof, checks: [] },
+    { ...proof, checks: [{ ...proof.checks[0], exitCode: 1 }] }, { ...proof, checks: [{ ...proof.checks[0], argv: ["true"] }] },
+    { ...proof, checks: [{ ...proof.checks[0], log: "" }] },
+  ];
+  for (const bad of invalid) {
+    assert.throws(() => store.settleWithoutReview("demo", "leader-one", r.revision, "one", request.token, request, bad as SettlementEvidence));
+    assert.deepEqual(store.read("demo"), stored(r));
+    assert.deepEqual(store.owned("demo", "one"), held);
+  }
+  assert.throws(() => store.settleWithoutReview("demo", "other-leader", r.revision, "one", request.token, request, proof), /stale leader/);
+  assert.throws(() => store.settleWithoutReview("demo", "leader-one", r.revision, "one", "old", request, proof), /stale assignment/);
+  const { review: _review, ...missingReview } = landedProof(r);
+  assert.throws(() => store.complete("demo", "leader-one", r.revision, "one", request.token, missingReview as CompletionEvidence), /review/);
+});
 
 /** Runtime evidence for a linked worktree of /repo, as `inspectAdoption` would record it. */
 const adoptionProof = (observed: string, declared: string, repositoryKey: string): WorktreeAdoption => ({

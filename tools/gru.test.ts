@@ -287,6 +287,130 @@ function engagement(t: TestContext) {
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=gru", "-c", "user.email=gru@example.invalid",
   "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+
+test("gru CLI: settle requires written authority and all non-review proof; status never calls it verified", async t => {
+  const { dir, state, file } = engagement(t);
+  const unopened = path.join(dir, "must-stay-absent", "state.sqlite");
+  const noFile = await run(["settle", "--state", unopened], "leader-one");
+  assert.equal(noFile.code, 2);
+  assert.match(noFile.error, /--file is required/);
+  assert.equal(fs.existsSync(path.dirname(unopened)), false, "missing authority must not open state");
+  const config = JSON.parse(fs.readFileSync(file, "utf8"));
+  const repo = config.tasks[0].repo;
+  const origin = path.join(repo, "o", "r.git");
+  fs.mkdirSync(path.dirname(origin));
+  git(repo, "init", "-q", "--bare", "--initial-branch=main", origin);
+  git(repo, "remote", "set-url", "origin", "o/r.git");
+  git(repo, "checkout", "-b", "main");
+  git(repo, "commit", "--allow-empty", "-qm", "integration base");
+  const base = git(repo, "rev-parse", "HEAD").trim();
+  git(repo, "commit", "--allow-empty", "-qm", "merged change");
+  const head = git(repo, "rev-parse", "HEAD").trim();
+  const unrelated = git(repo, "commit-tree", "HEAD^{tree}", "-m", "unrelated history").trim();
+  git(repo, "push", "-q", "origin", "main", "HEAD:refs/pull/1/head");
+  config.tasks[0].repositoryKey = "o/r";
+  config.tasks[0].checks = [
+    [process.execPath, "-e", "require('fs').writeFileSync('setup-proof', 'installed')"],
+    [process.execPath, "-e", "if (!require('fs').existsSync('setup-proof')) process.exit(9); console.log('disposable checks passed'); process.exit(Number(process.env.GRU_SETTLE_CHECK_FAIL || 0))"],
+  ];
+  const store = new GruStore(state); t.after(() => store.close());
+  let current = store.reconcile("cli", "leader-one", store.create(config).revision, {});
+  current = store.reserve("cli", "leader-one", current.revision, "t");
+  const token = current.tasks[0].token!;
+  current = store.attach("cli", "leader-one", current.revision, "t", token, {
+    id: "codex:t", session: "worker", surface: "surface", workspace: "workspace", provider: "codex", worktree: config.tasks[0].worktree,
+  });
+  current = store.report("cli", "leader-one", current.revision, "t", token, "worker", "ack", "d");
+  current = store.report("cli", "leader-one", current.revision, "t", token, "worker", "ready", "d");
+  current = store.integrate("cli", "leader-one", current.revision, "t", token, base, {
+    observedAt: new Date().toISOString(), repositoryKey: "o/r", ref: "main", tip: base, base, checks: [...BASE_CHECKS],
+  });
+  const held = store.owned("cli", "t");
+  const bin = path.join(dir, "bin"); fs.mkdirSync(bin);
+  const records = path.join(dir, "api.json");
+  const pr = { merged: true, merged_at: new Date().toISOString(), merge_commit_sha: head,
+    head: { sha: head, repo: { full_name: "o/r" } }, base: { ref: "main", repo: { full_name: "o/r" } }, html_url: "https://github.com/o/r/pull/1" };
+  const world = { pr, reviews: [[]] as unknown, ticket: "Closed" };
+  const save = () => fs.writeFileSync(records, JSON.stringify(world)); save();
+  fs.writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env node
+const r = JSON.parse(require('fs').readFileSync(${JSON.stringify(records)}, 'utf8'));
+const args = process.argv.slice(2);
+if (args[1].endsWith('/reviews')) {
+  if (!args.includes('--paginate') || !args.includes('--slurp')) process.exit(8);
+  console.log(JSON.stringify(r.reviews));
+} else console.log(JSON.stringify(args[1].includes('/reviews/') ? {} : r.pr));
+`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, "alfred"), `#!/usr/bin/env node
+const r = JSON.parse(require('fs').readFileSync(${JSON.stringify(records)}, 'utf8'));
+console.log(JSON.stringify({item:{ref:{custom_id:'STARK-1'},state:r.ticket},comments:[],comments_read:true}));
+`, { mode: 0o755 });
+  const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  const args = ["--run", "cli", "--revision", String(current.revision), "--task", "t", "--token", token, "--state", state];
+  // This is synthetic test authority against a throwaway store, never the live rehearsal file.
+  const authorization = path.join(dir, "fixture-operator.json");
+  const request = { run: "cli", task: "t", token, revision: current.revision, pr: pr.html_url, noReview: true,
+    reason: "Legacy merge has no review", operatorRequest: "TEST FIXTURE: release this unreviewed grant" };
+  fs.writeFileSync(authorization, JSON.stringify(request));
+  const settledArgs = ["settle", ...args, "--file", authorization];
+  const refuses = async (expected: RegExp, input = settledArgs, extra = {}) => {
+    const result = await run(input, "leader-one", { ...env, ...extra });
+    assert.equal(result.code, 2, result.out);
+    assert.match(result.error, expected);
+    assert.equal(store.read("cli").revision, current.revision);
+    assert.deepEqual(store.owned("cli", "t"), held);
+    assert.equal(store.read("cli").events.some(e => e.kind === "settled-without-review"), false);
+  };
+  await refuses(/--file is required/, ["settle", ...args]);
+  await refuses(/does not apply to settle/, [...settledArgs, "--review", "1"]);
+  for (const [field, value] of [["token", "old"], ["task", "other"], ["run", "other"], ["revision", current.revision - 1]]) {
+    fs.writeFileSync(authorization, JSON.stringify({ ...request, [field]: value }));
+    await refuses(/does not match/);
+  }
+  fs.writeFileSync(authorization, JSON.stringify({ ...request, noReview: false }));
+  await refuses(/noReview/);
+  fs.writeFileSync(authorization, JSON.stringify({ ...request, pr: "https://github.com/other/repo/pull/1" }));
+  await refuses(/PR does not match/);
+  fs.writeFileSync(authorization, JSON.stringify(request));
+  // Ordinary verify still refuses a reviewless merge while keeping every owner row.
+  await refuses(/posted review does not cover/, ["verify", ...args, "--pr", "1", "--review", "1"]);
+  pr.merged = false; save(); await refuses(/not confirmed merged/); pr.merged = true;
+  pr.merged_at = ""; save(); await refuses(/not confirmed merged/); pr.merged_at = new Date().toISOString();
+  pr.base.repo.full_name = "foreign/repo"; save(); await refuses(/repository mismatch/); pr.base.repo.full_name = "o/r";
+  pr.base.ref = "release"; save(); await refuses(/granted on main/); pr.base.ref = "main";
+  pr.merge_commit_sha = unrelated; save(); await refuses(/git failed/); pr.merge_commit_sha = head;
+  pr.head.sha = base; save(); await refuses(/fetched PR head differs/); pr.head.sha = head;
+  git(repo, "push", "-q", "--force", "origin", `${unrelated}:refs/pull/1/head`);
+  pr.head.sha = unrelated; save(); await refuses(/git failed/);
+  git(repo, "push", "-q", "--force", "origin", `${head}:refs/pull/1/head`); pr.head.sha = head;
+  world.reviews = [[], [{ state: "COMMENTED", commit_id: head }]]; save(); await refuses(/no posted review/);
+  world.reviews = {}; save(); await refuses(/no posted review/);
+  world.reviews = [[]]; world.ticket = "in progress"; save(); await refuses(/completion milestone/);
+  world.ticket = "Closed"; save();
+  await refuses(/independent check failed/, settledArgs, { GRU_SETTLE_CHECK_FAIL: "7" });
+  const result = await run(settledArgs, "leader-one", env);
+  assert.equal(result.code, 0, result.error);
+  const settled = store.read("cli");
+  assert.equal(settled.mode, "released-unverified");
+  assert.equal(settled.tasks[0].phase, "released-unverified");
+  assert.equal(settled.tasks[0].evidence, undefined);
+  assert.deepEqual(store.owned("cli", "t"), held.filter(r => !r.startsWith("merge:") && !r.startsWith("merge-resource:")));
+  assert.equal(settled.tasks[0].settlement!.evidence.checks.length, 2);
+  for (const check of settled.tasks[0].settlement!.evidence.checks) {
+    const log = JSON.parse(fs.readFileSync(check.log, "utf8"));
+    assert.equal(log.head, head);
+    assert.equal(log.code, 0);
+    assert.notEqual(log.cwd, config.tasks[0].worktree);
+    assert.equal(fs.existsSync(log.cwd), false, "only disposable checkout was removed");
+  }
+  assert.ok(fs.existsSync(config.tasks[0].worktree));
+  assert.equal(git(repo, "for-each-ref", "refs/gru/verification").trim(), "");
+  const status = await run(["status", "--run", "cli", "--state", state], "leader-one");
+  assert.equal(status.code, 0, status.error);
+  const expectedSummary = { verified: [], releasedUnverified: [{ task: "t", state: "released-unverified", reason: request.reason, pr: request.pr }], swept: [] };
+  assert.deepEqual(JSON.parse(status.out).summary, expectedSummary);
+  assert.deepEqual(JSON.parse(result.out).summary, expectedSummary);
+  assert.deepEqual(JSON.parse(status.out).waiting, []);
+});
 /** A GitHub-origin repository with one commit, so `git worktree add` has a HEAD to cut from. */
 function originRepo(dir: string, origin: string): string {
   fs.mkdirSync(dir, { recursive: true });

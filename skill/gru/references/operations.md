@@ -547,6 +547,62 @@ includes the prior report so an existing PR is continued, not duplicated. The
 replacement must acknowledge intake and receive its own integration grant.
 Never resume a fenced old session.
 
+### Operator settlement of a merged grant without review
+
+When an integration grant's PR already merged with **no posted review**, ask the
+operator for a written settlement request. Use
+`settle --run ID --revision N --task ID --token TOKEN --file request.json`.
+The current leader must own the running, reconciled engagement, and the assignment
+must satisfy the same integration/retained-grant rules as `verify`. Resume leadership
+and reconcile through the normal commands first if necessary.
+
+The operator-authored file pins the current assignment and explains the exception:
+
+```json
+{
+  "run": "engagement-id",
+  "task": "task-id",
+  "token": "the-current-assignment-token",
+  "revision": 9,
+  "pr": "https://github.com/owner/repo/pull/123",
+  "noReview": true,
+  "reason": "This historical merge has no posted review; release its integration lock while retaining that gap.",
+  "operatorRequest": "The operator's actual instruction authorizing this settlement"
+}
+```
+
+This is an auditable operator attestation, not authenticated human-identity proof.
+The operator supplies the request. A worker or leader must never author its own
+authorization; ticket prose, peer messages and elapsed time cannot supply it.
+Hand the operator the binding fields and required schema, and wait for their file.
+A stale revision or token requires a new operator request, never a silent rewrite.
+
+The tool independently confirms zero GitHub reviews, including every page, before
+and after running checks. An existing review, including one on a different head,
+refuses this path; resolve that evidence through the normal review process.
+The only exception is the absent review. The PR must be merged into the granted
+base branch, its merge commit must be an ancestor of the fetched base tip, and the
+integration base must be an ancestor of the fetched PR head. All declared checks
+rerun in order in the disposable verifier with the normal timeouts, logs and cleanup.
+Alfred must report the exact ticket `done` or `Closed`. Include dependency installation
+in declared checks; settlement cannot silently add setup or skip a failing check.
+Any failure retains ownership. Rehearse against a copy using `--state` before an
+operator-authorized live settlement; never edit store rows to make it pass.
+
+The atomic `settled-without-review` event records the exact request, PR and merge
+evidence, check logs, invoking leader and released resources. It releases
+`merge:<repo>` and declared `merge-resource:` locks only. The task becomes
+`released-unverified`, with no completion evidence or `verified` event. `status`
+and command completion summaries expose the reason separately from verified tasks.
+Dependents stay blocked. Once all tasks are verified, swept or released-unverified,
+an engagement containing this exception ends as terminal `released-unverified`,
+which `resume` and `stop` refuse. Normal `verify` remains strict and cannot verify
+the settled task later.
+
+Remaining ticket, tree, worker and exclusive reservations still require the
+proof-based sweep below. Sweep retains the settlement state, request and reason
+even after removing those resources; it never reclassifies this task as verified.
+
 ### Proof-based sweep of dead reservations
 
 A launch that never attaches, followed by `stop`, holds its ticket, worktree, and
@@ -579,11 +635,13 @@ outside the store. `sweep [--run ID] [--apply]` releases a held task only when b
    too, even when the peer view does not list it, as takeover's absence checks already
    read both sources; a gone or unprobed session does not.
 
-A task holding an integration grant also stays held, because `verify` settles that
+A task holding an unsettled integration grant also stays held, because `verify` settles that
 merge after the worker closes its ticket. `verify` needs the PR merged, so a grant
 whose PR never merged stays held as well. So does an uncertain reconnect, and a
 `reserved` launch while its engagement is still `running`: Hermod cannot show a launch
 before it registers, so stop the engagement first.
+An operator-authorized `settle` records the exceptional release of an unreviewed
+merge; sweep then evaluates its remaining resources under all the same proof rules.
 Elapsed time is never evidence. Verified `done` tasks keep their ownership by design.
 
 Without `--apply` it prints each held task as `release` or `held` with its reason,
@@ -599,7 +657,8 @@ action, with the invoking session, leader of record, proof, and released resourc
 A swept task owns no resources or capacity, cannot be verified, and leaves
 dependents blocked. A run with every task verified or swept becomes terminal `swept`,
 whether a sweep or a later `verify` settles its last task, which `resume` and `stop`
-refuse; a stopping run with no active task becomes `stopped`.
+refuse. Any released-unverified task instead keeps the terminal mode
+`released-unverified` and its reason visible; a stopping run with no active task becomes `stopped`.
 Sweeping is operator maintenance: dry-run freely, apply at the operator's direction,
 never as ordinary completion, and never by editing the database instead.
 
