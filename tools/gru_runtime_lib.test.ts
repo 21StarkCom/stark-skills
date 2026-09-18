@@ -1008,18 +1008,37 @@ test("the integration base is read from the real base branch, and every gap fail
   await assert.rejects(observeBase(task, tree, undefined, call), /is not a commit in owner\/repo/);
   const foreign = { ...task, spec: { ...task.spec, repositoryKey: "other/repo" } };
   await assert.rejects(observeBase(foreign, first, undefined, call), /repository mismatch: .* is owner\/repo, not other\/repo/);
+  // A record written before `init` resolved origin identity has no repositoryKey, and
+  // `repositoryKey()` falls back to the filesystem path for ownership. That fallback must NOT
+  // reach this comparison: a path can never equal a canonical owner/repo, so using it would
+  // refuse every grant in such a run forever, with no in-band repair. Absent means unknown.
+  const { repositoryKey: _unset, ...legacySpec } = task.spec;
+  assert.equal((await observeBase({ ...task, spec: legacySpec }, first, undefined, call)).repositoryKey, "owner/repo");
 
   // Another task's merge lands on origin while this one is in review: the grant's base is now stale.
   const second = path.join(dir, "second-worker");
   must(["git", "clone", origin, second]);
   for (const [key, value] of [["user.name", "Gru Test"], ["user.email", "gru@example.invalid"]]) must(["git", "config", key, value], second);
   const landed = land("second task merged", second);
+  // Snapshot the shared ref state the observation must not touch. `--no-write-fetch-head`
+  // alone does NOT achieve that: with an explicit refspec git still applies the remote's
+  // configured refmap opportunistically, so the fetch also advances origin/<branch> and
+  // follows new tags. A linked worktree shares this ref store with its main checkout, so a
+  // grant — including this refused one — would move origin/main under a Minion mid-rebase.
+  must(["git", "fetch", "-q", "origin"], repoDir);
+  must(["git", "tag", "-f", "v-probe", first], repoDir);
+  must(["git", "push", "-q", "origin", "refs/tags/v-probe"], repoDir);
+  const beforeRemote = must(["git", "rev-parse", "refs/remotes/origin/main"], repoDir);
+  must(["git", "tag", "-d", "v-probe"], repoDir);
   const stale = await observeBase(task, first, undefined, call);
   assert.equal(stale.tip, landed);
   assert.equal(stale.base, first);
   assert.notEqual(stale.tip, stale.base);
   // The observation fetched the new tip without the worker's checkout ever fetching it.
   assert.equal(must(["git", "rev-parse", "HEAD"], repoDir), first);
+  assert.equal(must(["git", "rev-parse", "refs/remotes/origin/main"], repoDir), beforeRemote,
+    "the grant fetch must not advance origin/<branch> in a ref store shared with live worktrees");
+  assert.equal(must(["git", "tag", "-l"], repoDir), "", "the grant fetch must not auto-follow tags");
 
   // An explicitly named branch is fetched instead of the default one.
   must(["git", "push", "origin", `${first}:refs/heads/release`], repoDir);
@@ -1101,4 +1120,52 @@ test("the integration base is read from the real base branch, and every gap fail
   fs.renameSync(origin, path.join(dir, "origin-moved.git"));
   await assert.rejects(observeBase(task, landed, undefined, call), /cannot read origin's default branch/);
   await assert.rejects(observeBase(task, landed, "main", call), /cannot fetch refs\/heads\/main from origin/);
+});
+
+test("verify settles against the branch the grant was taken on, not the declaration it overrode", async t => {
+  // `--base-ref` is a documented one-off override, and the grant it takes is legitimate: the
+  // observation fetched THAT branch, the worker merged into it. Settling against the task's
+  // DECLARED branch instead refused every such PR — one that matched its own grant exactly —
+  // and the refusal is terminal, since a grant cannot be retaken once the task is
+  // `integrating`. That is the very failure class declaring the branch exists to remove, so
+  // the brief (`packet`) and the gate (`verifyCompletion`) must read the one same value.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-verify-baseref-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const sha = (c: string) => c.repeat(40);
+  const granted = (base: string): Assignment => {
+    const task = assignment();
+    task.spec.repositoryKey = "owner/repo";
+    task.spec.baseRef = "main";              // declared at init, and in the first packet
+    task.integrationBase = sha("b");
+    task.baseEvidence = { observedAt: new Date().toISOString(), repositoryKey: "owner/repo",
+      ref: base, tip: sha("b"), base: sha("b"), checks: [...BASE_CHECKS] };
+    return task;
+  };
+  const gh = (baseRef: string): Command => async argv => argv[0] === "git" && argv[1] === "remote"
+    ? { code: 0, stdout: "git@github.com:owner/repo.git", stderr: "" }
+    : argv[0] === "gh" ? response({ merged: true, merged_at: "2026-01-01T00:00:00Z", merge_commit_sha: sha("c"),
+      head: { sha: sha("d"), repo: { full_name: "owner/repo" } },
+      base: { ref: baseRef, repo: { full_name: "owner/repo" } }, html_url: "u" })
+    : { code: 0, stdout: "", stderr: "" };
+
+  // Granted on `release` via --base-ref, merged into `release`: the base gate must pass. It
+  // stops at the NEXT gate (the posted review), which is how we know it got past this one.
+  await assert.rejects(verifyCompletion(granted("release"), 1, 1, path.join(dir, "override"), gh("release")),
+    /posted review does not cover the merged PR head/);
+
+  // A real divergence still refuses, and names the branch actually granted — not the
+  // declaration — plus how the two came apart, so the message is not a lie about the grant.
+  await assert.rejects(verifyCompletion(granted("release"), 1, 1, path.join(dir, "mismatch"), gh("main")),
+    /granted on release, but PR 1 merged into main \(the task declares baseRef main; this grant overrode it with --base-ref release\)/);
+
+  // With no override the two agree, so the declaration is still enforced end to end.
+  await assert.rejects(verifyCompletion(granted("main"), 1, 1, path.join(dir, "declared"), gh("release")),
+    /granted on main, but PR 1 merged into release\. A grant cannot be retaken/);
+
+  // The worker's brief names exactly the branch this gate will settle against.
+  const pending = run(); pending.tasks[0] = granted("release"); pending.tasks[0].token = "token";
+  const brief = packet(pending, pending.tasks[0]);
+  assert.match(brief, /Open your PR against base branch release/);
+  assert.deepEqual(brief.match(/base branch [\w./-]+/g), ["base branch release"],
+    `the brief must name one base branch, the one verify settles against:\n${brief}`);
 });

@@ -29,6 +29,7 @@ Use command argument arrays rather than interpolated shell strings.
     "ticket": "STARK-4919",
     "objective": "The ticket's authorized task",
     "repo": "/absolute/path/to/repository",
+    "baseRef": "main",
     "worktree": "/absolute/path/to/isolated/worktree",
     "provider": "codex",
     "dependsOn": [],
@@ -51,6 +52,11 @@ Use existing tickets; the tool does not create any.
 Dependencies reference tasks in the same engagement.
 Reject cycles and duplicate ticket or worktree ownership.
 Declare `worktree` where Hermod will place the task's provider; see [worktree placement](#worktree-placement).
+`baseRef` is the branch that task's PR targets. Omit it and `init` records origin's default,
+so every task carries a concrete branch either way; `init` refuses rather than leaving it
+unset, and declaring it skips the lookup entirely (the only way to run `init` offline).
+It is what the worker is briefed with in its FIRST packet, what `integrate` grants against
+without any flag, and what `verify` requires the merged PR to have targeted.
 Files are relative paths or directories, without glob patterns.
 Use normalized paths without trailing slashes or dot components.
 The CLI derives repository identity from origin, across checkout aliases.
@@ -80,9 +86,12 @@ the store validated the SHA's shape alone (40 to 64 hex
 characters) while `verify` only requires that base in the merged head's ancestry, so a
 foreign-repository SHA, a typo, or an hour-stale tip all passed and let a diff built
 without the other task's changes squash cleanly whenever git sees no textual conflict.
-The base branch is origin's default branch unless `--base-ref BRANCH` names another, and
-that name is asked of origin (`git ls-remote --symref`), never read from the local
-`refs/remotes/origin/HEAD`. Git writes that pointer at clone and then only on an explicit
+The base branch is the task's declared `baseRef`. `--base-ref BRANCH` still overrides it for
+a one-off, and with neither the name is asked of origin (`git ls-remote --symref`), never
+read from the local `refs/remotes/origin/HEAD`. Declaring it at `init` is what removed the
+terminal mismatch class: a flag typed at grant time is typed long AFTER the worker opened
+its PR, so a forgotten one granted against origin's default and `verify` then refused the
+merge with no way back. Git writes that pointer at clone and then only on an explicit
 `git remote set-head`, so a checkout made before a default-branch rename still names the
 old branch — which usually still exists and is frozen, so every supplied base passes as
 "the current tip" while the refusal text and `baseEvidence.ref` report a branch the
@@ -110,21 +119,31 @@ moved past — a lagging mirror, or a replica behind a rewrite — passes the ti
 floor would have caught the missing merge. Accepted because this fleet fetches GitHub
 directly; revisit if Gru ever grants against a replicated remote.
 The depth probe outlived the floor for the reason above, one local call per grant.
-Both network round trips are bounded by half the evidence freshness window, so a slow one
-fails as a fetch instead of returning evidence the store then calls stale; an observation
-that outlives that window less the same budget fails as the slow observation it was, with
-headroom so evidence squeaking under the limit cannot trip the store's own check a
-millisecond later.
+Both network round trips are bounded by a git transport budget of their own — 30 seconds,
+deliberately NOT derived from the evidence freshness window, which measures worker liveness
+and would otherwise widen for reconcile, sweep and takeover the moment someone raised the
+budget for a slow remote. A slow round trip fails as a fetch instead of returning evidence
+the store then calls stale; an observation that outlives the freshness window less that
+budget fails as the slow observation it was, with headroom so evidence squeaking under the
+limit cannot trip the store's own check a millisecond later.
 The stale-tip refusal names `--base-ref`, the one repair a leader on another branch needs.
 Name the PR's own base branch: a grant cannot be retaken once the task is `integrating`, so
 a grant taken on the wrong branch leaves a task only `recover` or operator takeover can
 move. A packet regenerated while a grant is pending names that branch to the worker.
-The observation fetches into an invocation-owned `refs/gru/integration/<uuid>`
-and removes it, so it neither writes `FETCH_HEAD` nor moves the leader's checkout. A task
+The observation fetches into an invocation-owned `refs/gru/integration/<uuid>` and removes
+it. It also passes `--refmap= --no-tags`: with an explicit refspec git still applies the
+remote's configured refmap opportunistically, so without those a grant — a REFUSED one
+included — would advance `refs/remotes/origin/<branch>` and follow new tags in a ref store
+every linked worktree shares, moving `origin/main` under a Minion mid-rebase. So it writes
+no `FETCH_HEAD`, moves no checkout, and touches no shared ref. `verify` fetches the same way. A task
 that is not in `review`, or an engagement that is not running and reconciled, refuses before
 that fetch rather than after it. `verify` closes the other end: the branch the grant was
 checked against must be the branch the PR actually merged into, so a grant taken at a quiet
-branch's tip cannot discharge a merge into a branch it never read.
+branch's tip cannot discharge a merge into a branch it never read. That is the branch the
+grant was ACTUALLY taken on — the declared `baseRef`, or the `--base-ref` that overrode it —
+and the worker's packet names that same one value, so the brief and the gate cannot
+disagree. Settling against the declaration instead would refuse every overridden grant:
+a PR that matched its own grant exactly, refused terminally.
 
 ## Durable commands
 

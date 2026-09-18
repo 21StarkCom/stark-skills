@@ -280,7 +280,7 @@ function engagement(t: TestContext) {
     limits: ["OPERATOR LIMIT: no publishing"],
     tasks: [{ id: "t", ticket: "STARK-1", objective: "o", repo, worktree: path.join(repo, "wt"),
       provider: "codex", dependsOn: [], files: ["a.ts"], exclusiveResources: [],
-      mergeResources: ["m"], doneWhen: "d", checks: [["true"]] }],
+      mergeResources: ["m"], doneWhen: "d", checks: [["true"]], baseRef: "main" }],
   }));
   return { dir, state, file };
 }
@@ -322,7 +322,7 @@ async function strandedLaunch(t: TestContext, peerRepoOrigin: string) {
     id: "cli", objective: "o", leader: "leader-one", maxWorkers: 1, maxAttempts: 1, maxRecoveries: 0,
     limits: ["OPERATOR LIMIT: no publishing"],
     tasks: [{ id: "t", ticket: "STARK-5030", objective: "o", repo, worktree: declared, provider: "claude",
-      dependsOn: [], files: ["a.ts"], exclusiveResources: [], mergeResources: ["m"], doneWhen: "d", checks: [["true"]] }],
+      dependsOn: [], files: ["a.ts"], exclusiveResources: [], mergeResources: ["m"], doneWhen: "d", checks: [["true"]], baseRef: "main" }],
   }));
   const init = await run(["init", "--file", file, "--state", state], "leader-one");
   assert.equal(init.code, 0, init.error);
@@ -677,4 +677,120 @@ test("gru CLI: integrate fetches the base branch and refuses anything but its cu
 
   // Nothing above left an invocation-owned ref in the leader's checkout.
   assert.equal(git(repo, "for-each-ref", "--format=%(refname)", "refs/gru").trim(), "");
+});
+
+test("gru CLI: the base branch is declared at init, briefed before any grant, and enforced at verify", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gru-cli-baseref-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const state = path.join(dir, "state.sqlite");
+  const repo = fs.mkdtempSync(path.join(dir, "checkout-"));
+  const origin = path.join(repo, "o", "r.git");
+  git(dir, "init", "-q", "--bare", "--initial-branch=main", origin);
+  git(repo, "init", "-q", "--initial-branch=main");
+  git(repo, "remote", "add", "origin", "o/r.git");
+  git(repo, "commit", "-q", "--allow-empty", "-m", "first");
+  git(repo, "push", "-q", "origin", "HEAD:main");
+  // A second branch origin does NOT default to: the case a per-grant flag kept getting wrong.
+  git(repo, "push", "-q", "origin", "HEAD:refs/heads/release");
+  fs.mkdirSync(path.join(dir, "wt"));
+  const spec = (extra: Record<string, unknown>) => ({
+    id: "cli", objective: "o", leader: "leader-one", maxWorkers: 1, maxAttempts: 1, maxRecoveries: 0,
+    limits: ["OPERATOR LIMIT: no publishing"],
+    tasks: [{ id: "t", ticket: "STARK-1", objective: "o", repo, worktree: path.join(dir, "wt"),
+      provider: "codex", dependsOn: [], files: ["a.ts"], exclusiveResources: [], mergeResources: [],
+      doneWhen: "d", checks: [["true"]], ...extra }],
+  });
+  const file = path.join(dir, "engagement.json");
+
+  // Undeclared: init resolves origin's default and RECORDS it, so nothing downstream has to
+  // re-derive it — the re-derivation per grant is what a forgotten flag silently got wrong.
+  fs.writeFileSync(file, JSON.stringify(spec({})));
+  const resolved = await run(["init", "--file", file, "--state", state], "leader-one");
+  assert.equal(resolved.code, 0, resolved.error);
+  assert.equal(JSON.parse(resolved.out).config.tasks[0].baseRef, "main");
+
+  // Declared: taken verbatim, and the FIRST packet names it — before the worker has opened a
+  // PR, which is the whole point. Naming it only after a grant exists names it after the
+  // decision it governs.
+  fs.writeFileSync(file, JSON.stringify(spec({ baseRef: "release" })));
+  const declaredState = path.join(dir, "declared.sqlite");
+  const declared = await run(["init", "--file", file, "--state", declaredState], "leader-one");
+  assert.equal(declared.code, 0, declared.error);
+  assert.equal(JSON.parse(declared.out).config.tasks[0].baseRef, "release");
+  const store = new GruStore(declaredState); t.after(() => store.close());
+  let current = store.reconcile("cli", "leader-one", store.read("cli").revision, {});
+  current = store.reserve("cli", "leader-one", current.revision, "t");
+  const brief = await run(["packet", "--run", "cli", "--task", "t", "--state", declaredState], "leader-one");
+  assert.equal(brief.code, 0, brief.error);
+  assert.match(brief.out, /Open your PR against base branch release/);
+  assert.equal(current.tasks[0].integrationBase, undefined, "no grant exists yet; the brief still names the branch");
+
+  // Granting needs no --base-ref: the declared branch is the default, so the flag can no
+  // longer be forgotten into a silent grant against origin's default.
+  const worker = { id: "codex:t", session: "s", surface: "sf", workspace: "w",
+    provider: "codex" as const, worktree: current.tasks[0].spec.worktree };
+  current = store.attach("cli", "leader-one", current.revision, "t", current.tasks[0].token!, worker);
+  for (const kind of ["ack", "ready"] as const) {
+    current = store.report("cli", "leader-one", current.revision, "t", current.tasks[0].token!, "s", kind, "d");
+  }
+  const tip = git(repo, "rev-parse", "HEAD").trim();
+  const granted = await run(["integrate", "--run", "cli", "--revision", String(store.read("cli").revision),
+    "--task", "t", "--token", store.read("cli").tasks[0].token!, "--base", tip, "--state", declaredState], "leader-one");
+  assert.equal(granted.code, 0, granted.error);
+  assert.equal(JSON.parse(granted.out).tasks[0].baseEvidence.ref, "release");
+
+  // init refuses rather than leaving the field unset, and names the escape hatch: an
+  // engagement with no base branch cannot brief a worker about one.
+  const unreachable = fs.mkdtempSync(path.join(dir, "unreachable-"));
+  git(unreachable, "init", "-q", "--initial-branch=main");
+  git(unreachable, "remote", "add", "origin", "o/absent.git");
+  git(unreachable, "commit", "-q", "--allow-empty", "-m", "first");
+  fs.mkdirSync(path.join(dir, "wt2"));
+  fs.writeFileSync(file, JSON.stringify({ ...spec({}), tasks: [{ ...spec({}).tasks[0],
+    repo: unreachable, worktree: path.join(dir, "wt2") }] }));
+  const refused = await run(["init", "--file", file, "--state", path.join(dir, "refused.sqlite")], "leader-one");
+  assert.equal(refused.code, 2);
+  assert.match(refused.error, /cannot resolve the base branch for t .*Declare "baseRef" on that task/s);
+  // Every repair a refusal names has to be reachable from the command that refused. `init`
+  // rejects `--base-ref` outright, so an unqualified "name it with --base-ref" hands the
+  // operator a command that hard-errors; the hint has to say WHERE each form applies.
+  // This needs a REACHABLE origin with no default branch — an empty one. The case above
+  // fails at the transport instead, which carries no flag hint at all to get wrong.
+  // Origin must still be owner/repo-shaped: `init` resolves repository identity first, and a
+  // bare path origin refuses there instead, never reaching the base-branch lookup.
+  const empty = fs.mkdtempSync(path.join(dir, "empty-origin-"));
+  git(dir, "init", "-q", "--bare", "--initial-branch=main", path.join(empty, "o", "r.git"));
+  git(empty, "init", "-q", "--initial-branch=main");
+  git(empty, "remote", "add", "origin", "o/r.git");
+  git(empty, "commit", "-q", "--allow-empty", "-m", "first");   // local only; origin stays empty
+  fs.mkdirSync(path.join(dir, "wt-empty"));
+  fs.writeFileSync(file, JSON.stringify({ ...spec({}), tasks: [{ ...spec({}).tasks[0],
+    repo: empty, worktree: path.join(dir, "wt-empty") }] }));
+  const noDefault = await run(["init", "--file", file, "--state", path.join(dir, "no-default.sqlite")], "leader-one");
+  assert.equal(noDefault.code, 2);
+  assert.match(noDefault.error, /origin reports no default branch/);
+  assert.doesNotMatch(noDefault.error, /(?<!at init, or )--base-ref(?! on integrate)/);
+  // And the flag that refusal used to name unqualified really is rejected by `init`.
+  const flagged = await run(["init", "--file", file, "--base-ref", "main",
+    "--state", path.join(dir, "flagged.sqlite")], "leader-one");
+  assert.equal(flagged.code, 2);
+  assert.match(flagged.error, /--base-ref applies to integrate, not init/);
+
+  // Two tasks, one repository, one of them declaring a branch. The per-repository cache
+  // exists to save an `ls-remote`, and origin's DEFAULT is a property of the repository —
+  // but a DECLARED baseRef is a property of the TASK. Caching declarations too made a
+  // sibling that declared nothing inherit one, silently and in input order, which is the
+  // wrong-branch brief this whole field exists to prevent. Asserted in BOTH orders: the
+  // defect only showed when the declaring task came first.
+  fs.mkdirSync(path.join(dir, "wt3"));
+  const sibling = { ...spec({}).tasks[0], id: "plain", ticket: "STARK-2", worktree: path.join(dir, "wt3") };
+  const declaring = { ...spec({}).tasks[0], id: "declared", baseRef: "release" };
+  for (const [n, tasks] of [[0, [declaring, sibling]], [1, [sibling, declaring]]] as const) {
+    fs.writeFileSync(file, JSON.stringify({ ...spec({}), tasks }));
+    const mixed = await run(["init", "--file", file, "--state", path.join(dir, `mixed-${n}.sqlite`)], "leader-one");
+    assert.equal(mixed.code, 0, mixed.error);
+    const byId = Object.fromEntries(JSON.parse(mixed.out).config.tasks.map((task: { id: string; baseRef: string }) => [task.id, task.baseRef]));
+    assert.deepEqual(byId, { declared: "release", plain: "main" },
+      "a declared baseRef must not leak to a sibling task in the same repository");
+  }
 });
