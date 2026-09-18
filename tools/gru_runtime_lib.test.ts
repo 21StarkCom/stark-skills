@@ -826,7 +826,9 @@ test("STARK-5052 advanced base rebases, imports progress, verifies last review a
   assert.match(current.tasks[0].report!.message, /^Merged /, "completion overwrites the task snapshot");
   // A resumed/transferred leader reads durable status, not its old in-memory pair.
   const resumed = JSON.parse(execFileSync(process.execPath, [path.join(import.meta.dirname, "gru.ts"), "status",
-    "--state", path.join(dir, "state.sqlite"), "--run", "run"], { encoding: "utf8" })) as Run;
+    "--state", path.join(dir, "state.sqlite"), "--run", "run", "--leader", "leader"], {
+    encoding: "utf8", env: { ...process.env, CODEX_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "", CLAUDE_SESSION_ID: "" },
+  })) as Run;
   const grantIndex = resumed.events.findLastIndex(e => e.task === "task" && e.kind === "integration");
   assert.notEqual(grantIndex, -1);
   const event = resumed.events.slice(grantIndex + 1).findLast(e => e.task === "task" && e.kind === "report:progress");
