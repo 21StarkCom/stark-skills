@@ -984,10 +984,11 @@ test("the integration base is read from the real base branch, and every gap fail
   await assert.rejects(observeBase(task, "f".repeat(40), [], undefined, cleanupThrows), /is not a commit in owner\/repo/);
   assert.equal((await observeBase(task, landed, [], undefined, cleanupThrows)).tip, landed);
 
-  // A shallow clone makes `merge-base --is-ancestor` exit 128 for every merge outside the
-  // depth, which is NOT "not contained": fetch honours the existing depth, so the floor would
-  // report each one missing and refuse forever with "fetch again and grant at the tip" —
-  // advice that cannot work. Name the shallow clone instead of the merge.
+  // A shallow clone cannot answer containment at all: fetch honours the existing depth, so a
+  // merge outside it is either absent (`merge-base --is-ancestor` exits 128) or present with
+  // the graft cutting the walk (exit 1, indistinguishable from an honest "not contained").
+  // Either reading refuses forever with "fetch again and grant at the tip" — advice that
+  // cannot work. One probe up front, before either reading exists; name the clone, not a merge.
   const shallowDir = path.join(dir, "shallow");
   must(["git", "clone", "--depth", "1", `file://${origin}`, shallowDir]);
   const shallowTask = { ...task, spec: { ...task.spec, repo: shallowDir } };
@@ -995,9 +996,39 @@ test("the integration base is read from the real base branch, and every gap fail
   assert.equal(must(["git", "rev-parse", "--is-shallow-repository"], shallowDir), "true");
   await assert.rejects(observeBase(shallowTask, shallowTip, [first], undefined, call),
     new RegExp(`cannot compare verified merge ${first} against ${shallowTip}: .*shallow clone.*--unshallow`));
+  // The merge the shallow clone DOES hold is the case a per-comparison probe misses: it exits
+  // 0, so the old reading recorded a clean containment in a repository whose remaining
+  // comparisons it could not have answered. The probe is per repository, not per merge.
+  await assert.rejects(observeBase(shallowTask, shallowTip, [shallowTip], undefined, call),
+    new RegExp(`cannot compare verified merge ${shallowTip} against ${shallowTip}: .*shallow clone.*--unshallow`));
+  // With no merges to compare there is nothing the depth can hide, so a shallow clone still grants.
+  assert.equal((await observeBase(shallowTask, shallowTip, [], undefined, call)).tip, shallowTip);
   // A complete clone keeps the old reading: an object it does not hold cannot be in the base's
   // history either, so it is simply reported as not contained.
   assert.deepEqual((await observeBase(task, landed, ["f".repeat(40)], undefined, call)).contains, []);
+
+  // Both round trips are bounded by half the freshness window, and BOTH say so. An unexplained
+  // `git exited 124` from the symref read would send the operator hunting a git bug.
+  const timedOutAt = (verb: string): Command => async (argv, cwd, timeoutMs) => argv[0] === "git" && argv[1] === verb
+    ? { code: 124, stdout: "", stderr: "", timedOut: true } : call(argv, cwd, timeoutMs);
+  await assert.rejects(observeBase(task, landed, [], undefined, timedOutAt("ls-remote")),
+    /cannot read origin's default branch .*timed out after 30s, the freshness budget/s);
+  await assert.rejects(observeBase(task, landed, [], "main", timedOutAt("fetch")),
+    /cannot fetch refs\/heads\/main from origin .*timed out after 30s, the freshness budget/s);
+
+  // Only the network calls carry that budget; the ancestry comparisons run on the default
+  // command timeout. Evidence that outlived the store's window must fail as the slow
+  // observation it was, not come back for the store to reject with "fetch the base branch
+  // again" — the same loop the budget exists to prevent, blamed on the wrong command.
+  const slow: Command = async (argv, cwd, timeoutMs) => {
+    const result = await call(argv, cwd, timeoutMs);
+    if (argv[0] === "git" && argv[1] === "merge-base") t.mock.timers.tick(61_000);
+    return result;
+  };
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  try {
+    await assert.rejects(observeBase(task, landed, [first], undefined, slow), /past the 60s window the store accepts/);
+  } finally { t.mock.timers.reset(); }
 
   // An unreachable origin refuses; it never falls back to a local ref that reads as current.
   // Both round trips are covered: resolving the default branch name, and fetching the tip.

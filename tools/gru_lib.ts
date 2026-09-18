@@ -492,11 +492,19 @@ function baseRefusal(run: Run, task: Assignment, base: string, evidence: BaseEvi
   if (evidence.repositoryKey !== expected) return `integration base observed in ${evidence.repositoryKey}, not ${expected}`;
   if (evidence.base !== base) return "integration base evidence does not cover the supplied SHA";
   if (!nonempty(evidence.ref)) return "integration base evidence names no base branch";
-  if (evidence.tip !== base) return `integration base ${base} is not the current ${evidence.ref} tip ${evidence.tip}; fetch again and grant at the tip`;
+  // Name `--base-ref` here, not just the tip. A task whose PR targets a branch other than the
+  // one this evidence was read from hits exactly this refusal, and "grant at the tip" alone
+  // reads as an instruction to grant at THAT branch's tip — which `verify` then refuses against
+  // the PR's real base, terminally, since a grant cannot be retaken once the task is
+  // `integrating`. The refusal has to offer the repair that is actually available.
+  if (evidence.tip !== base) return `integration base ${base} is not the current ${evidence.ref} tip ${evidence.tip}; fetch again and grant at the tip, or pass --base-ref BRANCH if this task's PR targets another branch`;
   // Scope the floor to one base branch: a repository that also takes merges on a release
   // branch must not refuse a perfectly current `main` tip for lacking them.
   const missing = verifiedMerges(run, task, evidence.ref).filter(sha => !evidence.contains.includes(sha));
-  if (missing.length > 0) return `integration base ${base} does not contain verified merge ${missing[0]}; fetch again and grant at the tip`;
+  // "Fetch again" is the repair only while the merge is still on the branch. A revert or a
+  // force-push takes it off, and then no fetch can ever satisfy this floor — say so, rather
+  // than looping the leader through advice that cannot work.
+  if (missing.length > 0) return `integration base ${base} does not contain verified merge ${missing[0]}; fetch again and grant at the tip, unless that merge was reverted or force-pushed off ${evidence.ref}, which no fetch can repair`;
   return null;
 }
 

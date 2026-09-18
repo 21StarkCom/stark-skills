@@ -384,7 +384,10 @@ export function packet(run: Run, task: Assignment): string {
     // and `/minion`'s rule (report anything not in your packet) reaches only workers that ran the skill.
     "Report any exclusive resource not listed in this packet to Gru before touching it.",
     ...(task.integrationBase ? [
-      `Pending integration base: ${task.integrationBase}. Existing report: ${JSON.stringify(task.report ?? null)}`,
+      // Name the branch, not just the SHA: `verify` now refuses a PR whose base branch is not
+      // the one the grant was read from, and that refusal is terminal. A worker resuming an
+      // existing PR is the one who can still retarget it, and this is the only brief it gets.
+      `Pending integration base: ${task.integrationBase}${task.baseEvidence ? ` on base branch ${task.baseEvidence.ref}, which your PR must target` : ""}. Existing report: ${JSON.stringify(task.report ?? null)}`,
       "Before new work, ask Gru to inspect the existing PR's merge outcome. Do not duplicate that PR.",
       "Gru can only settle that merge before you attach, so assume it did not: resume the existing PR,",
       "then send READY and wait for your own integration grant. Gru refuses verification while you hold the task.",
@@ -613,7 +616,11 @@ const NETWORK_BUDGET_MS = Math.floor(OBSERVATION_FRESHNESS_MS / 2);
 async function defaultBaseRef(repoDir: string, call: Command): Promise<string> {
   const head = await call(["git", "ls-remote", "--symref", "origin", "HEAD"], repoDir, NETWORK_BUDGET_MS);
   if (head.code !== 0) {
-    throw new Error(`cannot read origin's default branch in ${repoDir}: ${(head.stderr || head.stdout).trim() || `git exited ${head.code}`}; name the base branch with --base-ref`);
+    // This round trip is bounded like the fetch below, so it fails like the fetch below:
+    // an unexplained `git exited 124` would read as a git bug rather than the budget.
+    throw new Error(`cannot read origin's default branch in ${repoDir}: ${head.timedOut
+      ? `timed out after ${NETWORK_BUDGET_MS / 1000}s, the freshness budget this evidence has to fit in`
+      : (head.stderr || head.stdout).trim() || `git exited ${head.code}`}; name the base branch with --base-ref`);
   }
   // `ref: refs/heads/main\tHEAD`, then the SHA line. An origin with no commits yet reports
   // neither, so an empty match is a real absence rather than a parse failure.
@@ -654,27 +661,36 @@ export async function observeBase(task: Assignment, base: string, priorMerges: s
     const resolved = await call(["git", "rev-parse", "--verify", "--quiet", `${base}^{commit}`], repoDir);
     if (resolved.code !== 0 || resolved.stdout.trim() !== base) throw new Error(`integration base ${base} is not a commit in ${repositoryKey}`);
     const contains: string[] = [];
-    // Resolved once, and only when a 128 actually needs interpreting.
-    let shallow: boolean | undefined;
-    for (const sha of [...new Set(priorMerges)]) {
+    const merges = [...new Set(priorMerges)];
+    // A shallow clone cannot answer containment AT ALL, and the two ways it fails to are not
+    // distinguishable after the fact. `git fetch` honours the existing depth, so a merge outside
+    // it is either absent — `merge-base --is-ancestor` exits 128 — or present while the graft
+    // cuts the walk between it and the base, which exits 1: an answer indistinguishable from an
+    // honest "not contained". Reading only the 128 half left the 1 half refusing with
+    // "does not contain verified merge X; fetch again and grant at the tip", the same
+    // cannot-work advice the 128 branch exists to avoid. One probe up front, before either
+    // reading can be produced, is both simpler and complete. (In a COMPLETE clone 128 IS an
+    // answer: the fetch above brought the base branch with its history, so a merge this
+    // repository still lacks cannot be in the base's ancestry either — not contained.)
+    if (merges.length > 0 && (await checked(call, ["git", "rev-parse", "--is-shallow-repository"], repoDir)) === "true") {
+      throw new Error(`cannot compare verified merge ${merges[0]} against ${base}: ${repoDir} is a shallow clone, so containment cannot be answered there; run git fetch --unshallow there`);
+    }
+    for (const sha of merges) {
       const ancestor = await call(["git", "merge-base", "--is-ancestor", sha, base], repoDir);
-      // 0 contained, 1 not contained. Anything but 128 beyond those (a timeout, a signal) is a
-      // failed observation, so refuse rather than record silence as a clean comparison.
+      // 0 contained, 1 not contained, 128 an object this complete clone does not hold, which
+      // cannot be in the base's ancestry either. Anything else (a timeout, a signal) is a failed
+      // observation, so refuse rather than record silence as a clean comparison.
       if (ancestor.code === 0) { contains.push(sha); continue; }
-      if (ancestor.code === 1) continue;
-      if (ancestor.code !== 128) {
-        throw new Error(`cannot compare verified merge ${sha} against ${base}: ${(ancestor.stderr || ancestor.stdout).trim() || `git exited ${ancestor.code}`}`);
-      }
-      // 128 is an unknown object, and it means two different things. In a COMPLETE clone it is
-      // an answer: the fetch above brought the base branch with its history, so a merge this
-      // repository still lacks cannot be in the base's ancestry either — not contained. In a
-      // SHALLOW clone it is no answer at all: fetch honours the existing depth, so every older
-      // merge is absent and the floor would report each one missing, refusing forever with
-      // "fetch again and grant at the tip" — advice that cannot work. Say which it is instead.
-      shallow ??= (await checked(call, ["git", "rev-parse", "--is-shallow-repository"], repoDir)) === "true";
-      if (shallow) {
-        throw new Error(`cannot compare verified merge ${sha} against ${base}: ${repoDir} is a shallow clone and does not hold it; run git fetch --unshallow there`);
-      }
+      if (ancestor.code === 1 || ancestor.code === 128) continue;
+      throw new Error(`cannot compare verified merge ${sha} against ${base}: ${(ancestor.stderr || ancestor.stdout).trim() || `git exited ${ancestor.code}`}`);
+    }
+    // Only the two network calls carry NETWORK_BUDGET_MS; everything after the stamp runs on the
+    // default command timeout. Evidence that has already outlived the store's freshness window
+    // comes back as "integration base evidence is stale; fetch the base branch again" — the very
+    // loop that budget exists to prevent, now blamed on the fetch. Fail as what it was instead.
+    const age = Date.now() - Date.parse(observedAt);
+    if (age >= OBSERVATION_FRESHNESS_MS) {
+      throw new Error(`integration base observation of ${branch} in ${repoDir} took ${Math.round(age / 1000)}s, past the ${OBSERVATION_FRESHNESS_MS / 1000}s window the store accepts; the repository or its origin is too slow to grant against right now`);
     }
     return { observedAt, repositoryKey, ref: branch, tip, base, contains, checks: [...BASE_CHECKS] };
   } finally {
