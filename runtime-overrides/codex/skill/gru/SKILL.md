@@ -163,11 +163,12 @@ repository holds, is that branch's current tip, and contains every merge this
 engagement already verified there. The refusal names the current tip. Pass
 `--base-ref BRANCH` when the PR does not target origin's default branch, which is asked
 of origin rather than read from this checkout's `refs/remotes/origin/HEAD`. An unreachable
-origin, a branch origin does not have, and an origin reporting no default branch each
-refuse and say which; none ever falls back to a local ref that reads exactly like a
-current one.
+origin, a branch origin does not have, an origin reporting no default branch, and a shallow
+checkout each refuse and say which; none ever falls back to a local ref that reads exactly
+like a current one.
 Merge into the branch the grant was checked against: `verify` refuses a PR whose base
-branch is not the one `integrate` read the tip from.
+branch is not the one `integrate` read the tip from, and a grant cannot be retaken once the
+task is `integrating`, so name the PR's own base branch the first time.
 After merging, independently inspect the actual PR and merge ancestry.
 Rerun completion checks against the fetched base in an isolated verifier.
 Confirm review evidence covers the final PR head.

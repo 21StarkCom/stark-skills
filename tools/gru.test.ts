@@ -423,6 +423,23 @@ test("gru CLI: --limits-file is refused on every verb except resume", async t =>
   assert.deepEqual(JSON.parse(after.out).config.limits, ["OPERATOR LIMIT: no publishing"]);
 });
 
+test("gru CLI: --base and --base-ref are refused on every verb except integrate", async t => {
+  const { state, file } = engagement(t);
+  assert.equal((await run(["init", "--file", file, "--state", state], "leader-one")).code, 0);
+  // Same trap as --limits-file: parseArgs registers one option set for all verbs, so a
+  // --base-ref the verb never reads exits 0 having done nothing. On `verify` that reads as a
+  // grant checked against the named branch while the recorded one came from origin's default.
+  for (const flag of ["--base", "--base-ref"]) {
+    for (const verb of ["status", "reconcile", "reserve", "verify", "stop"]) {
+      const value = flag === "--base" ? "a".repeat(40) : "release";
+      const r = await run([verb, "--run", "cli", "--state", state, "--revision", "0", "--task", "t",
+        "--token", "t", "--pr", "1", "--review", "1", flag, value], "leader-one");
+      assert.equal(r.code, 2, `${verb} accepted ${flag}`);
+      assert.match(r.error, new RegExp(`\\${flag} applies to integrate, not ${verb}`));
+    }
+  }
+});
+
 test("gru CLI: resume rejects a missing, malformed, or empty --limits-file path", async t => {
   const { dir, state, file } = engagement(t);
   const init = await run(["init", "--file", file, "--state", state], "leader-one");

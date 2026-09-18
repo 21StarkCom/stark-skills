@@ -298,7 +298,12 @@ const completeChecks = (checks: string[], required: readonly string[]) =>
 const reservationResources = (task: Assignment) => [`ticket:${task.spec.ticket}`, `tree:${path.resolve(task.spec.worktree)}`,
   ...task.spec.exclusiveResources.map(r => `exclusive:${r}`)];
 const workerResources = (worker: Worker) => [`worker:${worker.id}`, `session:${worker.provider}:${worker.session}`, `surface:${worker.surface}`];
-export const fresh = (o?: Pick<Observation, "observedAt">) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= 60_000 && Date.parse(o.observedAt) <= Date.now() + 5_000);
+/** How old an observation may be before the store refuses it. Exported because the gatherers
+ * have to fit inside it: a git or Hermod round trip left on the 300 s default command timeout
+ * can return evidence this predicate then calls stale, and "observe it again" only re-runs the
+ * same slow command. */
+export const OBSERVATION_FRESHNESS_MS = 60_000;
+export const fresh = (o?: Pick<Observation, "observedAt">) => Boolean(o && Date.now() - Date.parse(o.observedAt) <= OBSERVATION_FRESHNESS_MS && Date.parse(o.observedAt) <= Date.now() + 5_000);
 
 /** A retained merge is settleable only while no replacement owns the work, or while
  * this task's own integration is live or frozen. `attach` is the ownership line:
@@ -315,6 +320,19 @@ export function verificationReady(task: Assignment): task is Assignment & { inte
     (task.phase === "integrating" || task.phase === "pending" || task.phase === "reserved" ||
       (task.phase === "stopped" && task.stoppedFrom === "integrating")));
 }
+/** The one precondition `integrate` applies, shared with the CLI's pre-fetch refusal the way
+ * `verificationReady` is shared with `verify`'s. Hand-copying it is the drift that matters:
+ * the copy exists so a grant the store was always going to refuse never spends a network
+ * round trip or writes objects into the leader's checkout, and a copy that says something
+ * narrower silently restores that cost, while a copy that says something wider refuses a
+ * grant the store would have taken. */
+export const integrationReady = (run: Run, task: Assignment): boolean =>
+  run.mode === "running" && run.reconciled && task.phase === "review";
+/** A git object name as every Gru surface spells it. One predicate, because `observeBase` and
+ * `GruStore.integrate` have to agree exactly: a shape the observation accepts and the store
+ * refuses costs a pointless fetch, and the reverse admits a base nothing ever looked at. */
+export const isRevision = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-f]{40,64}$/.test(value);
 
 /** Alfred's completion states: the one predicate `complete` and `sweep` both apply. */
 export const ticketClosed = (state: string) => state === "done" || state === "Closed";
@@ -452,7 +470,11 @@ function attachRefusal(run: Run, task: Assignment, worker: Worker): string | nul
  * which no amount of re-fetching can repair.
  * A grant recorded before `baseEvidence` existed has no ref to compare, so it counts: fail closed. */
 export function verifiedMerges(run: Run, task: Assignment, ref?: string): string[] {
-  return run.tasks.filter(t => t !== task && t.phase === "done" && t.evidence &&
+  // Exclude the subject by id, not by object reference: the CLI gathers the tested set from
+  // its own read of the run and `baseRefusal` recomputes the required set inside the store's
+  // transaction, so the two see structurally equal tasks from different parses. A reference
+  // compare there would put a task's own merge in its own floor.
+  return run.tasks.filter(t => t.spec.id !== task.spec.id && t.phase === "done" && t.evidence &&
     repositoryKey(t.spec) === repositoryKey(task.spec) &&
     (ref === undefined || t.baseEvidence === undefined || t.baseEvidence.ref === ref))
     .map(t => t.evidence!.merge);
@@ -871,8 +893,8 @@ export class GruStore {
   integrate(id: string, leader: string, revision: number, taskId: string, token: string, base: string, evidence: BaseEvidence): Run {
     return this.transaction(id, leader, revision, run => {
       const task = this.task(run, taskId, token);
-      requireValue(run.mode === "running" && run.reconciled && task.phase === "review", "task is not ready for integration");
-      requireValue(/^[0-9a-f]{40,64}$/.test(base), "integration requires an observed base SHA");
+      requireValue(integrationReady(run, task), "task is not ready for integration");
+      requireValue(isRevision(base), "integration requires an observed base SHA");
       // The shape check above admits a foreign-repository SHA, a typo, and an hour-stale tip
       // alike; only the observation can tell them from the tip this repository has right now.
       const refusal = baseRefusal(run, task, base, evidence);
@@ -888,7 +910,7 @@ export class GruStore {
       const task = this.task(run, taskId, token);
       requireValue(run.mode === "running" && run.reconciled && verificationReady(task), "integration and independent verification required");
       requireValue(evidence.base === task.integrationBase, "integration base changed; rebase and reverify");
-      for (const sha of [evidence.head, evidence.base, evidence.merge]) requireValue(/^[0-9a-f]{40,64}$/.test(sha), "invalid evidence revision");
+      for (const sha of [evidence.head, evidence.base, evidence.merge]) requireValue(isRevision(sha), "invalid evidence revision");
       requireValue(nonempty(evidence.pr) && nonempty(evidence.review) && nonempty(evidence.verifiedAt), "PR, review, and verification evidence required");
       requireValue(ticketClosed(evidence.ticketState), "repository completion milestone not recorded in Alfred");
       requireValue(evidence.checks.length === task.spec.checks.length, "missing completion checks");

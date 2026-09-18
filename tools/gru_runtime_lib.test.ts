@@ -984,6 +984,21 @@ test("the integration base is read from the real base branch, and every gap fail
   await assert.rejects(observeBase(task, "f".repeat(40), [], undefined, cleanupThrows), /is not a commit in owner\/repo/);
   assert.equal((await observeBase(task, landed, [], undefined, cleanupThrows)).tip, landed);
 
+  // A shallow clone makes `merge-base --is-ancestor` exit 128 for every merge outside the
+  // depth, which is NOT "not contained": fetch honours the existing depth, so the floor would
+  // report each one missing and refuse forever with "fetch again and grant at the tip" —
+  // advice that cannot work. Name the shallow clone instead of the merge.
+  const shallowDir = path.join(dir, "shallow");
+  must(["git", "clone", "--depth", "1", `file://${origin}`, shallowDir]);
+  const shallowTask = { ...task, spec: { ...task.spec, repo: shallowDir } };
+  const shallowTip = must(["git", "rev-parse", "HEAD"], shallowDir);
+  assert.equal(must(["git", "rev-parse", "--is-shallow-repository"], shallowDir), "true");
+  await assert.rejects(observeBase(shallowTask, shallowTip, [first], undefined, call),
+    new RegExp(`cannot compare verified merge ${first} against ${shallowTip}: .*shallow clone.*--unshallow`));
+  // A complete clone keeps the old reading: an object it does not hold cannot be in the base's
+  // history either, so it is simply reported as not contained.
+  assert.deepEqual((await observeBase(task, landed, ["f".repeat(40)], undefined, call)).contains, []);
+
   // An unreachable origin refuses; it never falls back to a local ref that reads as current.
   // Both round trips are covered: resolving the default branch name, and fetching the tip.
   fs.renameSync(origin, path.join(dir, "origin-moved.git"));

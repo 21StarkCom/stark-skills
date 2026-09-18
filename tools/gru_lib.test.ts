@@ -177,6 +177,26 @@ test("an integration grant is checked against the repository's base branch, not 
   assert.ok(store.owned("demo", "one").includes("merge:/repo"));
 });
 
+test("verifiedMerges excludes the subject task by id, not by object identity", t => {
+  const { store } = fixture(t);
+  let run = start(store, observe(store, store.create(config())), "one");
+  run = report(store, run, "one", "ack"); run = report(store, run, "one", "ready");
+  run = grant(store, run, "one", BASE);
+  const merged = landedProof(run).merge;
+  run = store.complete("demo", "leader-one", run.revision, "one", run.tasks[0].token!, landedProof(run));
+  // The CLI gathers the tested set from its own read of the run; `baseRefusal` recomputes the
+  // required set inside the store's transaction, from a separate JSON.parse. The two see
+  // structurally equal tasks that are different objects, so a `!==` compare would put a task's
+  // own merge into its own containment floor — a refusal naming a merge no fetch can add.
+  const reparsed = JSON.parse(JSON.stringify(run)) as Run;
+  assert.notEqual(reparsed.tasks[0], run.tasks[0]);
+  assert.equal(reparsed.tasks[0].spec.id, run.tasks[0].spec.id);
+  assert.equal(reparsed.tasks[0].evidence!.merge, merged);
+  assert.ok(!verifiedMerges(run, reparsed.tasks[0]).includes(merged), "a task's own merge is never its own floor");
+  // A different task in the same repository still has to contain it.
+  assert.deepEqual(verifiedMerges(run, reparsed.tasks[1]), [merged]);
+});
+
 test("a grant's base must contain the merges this engagement verified on that same base branch", t => {
   /** Task one verified with `ref` as its base branch; task two ready for its own grant. */
   const afterFirstMerge = (store: GruStore, ref: string): Run => {

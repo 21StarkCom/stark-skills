@@ -89,7 +89,13 @@ engagement never merges into. Pass `--base-ref` whenever the task's PR does not 
 origin's default branch; `verify` refuses a grant whose branch is not the PR's base.
 The check is fail-closed: an unreachable origin, a branch origin does not have, and an
 origin that reports no default branch each refuse and say which, rather than falling back
-to a local ref. The observation fetches into an invocation-owned `refs/gru/integration/<uuid>`
+to a local ref. A shallow checkout refuses by name too: `git fetch` honours the existing
+depth, so the ancestry comparison cannot see merges outside it, and reporting them missing
+would loop the leader through "fetch again" forever — run `git fetch --unshallow` there.
+Both network round trips are bounded by half the evidence freshness window, so a slow fetch
+fails as a fetch instead of returning evidence the store then calls stale.
+Name the PR's own base branch: a grant cannot be retaken once the task is `integrating`, so
+a grant taken on the wrong branch leaves a task only `recover` or operator takeover can move. The observation fetches into an invocation-owned `refs/gru/integration/<uuid>`
 and removes it, so it neither writes `FETCH_HEAD` nor moves the leader's checkout. A task
 that is not in `review`, or an engagement that is not running and reconciled, refuses before
 that fetch rather than after it. `verify` closes the other end: the branch the grant was
