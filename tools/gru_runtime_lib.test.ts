@@ -607,6 +607,38 @@ test("STARK-5052 mutation sweep detects every reverted contract clause", {
     t.diagnostic(`KILLED: ${name}: ${from}`);
   }
   t.diagnostic(`${guards.length}/${guards.length} behavioral mutations rejected`);
+  const rebriefPattern = "STARK-5052 rebrief preserves";
+  const rebriefBaseline = execute(rebriefPattern);
+  assert.equal(rebriefBaseline.status, 0, rebriefBaseline.stdout + rebriefBaseline.stderr);
+  const runtimeFile = path.join(dir, "tools/gru_runtime_lib.ts"), runtime = fs.readFileSync(runtimeFile, "utf8");
+  const grantArm = 'task.phase === "integrating" || (["stopping", "stopped"].includes(task.phase) && task.stoppedFrom === "integrating")';
+  for (const replacement of ["false", "true", 'task.phase === "integrating"']) {
+    assert.ok(runtime.includes(grantArm));
+    fs.writeFileSync(runtimeFile, runtime.replace(grantArm, replacement));
+    const result = execute(rebriefPattern);
+    fs.writeFileSync(runtimeFile, runtime);
+    assert.equal(result.status, 1, `rebrief mutation survived: ${replacement}\n${result.stdout}${result.stderr}`);
+    assert.match(result.stdout, /AssertionError/);
+    t.diagnostic(`KILLED: current-grant rebrief guard -> ${replacement}`);
+  }
+  t.diagnostic("3/3 rebrief mutations rejected");
+});
+
+test("STARK-5052 rebrief preserves current and frozen grants without sending replacement READY instructions", () => {
+  const r = run();
+  for (const phase of ["integrating", "stopping", "stopped"] as const) {
+    const task = { ...assignment(), phase, ...(phase === "integrating" ? {} : { stoppedFrom: "integrating" as const }) };
+    const brief = packet(r, task);
+    assert.match(brief, /This is your existing integration grant/);
+    assert.doesNotMatch(brief, /then send READY and wait for your own integration grant|Gru refuses verification while you hold/);
+  }
+  for (const phase of ["pending", "reserved", "intake", "working", "review", "stopping", "stopped"] as const) {
+    const task = { ...assignment(), phase, ...(["stopping", "stopped"].includes(phase) ? { stoppedFrom: "working" as const } : {}) };
+    const brief = packet(r, task);
+    assert.match(brief, /retained grant from a previous attempt/);
+    assert.match(brief, /then send READY and wait for your own integration grant/);
+    assert.doesNotMatch(brief, /This is your existing integration grant/);
+  }
 });
 
 test("completed idle workers retire through Hermod without deleting session worktrees", async () => {

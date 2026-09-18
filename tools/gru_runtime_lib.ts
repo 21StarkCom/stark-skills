@@ -418,9 +418,14 @@ export function packet(run: Run, task: Assignment): string {
       // The SHA only: the branch is named once, by the line above, which reads the same
       // `targetBaseRef` this grant set. A second naming here could only ever disagree with it.
       `Pending integration base: ${task.integrationBase}. Existing report: ${JSON.stringify(task.report ?? null)}`,
-      "Before new work, ask Gru to inspect the existing PR's merge outcome. Do not duplicate that PR.",
-      "Gru can only settle that merge before you attach, so assume it did not: resume the existing PR,",
-      "then send READY and wait for your own integration grant. Gru refuses verification while you hold the task.",
+      ...(task.phase === "integrating" || (["stopping", "stopped"].includes(task.phase) && task.stoppedFrom === "integrating") ? [
+        "This is your existing integration grant. Do not request a second grant or send READY.",
+        "Honor cancellation or a pending reconnect before continuing; report the final head and review id as progress.",
+      ] : [
+        "This is a retained grant from a previous attempt. Before new work, ask Gru to inspect the existing PR's merge outcome.",
+        "Do not duplicate that PR. Gru can settle the prior merge before you attach; after attachment, resume the existing PR,",
+        "then send READY and wait for your own integration grant. Gru refuses verification while you hold the replacement task.",
+      ]),
     ] : []),
     `Dependencies: ${JSON.stringify(task.spec.dependsOn)}`,
     `Exclusive resources: ${JSON.stringify(task.spec.exclusiveResources)}`,
@@ -436,7 +441,7 @@ export function packet(run: Run, task: Assignment): string {
     "Fetch and rebase onto the current base; report HEAD and git status.",
     "Implement through a draft PR. Run the required tests and /code-review xhigh --fix gate.",
     "Post all review findings on the PR. Fix or answer every finding.",
-    "Send READY with PR, head, review evidence, exact commands, and actual output.",
+    "Before receiving your own integration grant, send READY with PR, head, review evidence, exact commands, and actual output.",
     "Wait for Gru's assignment-specific integration grant before merging.",
     "Before every merge, after the grant: fetch and rebase onto the PR's own base branch's current tip,",
     "even if you observed no other merge. Your merged head must contain the granted base SHA; check it with",

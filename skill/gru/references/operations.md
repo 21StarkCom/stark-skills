@@ -449,6 +449,9 @@ Compare GitHub's actual PR head to that last reported head and pass the last rev
 to `verify --review`. There is no `--head` flag: the verifier reads the PR head itself.
 If the pair is stale, stop before merge and obtain the current evidence. Neither a
 missing granted-base ancestor nor a wrong-head review can be repaired after merging.
+Re-briefing an integrating worker preserves its existing grant and progress-report rule,
+including when cancellation froze that integration. Replacement-only READY instructions
+apply to a retained previous-attempt grant, not an existing grant for the current attempt.
 Use the repository's squash-merge path and inspect the result.
 Never rely on a merge command's exit code alone.
 
