@@ -382,6 +382,9 @@ const inlined = (value: string) => value.split(/\r\n|\r|\n/).join("\n  ");
 export function packet(run: Run, task: Assignment): string {
   if (!task.token) throw new Error("reserve this task before generating its dispatch packet");
   const invocation = task.spec.provider === "codex" ? "$minion" : "/minion";
+  // One reading, used by the guard and the text it guards: two calls could never disagree
+  // today, but they are the seam where a future conditional reading would split silently.
+  const baseRef = targetBaseRef(task);
   return [
     `Run ${invocation} before intake if available. You are a Minion reporting to Gru.`,
     `Assignment: ${run.config.id}/${task.spec.id}; token: ${task.token}`,
@@ -409,7 +412,7 @@ export function packet(run: Run, task: Assignment): string {
     // SAME reading `verifyCompletion` settles against, so the brief and the gate cannot name
     // different branches: naming the declaration here while a `--base-ref` grant was taken on
     // another branch put two contradictory instructions in one packet.
-    ...(targetBaseRef(task) ? [`Open your PR against base branch ${targetBaseRef(task)}, and rebase onto its current tip. Gru cannot verify a merge into any other branch.`] : []),
+    ...(baseRef ? [`Open your PR against base branch ${baseRef}, and rebase onto its current tip. Gru cannot verify a merge into any other branch.`] : []),
 
     ...(task.integrationBase ? [
       // The SHA only: the branch is named once, by the line above, which reads the same
@@ -643,16 +646,25 @@ const NETWORK_BUDGET_MS = 30_000;
  * silently widened the window in which a stale peer observation still counts as live evidence
  * for reconcile, sweep and takeover. */
 const OBSERVATION_DEADLINE_MS = OBSERVATION_FRESHNESS_MS - NETWORK_BUDGET_MS;
-if (OBSERVATION_DEADLINE_MS <= 0) throw new Error("gru: the git network budget must leave room inside the observation freshness window");
 /** Flags that make a fetch into an invocation-owned ref touch NOTHING else in the ref store.
  * `--no-write-fetch-head` alone is not enough, and the gap is not theoretical: with an explicit
  * refspec git STILL applies the remote's configured refmap opportunistically, so
  * `git fetch --no-write-fetch-head origin refs/heads/main:refs/gru/.../base` also reports
  * `abc..def main -> origin/main`, and auto-follows any new tags. A linked worktree shares the
- * ref store with its main checkout, so a grant observation — including a REFUSED one, which is
- * the common case — would move `origin/main` under a Minion in the middle of
- * `git rebase origin/main`. `--refmap=` empties the map; `--no-tags` stops the tag follow. */
-const PRIVATE_FETCH = ["--no-write-fetch-head", "--refmap=", "--no-tags"] as const;
+ * ref store with its main checkout, so a fetch here can move `origin/main` under a Minion in
+ * the middle of `git rebase origin/main`. `--refmap=` empties the map. */
+export const PRIVATE_FETCH = ["--no-write-fetch-head", "--refmap="] as const;
+/** The grant observation adds `--no-tags`. It runs on EVERY `integrate` attempt, and the
+ * common outcome is a refusal, so it must leave the ref store exactly as it found it —
+ * including the tag namespace, which `--refmap=` alone does not cover.
+ *
+ * `verifyCompletion` deliberately does NOT add it: its declared checks run against the fetched
+ * base in a disposable worktree, and a check that derives a version with `git describe --tags`
+ * — this fleet cuts tagged releases — reports `No names found, cannot describe anything` when
+ * the tags were never fetched, surfacing as a failed completion check with nothing pointing at
+ * the fetch flags. Verification is a deliberate, completing operation; following the tags
+ * reachable from the branch it already fetched is what a plain `git fetch` would have done. */
+export const GRANT_FETCH = [...PRIVATE_FETCH, "--no-tags"] as const;
 
 /** The base branch to read the tip from when the leader names none: origin's default branch,
  * asked of ORIGIN. Not the local `refs/remotes/origin/HEAD`: git writes that pointer once at
@@ -718,7 +730,11 @@ export async function observeBase(task: Assignment, base: string, ref?: string,
   // a grant cannot be retaken once the task is `integrating` — so a shallow clone discovered at
   // verification time strands a merged PR behind a check that can never pass. One local probe
   // per grant, before any network call; it is not the deleted containment floor returning.
-  if (await checked(call, ["git", "rev-parse", "--is-shallow-repository"], repoDir) === "true") {
+  // `checked` would surface a bare `git failed (128): ...` here, the one unnamed refusal in a
+  // function whose every other failure says which fact it could not establish. Name it.
+  const depth = await call(["git", "rev-parse", "--is-shallow-repository"], repoDir);
+  if (depth.code !== 0) throw new Error(`cannot read clone depth in ${repoDir}: ${(depth.stderr || depth.stdout).trim() || `git exited ${depth.code}`}`);
+  if (depth.stdout.trim() === "true") {
     throw new Error(`integration base cannot be granted in ${repoDir}: it is a shallow clone, and verification there cannot answer ancestry after the merge; run git fetch --unshallow there first`);
   }
   checks.push("checkout can answer ancestry after the merge");
@@ -731,11 +747,11 @@ export async function observeBase(task: Assignment, base: string, ref?: string,
     throw new Error(`invalid base branch name ${JSON.stringify(branch)}`);
   }
   // Each invocation owns its ref, so concurrent grants in one repository cannot overwrite
-  // each other's fetch, and PRIVATE_FETCH keeps the rest of the ref store out of it.
+  // each other's fetch, and GRANT_FETCH keeps the rest of the ref store out of it.
   const temp = `refs/gru/integration/${randomUUID()}/base`;
   try {
     const observedAt = new Date().toISOString();
-    const fetched = await call(["git", "fetch", ...PRIVATE_FETCH, "origin", `refs/heads/${branch}:${temp}`], repoDir, NETWORK_BUDGET_MS);
+    const fetched = await call(["git", "fetch", ...GRANT_FETCH, "origin", `refs/heads/${branch}:${temp}`], repoDir, NETWORK_BUDGET_MS);
     if (fetched.code !== 0) {
       throw new Error(`cannot fetch refs/heads/${branch} from origin in ${repoDir}: ${fetched.timedOut
         ? `timed out after ${NETWORK_BUDGET_MS / 1000}s, the freshness budget this evidence has to fit in`
@@ -821,18 +837,22 @@ async function inspectCompletion(task: Assignment, prNumber: number,
   // "granted on <declaration>" about a grant taken somewhere else.
   const declared = targetBaseRef(task);
   if (declared !== undefined && declared !== pr.base.ref) {
-    // Name the repair, as every other refusal here does — and be honest about its shape:
-    // `integrate` only grants from `review` and refuses a second call once the phase is
-    // `integrating`, so a grant already taken cannot be retaken. The task needs `recover`
-    // (an observed-dead worker) or operator takeover. Retarget the PR when it is still the
-    // PR that is wrong; that is the repair available without touching the store.
+    // Be honest about the repair instead of naming one that refuses in the state this fires
+    // in. This branch is reached only for an ALREADY MERGED PR (asserted above), so there is
+    // nothing left to retarget; `integrate` refuses a second grant once the phase is
+    // `integrating`; and `recover`/`takeover` are unreachable while the worker is live —
+    // `recover` demands an observed-dead worker and `takeover` an unknown one, and after a
+    // successful merge the worker is normally live and idle. Even recovering first does not
+    // help: a fresh grant would record the base branch's CURRENT tip, which contains the
+    // merge and therefore is not an ancestor of the reviewed head this check requires. So say
+    // that it is terminal rather than sending an operator around a loop of refusals.
     // Name the DECLARATION only when it differs from the branch actually granted, and as
     // context rather than as the requirement: a `--base-ref` grant makes the two diverge
     // legitimately, and reporting the declaration as "the branch its PR had to target" would
     // describe a rule this check no longer applies.
     throw new Error(`integration base was granted on ${declared}, but PR ${prNumber} merged into ${pr.base.ref}${
       task.spec.baseRef && task.spec.baseRef !== declared ? ` (the task declares baseRef ${task.spec.baseRef}; this grant overrode it with --base-ref ${declared})` : ""
-    }. A grant cannot be retaken once the task is integrating, so this one needs recovery or operator takeover`);
+    }. The PR is already merged, so nothing is left to retarget, and a grant cannot be retaken once the task is integrating; re-granting after recovery would record a base the reviewed head does not contain. This task cannot be settled in band — escalate to the operator`);
   }
   const noReviews = async () => {
     const pages = JSON.parse(await checked(call, ["gh", "api", `repos/${repo}/pulls/${prNumber}/reviews`, "--paginate", "--slurp"], repoDir));

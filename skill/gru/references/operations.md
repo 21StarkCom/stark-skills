@@ -95,8 +95,10 @@ merge with no way back. Git writes that pointer at clone and then only on an exp
 `git remote set-head`, so a checkout made before a default-branch rename still names the
 old branch — which usually still exists and is frozen, so every supplied base passes as
 "the current tip" while the refusal text and `baseEvidence.ref` report a branch the
-engagement never merges into. Pass `--base-ref` whenever the task's PR does not target
-origin's default branch; `verify` refuses a grant whose branch is not the PR's base.
+engagement never merges into. Declare `baseRef` whenever the task's PR does not target
+origin's default branch; reach for `--base-ref` only when one grant has to deviate from
+that declaration. `verify` refuses a PR whose base branch is not the one its grant was
+taken on, and that refusal lands after the merge, where nothing can repair it.
 The check is fail-closed: an unreachable origin, a branch origin does not have, and an
 origin that reports no default branch each refuse and say which, rather than falling back
 to a local ref. A shallow checkout refuses too, by name, on one local probe before any
