@@ -51,13 +51,13 @@ gaps as it says. Three things are yours on top of it, and each of them exists
 because there is no leader:
 
 - **Nobody sequences your merge.** Gru holds one `idun gh pr-merge` per repo at
-  a time; two Agneses in one repo have no such referee. So handle your own
-  contention: if `pr-merge` refuses — a stale base, a merge commit from main, a
-  check that needs a fresh head — **rebase and rerun it**. Never `--force`, and
-  never wait on a human for what a rebase fixes.
+  a time; two Agneses in one repo have no such referee. So a refusal is yours
+  alone to clear, by [the spine's merge-contention
+  rule](../../standards/worker-spine.md#4-the-spine) — and never by waiting on
+  a human for what a rebase fixes.
 - **Nobody reads your scrollback.** It dies with you at stand down, so the PR
-  comment carrying the re-run live check (the spine's step 5) is the only copy
-  of your evidence that survives. Post it before you merge.
+  comment [the spine](../../standards/worker-spine.md)'s step 5 requires is the
+  only copy of your evidence that survives.
 - **Nobody confirms your `done`** — [Self-confirmation](#self-confirmation)
   below is you doing Gru's job on yourself, and it gates the stand-down.
 
@@ -113,10 +113,11 @@ Then, and only then, stand down.
 ## Stand down
 
 Run [the stand-down contract](../../standards/stand-down.md) — the authority
-scope, the subagent hard stop, the four preflight rules (clean tree, no
-unpushed commits against **your own branch**, and a pane surface count above
-1), `hermod poison-pill --json`, `armed:true` as the only proof it took, and
-the `partial` outcomes. Two of its terms are filled in here:
+scope, the subagent hard stop, its four rules about when (report first; strictly
+after the merge and the close; a clean tree and no unpushed commits against
+**your own branch**; the pane surface count), `hermod poison-pill --json`,
+`armed:true` as the only proof it took, and the `partial` outcomes. Two of its
+terms are filled in here:
 
 - **Your GO** is the operator's own launch: the `hermod ticket … --prompt-file`
   invocation naming `$agnes STARK-n`. That is the operator's keystroke, not a
@@ -130,10 +131,14 @@ the `partial` outcomes. Two of its terms are filled in here:
   arm. Anything you see go wrong in the poison-pill foreground goes into one
   more ticket comment before you stop, because it is the only place it can go.
 
-An unattended worker that fails to stand down **blocks its own relaunch**:
-`hermod ticket` refuses a ticket whose worktree already exists, most visibly on
-Codex. That is a reason to run the preflight properly, never a reason to reach
-for `--force`.
+An unattended worker that fails to stand down leaves a worktree behind, and a
+relaunch on that ticket does **not** start clean — differently, and badly, on
+each runtime. On Codex — your runtime — `hermod ticket` refuses outright
+(`Codex worktree path already exists`), so the ticket simply cannot be
+relaunched. On Claude it launches `claude --worktree=<ticket>`, which
+**attaches** to an existing worktree of that name rather than minting one, so
+the relaunch silently drops a second session into the leftovers. Both are
+reasons to run the preflight properly, never a reason to reach for `--force`.
 
 ## When not to stand down
 
@@ -148,3 +153,19 @@ of these:
 There is no leader to inspect what happened, so the session itself is the
 record. The operator's sweep is cheap; a destroyed worktree that held the only
 evidence is not.
+
+**Then raise a notification, because the ticket comment reaches nobody.** A
+Minion's `blocked` goes to Gru, who is awake and relaying; yours goes into a
+comment on a ticket nobody is reading — and the ticket stays *bound* to your
+still-live session, which is exactly the state `alfred task sweep-stale` skips
+by design ("never sweeps tickets bound by a LIVE session on this host"). So a
+ticket blocked at 02:00 sits in progress, bound, unswept and unannounced until
+someone happens to look. One line closes that hole:
+
+```
+hermod notify send "STARK-n blocked: <one-line reason> — tab and worktree left standing"
+```
+
+Send it after the ticket comment, which stays the detailed record; the
+notification is the pointer that gets the operator to it. Then stop, and leave
+the session, the worktree and the tab exactly as they are.

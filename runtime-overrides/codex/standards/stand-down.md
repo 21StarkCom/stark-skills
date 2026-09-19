@@ -6,6 +6,12 @@ The full hermod behaviour below was live-verified against hermod's TS engine
 (`close-session.ts`, `poison-pill.ts`, `bin/hermod.ts`) plus an observed real
 run under STARK-6166 — it is spec, not hints.
 
+This doc is runtime-neutral and is shipped byte-identical to both runtimes, so
+read two conventions into it throughout. **The repo's agent instructions file**
+means `CLAUDE.md` on Claude and `AGENTS.md` on Codex. And **a skill is written
+in its Claude form** (`/agnes`); the same skill is `$agnes` on Codex, so a
+launch, a brief or a GO naming one names the other.
+
 Two things are the calling skill's, and only two. This doc calls them by name:
 
 - **your GO** — the single operator action that authorized the teardown
@@ -84,9 +90,18 @@ line.
     | select(.surface_ids | index(env.CMUX_SURFACE_ID)) | .surface_count'
   ```
 
-  More than 1 and the close will land. Exactly 1 and it will not: say so in your
-  report and leave the tab for the operator rather than arming a teardown you
-  already know ends `partial`.
+  Read it as three outcomes, not two. **More than 1** and the last-surface
+  refusal is not what will stop you — the claude-lock `partial` below still
+  can, so this is one failure mode ruled out, not a guarantee the close lands.
+  **Exactly 1** and the tab will survive as a bare shell (`"Cannot close the
+  last surface"`): **arm anyway** and say so in your report. Do not skip the
+  stand-down over it — that `partial` still exits your agent and removes your
+  worktree, which is the whole point of the mandate above, and not arming
+  leaves a live agent, a live worktree *and* the same tab. **No output at all**
+  is not a count: `index` returns nothing when `$CMUX_SURFACE_ID` is unset or
+  your surface is not among this window's panes, and jq still exits 0. That is
+  the same ground poison-pill itself refuses on — treat it as the check having
+  failed: report it and stop.
 
 ## What it aims at
 
@@ -167,10 +182,12 @@ nobody expected to exist. Report the surface and the path; stop there.
 
 ## One permissions note, because it is a real tradeoff, not a detail
 
-A skill cannot self-approve its own Bash call, so the stand-down runs only in a
-bypass-mode session or behind a `Bash(hermod poison-pill:*)` allowlist entry —
-and that entry lets any skill or stray reasoning step kill the tab unprompted.
-If the command is refused, that is a refusal, not an obstacle: report and stop.
+A skill cannot self-approve its own shell call, so the stand-down runs only in a
+session whose permission settings already let it through unprompted — on Claude
+a bypass-mode session or a `Bash(hermod poison-pill:*)` allowlist entry, on
+Codex a sandbox + approval policy that permits it. Either way that latitude lets
+any skill or stray reasoning step kill the tab unprompted. If the command is
+refused, that is a refusal, not an obstacle: report and stop.
 
 ## A blocked or stopped exit does NOT stand down
 

@@ -390,24 +390,91 @@ for (const name of SKILLS) {
 //     two workers cannot drift, which only holds while both links resolve) and
 //     `../minion/SKILL.md` from `/agnes`. Renaming a standards doc would
 //     otherwise break every pointer silently: nothing else reads these links.
+//
+//     Three trees, not one. The Codex overlay under runtime-overrides/codex/
+//     carries its OWN copy of every link — `../../standards/stand-down.md`
+//     from `runtime-overrides/codex/skill/agnes/` resolves inside the overlay,
+//     not into the canonical tree — so a standards doc added to `standards/`
+//     and forgotten in the mirror leaves the Codex worker pointing at nothing.
+//     And the shared docs link each OTHER (`stand-down.md` → `worker-spine.md`
+//     for gaps), which is the one link the two-workers-cannot-drift claim
+//     actually rests on, in the one file no per-skill check ever reads.
 // ---------------------------------------------------------------------------
 
 // Inline markdown links whose destination is explicitly relative (`./` or
 // `../`) and lands on a `.md` file, with an optional `#anchor` fragment. Only
 // the file half is checked — an anchor is markdown, not a path.
+//
+// The explicit `./`/`../` prefix is the scope, not a shortcut, and dropping it
+// was measured to produce only false positives: a SKILL.md writes prose
+// placeholders (`[title](file.md)` in /stark-memory) that are not links to
+// anything, and a Codex overlay ships ONLY its SKILL.md, so its bare
+// `references/foo.md` resolves against the canonical tree bifrost merges it
+// over, never against this repo's overlay dir. What a `../` prefix always
+// means is "another directory of THIS tree", which is exactly the class no
+// other check reads.
 const RELATIVE_MD_LINK_RE = /\]\((\.{1,2}\/[^)\s#]+\.md)(#[^)\s]*)?\)/g;
 
-for (const name of SKILLS) {
-  test(`skill smoke: ${name} — every relative .md link resolves`, () => {
-    const skillDir = path.join(SKILLS_ROOT, name);
-    const broken: string[] = [];
-    for (const m of SKILL_CONTENT[name].text.matchAll(RELATIVE_MD_LINK_RE)) {
-      if (!fs.existsSync(path.resolve(skillDir, m[1]))) broken.push(m[1]);
+// The standards docs point at each other as bare siblings (`worker-spine.md`),
+// which the prefix rule above would exempt — and that link is the one the
+// "the two workers cannot drift" claim actually rests on. They carry no prose
+// placeholders and no install-time indirection, so they get the permissive
+// matcher.
+const SIBLING_MD_LINK_RE = /\]\(([^)\s#:/][^)\s#:]*\.md)(#[^)\s]*)?\)/g;
+
+function brokenMdLinks(file: string, res: RegExp[]): string[] {
+  const dir = path.dirname(file);
+  const broken: string[] = [];
+  for (const re of res) {
+    for (const m of fs.readFileSync(file, "utf8").matchAll(re)) {
+      if (!fs.existsSync(path.resolve(dir, m[1]))) broken.push(m[1]);
     }
+  }
+  return broken;
+}
+
+const CODEX_SKILL_ROOT = path.join(REPO_ROOT, "runtime-overrides", "codex", "skill");
+const SHARED_WORKER_DOCS = ["stand-down.md", "worker-spine.md"];
+
+const LINK_SOURCES: { label: string; file: string; res: RegExp[] }[] = [
+  ...SKILLS.map((name) => ({
+    label: `skill/${name}`,
+    file: path.join(SKILLS_ROOT, name, "SKILL.md"),
+    res: [RELATIVE_MD_LINK_RE],
+  })),
+  ...fs
+    .readdirSync(CODEX_SKILL_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      label: `runtime-overrides/codex/skill/${entry.name}`,
+      file: path.join(CODEX_SKILL_ROOT, entry.name, "SKILL.md"),
+      res: [RELATIVE_MD_LINK_RE],
+    })),
+  ...["standards", "runtime-overrides/codex/standards"].flatMap((dir) =>
+    SHARED_WORKER_DOCS.map((name) => ({
+      label: `${dir}/${name}`,
+      file: path.join(REPO_ROOT, ...dir.split("/"), name),
+      res: [RELATIVE_MD_LINK_RE, SIBLING_MD_LINK_RE],
+    })),
+  ),
+].filter((source) => fs.existsSync(source.file));
+
+// Both trees' copies of both shared docs, or the mirror silently stopped being
+// checked. `SUPPORT_FILES` in runtime_overrides.test.ts guards that they EXIST;
+// nothing else guards that their links do.
+test("skill smoke: the shared worker docs are link-checked in both trees", () => {
+  assert.equal(
+    LINK_SOURCES.filter((s) => s.res.includes(SIBLING_MD_LINK_RE)).length,
+    2 * SHARED_WORKER_DOCS.length,
+  );
+});
+
+for (const { label, file, res } of LINK_SOURCES) {
+  test(`skill smoke: ${label} — every relative .md link resolves`, () => {
     assert.deepEqual(
-      broken,
+      brokenMdLinks(file, res),
       [],
-      `unresolved relative .md links in ${name} — the SKILL.md points at docs that do not exist`,
+      `unresolved relative .md links in ${label} — it points at docs that do not exist`,
     );
   });
 }

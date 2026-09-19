@@ -133,7 +133,11 @@ test("Codex runtime override inventory is exact", () => {
 });
 
 test("required Codex parity skills remain model-discoverable", () => {
-  for (const name of ["stark-bury", "gru", "minion"]) {
+  // agnes belongs here for the same reason gru and minion do, and one step
+  // harder: the operator launches her with `hermod ticket … --prompt-file`
+  // whose entire body is `$agnes STARK-n`, so a `disable-model-invocation:
+  // true` here does not degrade her — it makes the launch a no-op.
+  for (const name of ["stark-bury", "agnes", "gru", "minion"]) {
     const body = fs.readFileSync(
       path.join(CODEX_ROOT, "skill", name, "SKILL.md"),
       "utf8",

@@ -6,8 +6,11 @@ doc; neither restates it. Each skill adds only what is genuinely its own —
 `/minion` its reporting to Gru, `/agnes` its self-confirmation — so the review
 gate and the merge path cannot drift between the two.
 
+This doc is runtime-neutral and is shipped byte-identical to both runtimes.
 Throughout, **the repo's agent instructions file** means `CLAUDE.md` on Claude
-and `AGENTS.md` on Codex. Where it and this doc disagree, it wins.
+and `AGENTS.md` on Codex. Where it and this doc disagree, it wins. And **a
+skill is written in its Claude form** (`/minion`); the same skill is `$minion`
+on Codex, so a brief or a launch naming one names the other.
 
 ## 1. Bind and read
 
