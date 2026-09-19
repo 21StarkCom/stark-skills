@@ -66,9 +66,12 @@ down. Launch her and stop.
    the whole hand-off.
 
 A nonzero exit is the answer, not something to work around: exit 2 names a bad
-argument, an unbound session, or a repo frigg cannot resolve; exit 1 with
-`verified:false` means the tab opened but Claude did not start, and hermod left
-the tab and worktree standing for inspection. Report what it printed. Never
+argument, an unbound session, or a repo frigg cannot resolve. A failed start
+looks different per `--agent`, and either leaves the tab and worktree standing
+for inspection: Claude exits 1 with a complete, normal-looking ack whose only
+tell is `verified:false`, so check that field and the exit code before you call
+the hand-off done; Codex prints `{error, code, stage}` with no ack fields at
+all. Report what it printed. Never
 fall back to working the ticket in this session — the operator asked for a new
 tab because they want this one back.
 

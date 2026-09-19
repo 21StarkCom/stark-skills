@@ -66,9 +66,12 @@ no stand down. Launch her and stop.
    the whole hand-off.
 
 A nonzero exit is the answer, not something to work around: exit 2 names a bad
-argument, an unbound session, or a repo frigg cannot resolve; a Codex startup
-failure prints its `code` and `stage` and leaves the tab and worktree standing
-for inspection. Report what it printed. Never fall back to working the ticket in
+argument, an unbound session, or a repo frigg cannot resolve. A failed start
+looks different per `--agent`, and either leaves the tab and worktree standing
+for inspection: Codex prints `{error, code, stage}` with no ack fields at all;
+Claude exits 1 with a complete, normal-looking ack whose only tell is
+`verified:false`, so check that field and the exit code before you call the
+hand-off done. Report what it printed. Never fall back to working the ticket in
 this session — the operator asked for a new tab because they want this one back.
 
 ## First: are you the right skill?
