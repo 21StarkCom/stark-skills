@@ -14,7 +14,7 @@
  */
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnBounded, type BoundedSpawnResult } from "./bounded_spawn_lib.ts";
 
 import {
   GITHUB_REVIEW_BODY_MAX,
@@ -265,13 +265,13 @@ export interface GitattributesFetch {
  * is the exact defect STARK-6095 exists to kill. The reason is returned so the
  * warning can say which happened.
  */
-export function fetchGitattributesResult(
+export async function fetchGitattributesResult(
   repo: string,
   run: RunFn = defaultRun,
   ref?: string,
-): GitattributesFetch {
+): Promise<GitattributesFetch> {
   const path = `repos/${repo}/contents/.gitattributes${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`;
-  const r = run("gh", ["api", path, "-H", "Accept: application/vnd.github.raw"]);
+  const r = await run("gh", ["api", path, "-H", "Accept: application/vnd.github.raw"]);
   if (r.status === 0) return { text: r.stdout, failure: null };
   const stderr = (r.stderr ?? "").trim();
   // A TERMINATED child (`status: null` — timeout, maxBuffer, signal) is never a
@@ -286,12 +286,12 @@ export function fetchGitattributesResult(
 }
 
 /** Read the target repo's `.gitattributes`, or null when it could not be read. */
-export function fetchGitattributes(
+export async function fetchGitattributes(
   repo: string,
   run: RunFn = defaultRun,
   ref?: string,
-): string | null {
-  return fetchGitattributesResult(repo, run, ref).text;
+): Promise<string | null> {
+  return (await fetchGitattributesResult(repo, run, ref)).text;
 }
 
 /** Which layer of the precedence order supplied the base list. */
@@ -705,7 +705,10 @@ export interface PrContext {
   anchorable: AnchorableLines;
 }
 
-type RunFn = (cmd: string, args: string[]) => { status: number | null; stdout: string; stderr: string };
+interface RunResult { status: number | null; stdout: string; stderr: string }
+
+/** Async since STARK-6131 (see `runCapturing`); a synchronous fake still fits. */
+type RunFn = (cmd: string, args: string[]) => RunResult | Promise<RunResult>;
 
 /**
  * 64 MiB. Node's spawnSync default is 1 MiB, and `gh api /pulls/N/files
@@ -733,25 +736,38 @@ export const GH_MAX_BUFFER = 64 * 1024 * 1024;
  * 64 KiB.
  *
  * `timeoutMs` bounds the child (STARK-6113): without it a `gh api --paginate`
- * stalled on a hung connection blocks `spawnSync` forever. The kill is SIGKILL,
- * not the SIGTERM default — a bound a child can ignore is not a bound, and `gh`
- * on a read call has nothing to clean up. A timeout leaves `status: null` +
- * `error.code: ETIMEDOUT`, which `explainTermination` names with the value.
+ * stalled on a hung connection blocks forever. The kill is SIGKILL, not SIGTERM
+ * — a bound a child can ignore is not a bound, and `gh` on a read call has
+ * nothing to clean up. A timeout leaves `status: null` + `error.code:
+ * ETIMEDOUT`, which `explainTermination` names with the value.
+ *
+ * Async since STARK-6131: the kill has to reach the child's whole process
+ * GROUP, or whatever `gh` spawned is orphaned rather than bounded, and
+ * `spawnSync` can do neither half of that — its `killSignal` goes to one pid,
+ * and it blocks the event loop the Ctrl-C forwarding handler needs. Both live
+ * in `bounded_spawn_lib.ts`, shared with `review_post_lib.ts`.
  */
-export function runCapturing(
+export async function runCapturing(
   cmd: string,
   args: string[],
   maxBuffer: number,
   timeoutMs: number,
-): { status: number | null; stdout: string; stderr: string } {
-  // `spawnSync` reads `timeout: 0` as NO bound, so an unvalidated 0 is the hang
-  // this exists to stop, arriving by the argument instead of the env var.
+): Promise<RunResult> {
+  // Held to the env var's rule whichever door it arrives by: `setTimeout` fires
+  // 0, NaN and anything past 2^31-1 ms after ~1 ms.
   assertGhTimeoutMs(timeoutMs, "runCapturing timeoutMs");
-  const sp = spawnSync(cmd, args, { encoding: "utf8", maxBuffer, timeout: timeoutMs, killSignal: "SIGKILL" });
+  let sp: BoundedSpawnResult;
+  try {
+    sp = await spawnBounded(cmd, args, { maxBuffer, timeoutMs });
+  } catch (e) {
+    // A spawn failure (`gh` not on PATH) stays a RESULT, as it was under
+    // `spawnSync`: every caller reports `status`/`stderr`, none catches.
+    sp = { stdout: "", stderr: "", status: null, signal: null, error: e as Error };
+  }
   return {
     status: sp.status,
-    stdout: sp.stdout ?? "",
-    stderr: explainTermination(cmd, sp, sp.stderr ?? "", maxBuffer, timeoutMs),
+    stdout: sp.stdout,
+    stderr: explainTermination(cmd, sp, sp.stderr, maxBuffer, timeoutMs),
   };
 }
 
@@ -785,14 +801,14 @@ export async function fetchPrContext(
   pr: number,
   run: RunFn = defaultRun,
 ): Promise<PrContext> {
-  const head = run("gh", ["api", `repos/${repo}/pulls/${pr}`, "--jq", ".head.sha"]);
+  const head = await run("gh", ["api", `repos/${repo}/pulls/${pr}`, "--jq", ".head.sha"]);
   if (head.status !== 0) {
     throw new Error(`gh api pulls/${pr} failed (exit ${head.status}): ${head.stderr.slice(0, 400)}`);
   }
   // --paginate --slurp merges every page into one array; a PR over 30 changed
   // files would otherwise silently expose only the first page, and a finding in
   // an unlisted file loses its anchor for no visible reason.
-  const files = run("gh", [
+  const files = await run("gh", [
     "api", `repos/${repo}/pulls/${pr}/files`, "--paginate", "--slurp",
   ]);
   if (files.status !== 0) {
@@ -1025,8 +1041,8 @@ async function main(argv: string[]): Promise<number> {
     // is reviewed against the declaration it ships. A fork PR's head sha is not
     // in the base repo, so fall back to the default branch rather than
     // degrading a fork review to the built-in default list.
-    let r = fetchGitattributesResult(args.repo, defaultRun, ctx.headSha);
-    if (r.text === null) r = fetchGitattributesResult(args.repo);
+    let r = await fetchGitattributesResult(args.repo, defaultRun, ctx.headSha);
+    if (r.text === null) r = await fetchGitattributesResult(args.repo);
     gitattributes = r.text;
     gitattributesFailure = r.failure;
   }
