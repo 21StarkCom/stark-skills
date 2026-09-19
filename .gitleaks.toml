@@ -1,0 +1,62 @@
+# gitleaks config for this repo — free, self-hosted secret scanning.
+#
+# SEEDED ONCE, THEN YOURS. This file was created by the fleet's governance
+# Terraform because the repo had no gitleaks config. It is never rewritten
+# after that: the rules and every allowlist entry below are this repo's to own
+# and edit in a normal PR. (The caller workflow next to it,
+# .github/workflows/secret-scan.yml, is the opposite: managed centrally, do not
+# edit it here.)
+#
+# CI scans only the incoming commits (the PR diff range, or the pushed range on
+# the default branch), so a finding in old history does not fail a PR unless
+# that PR touches the line.
+#
+# HANDLING A FALSE POSITIVE — cheapest first, stop at the first that works:
+#
+#  1. Inline: append `gitleaks:allow` in a comment on the offending line.
+#     Scoped to that line, moves with the file, disappears when the line does.
+#  2. A `.gitleaksignore` file at the repo root, one fingerprint per line
+#     (run the scan with `-v` to print them). For sources that cannot carry a
+#     comment: generated files, JSON, binaries.
+#  3. An `[allowlist]` table in this file. Last resort. Every entry MUST carry
+#     a comment directly above it saying what the string is and why it is
+#     provably not a live credential. Prefer `regexes` (value-scoped) over
+#     `paths`: a `paths` entry is history-scoped under a commit-walking scan,
+#     so never delete one because the file was deleted, and on a rename ADD
+#     the new path rather than swapping it in.
+#
+# IF A REAL SECRET IS FOUND: it is burned the moment it left your machine.
+# Rotate it first, then clean up history. A red check is a notification of a
+# leak, not prevention of one.
+
+[extend]
+useDefault = true
+
+# Google OAuth client secrets (`GOCSPX-` prefix). The stock ruleset catches
+# these only inside a `key = value` assignment; this rule also fires on a bare
+# token pasted into prose, a log, a URL or JSON, and names the credential type
+# so triage knows what to rotate.
+#
+# DO NOT REMOVE OR RENAME THIS RULE without also changing the caller's
+# `selftest_rule_id`: the scan's self-test asserts this exact rule id fires,
+# and fails the check when it does not.
+[[rules]]
+id = "google-oauth-client-secret"
+description = "Google OAuth client secret (GOCSPX- prefix)"
+regex = '''GOCSPX-[A-Za-z0-9_\-]{28}'''
+keywords = ["gocspx-"]
+entropy = 2.0
+
+# Documentation placeholders of the form GOCSPX-xxxx... are not credentials.
+# Scoped to the match itself, so it suppresses the placeholder wherever it is
+# written rather than blessing a path.
+[rules.allowlist]
+regexTarget = "match"
+regexes = [
+  '''GOCSPX-x{28}''',
+]
+
+# There is no global [allowlist] table because there is nothing to allow yet.
+# Do NOT add an empty one as a placeholder: gitleaks >= 8.30 rejects an
+# allowlist with no commits/paths/regexes/stopwords and refuses to load the
+# config at all. Add the table only together with the first justified entry.
