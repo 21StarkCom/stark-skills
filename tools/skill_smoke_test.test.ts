@@ -331,6 +331,40 @@ for (const name of SKILLS) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// 1b. The worker family stays model-invocable (STARK-6471, decided 2026-09-19).
+//
+// `agnes`, `gru` and `minion` are launched unattended: hermod hands a fresh
+// session the brief `/agnes STARK-n` as TEXT, and on a marketplace install that
+// resolves through the plugin (STARK-6469 — Claude Code's docs: the bare form
+// invokes the skill unless another command already uses the name; the real
+// Minion transcripts resolve to `stark-ops:minion`). A review that reads
+// "auto-merges and poison-pills" and reaches for `disable-model-invocation`
+// would leave that session forbidden to enter the skill it was launched to run
+// — so the flag is pinned OFF here, in both runtime trees, and a change to that
+// decision has to change this test first.
+// ---------------------------------------------------------------------------
+
+const WORKER_SKILLS = ["agnes", "gru", "minion"] as const;
+
+for (const name of WORKER_SKILLS) {
+  for (const [tree, file] of [
+    ["claude", path.join(SKILLS_ROOT, name, "SKILL.md")],
+    ["codex", path.join(REPO_ROOT, "runtime-overrides", "codex", "skill", name, "SKILL.md")],
+  ] as const) {
+    test(`skill smoke: ${name} [${tree}] — stays model-invocable (STARK-6471)`, () => {
+      assert.ok(fs.existsSync(file), `${name}: no ${tree} SKILL.md at ${file}`);
+      const block = fs.readFileSync(file, "utf8").match(/^---\n([\s\S]*?)\n---/);
+      assert.ok(block, `${name} [${tree}]: SKILL.md has no frontmatter block`);
+      assert.doesNotMatch(
+        block![1],
+        /^disable-model-invocation:\s*(true|yes|on|1)\s*$/im,
+        `${name} [${tree}] carries disable-model-invocation — an unattended launch could then never enter the skill it was launched to run (STARK-6471)`,
+      );
+    });
+  }
+}
+
 // The shared help protocol every skill points at must exist.
 test("skill smoke: standards/help.md exists", () => {
   assert.ok(

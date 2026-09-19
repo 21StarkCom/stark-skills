@@ -49,7 +49,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { isSignallableGroup, releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
+import { isSignallableGroup, makeGroupKiller } from "./bounded_spawn_lib.ts";
 import { buildCommand as buildClaude, normalizeOutput as normalizeClaude } from "./agent_claude.ts";
 import { buildCommand as buildCodex, extractLastAgentText as lastCodexText } from "./agent_codex.ts";
 import { buildCommand as buildGemini, normalizeOutput as normalizeGemini } from "./agent_gemini.ts";
@@ -734,6 +734,19 @@ export async function killProcessGroup(pgid: number, deps: KillDeps = {}): Promi
   };
 }
 
+/**
+ * The report for a timeout that fired over a group the leader's exit probe had
+ * already found empty (STARK-6735). `attempted: false` is that field's
+ * documented meaning — no live process group to signal — and `signals` stays
+ * empty because nothing was sent: the id is free for reuse.
+ */
+const GROUP_GONE_AT_EXIT_PROBE: KillReport = {
+  attempted: false,
+  signals: [],
+  survivors: false,
+  detail: "group already gone at the leader's exit probe; nothing signalled",
+};
+
 // ---------------------------------------------------------------------------
 // The real runner
 // ---------------------------------------------------------------------------
@@ -774,10 +787,12 @@ export const realRunner: SeatRunner = (req) =>
     }
 
     // `detached` took the seat out of the terminal's foreground group, so an
-    // operator's Ctrl-C no longer reaches it on its own: forward it (the shared
-    // half of bounded_spawn_lib; the kill ladder below stays jury's).
+    // operator's Ctrl-C no longer reaches it on its own: forward it through the
+    // shared door of bounded_spawn_lib (claim + ESRCH latch + per-call release;
+    // the kill ladder below stays jury's). Synchronously, so forwarding is armed
+    // before anything can await.
     const pgid = child.pid;
-    if (pgid !== undefined) trackGroup(pgid);
+    const group = makeGroupKiller(pgid);
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -796,8 +811,9 @@ export const realRunner: SeatRunner = (req) =>
       const emit = (kill: KillReport | null): void => {
         // Released only once the kill ladder is done: until then the group may
         // still hold descendants, and a Ctrl-C that lands mid-ladder should
-        // still reach them.
-        if (pgid !== undefined) releaseGroup(pgid);
+        // still reach them. By identity, never by id: if the exit probe already
+        // found the group empty the id may be another call's by now.
+        group.release();
         resolve({
           code,
           signal,
@@ -821,7 +837,17 @@ export const realRunner: SeatRunner = (req) =>
       timedOut = true;
       // Do NOT resolve here: the result still waits for "close" so the bytes the
       // child already wrote are captured.
-      killing = pgid === undefined ? Promise.resolve(null) : killProcessGroup(pgid);
+      // A group the kernel already reported gone has no ladder to climb: its id
+      // is free for reuse, and SIGTERM there lands on whoever holds it NOW
+      // (STARK-6735 — the guard `run()` has carried since STARK-6147).
+      // It still gets a REPORT, never `null`: the kill report is the one piece
+      // of evidence a timeout exists to produce, and `null` renders as "no kill
+      // report" — the same words a seat with no pid at all gets. The ladder this
+      // replaced said "group already gone at SIGTERM"; skipping the SIGTERM must
+      // not also skip saying so. A fresh copy per seat: `signals` is an array.
+      if (pgid === undefined) killing = Promise.resolve(null);
+      else if (group.gone) killing = Promise.resolve({ ...GROUP_GONE_AT_EXIT_PROBE, signals: [] });
+      else killing = killProcessGroup(pgid);
       void killing.catch(() => null);
     }, req.timeoutMs);
 
@@ -853,6 +879,12 @@ export const realRunner: SeatRunner = (req) =>
     // and force-settles (destroying the streams) if "close" never comes.
     // finish() is idempotent, so the normal close path is unaffected.
     child.on("exit", (code, signal) => {
+      // The leader's exit is the first moment the group can have emptied with
+      // this seat still open (an escaped descendant holding stdout). Probe with
+      // signal 0 — which delivers nothing — while the id cannot yet have been
+      // reused: an empty group leaves the forwarding set NOW, not at `emit` up
+      // to EXIT_CLOSE_GRACE_MS later, when a Ctrl-C would reach a stranger.
+      group(0);
       const grace = setTimeout(() => {
         child.stdout?.destroy();
         child.stderr?.destroy();
