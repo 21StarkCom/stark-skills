@@ -8,7 +8,6 @@ import {
   GH_MAX_BUFFER,
   GITHUB_REVIEW_BODY_MAX,
   TERMINATION_STDERR_TAIL,
-  bodyTooLarge,
   anchorableLinesFromPatch,
   bodyFor,
   defaultRun,
@@ -33,6 +32,7 @@ import {
 import {
   BODY_REASON_HEADINGS,
   buildReviewBody,
+  GITHUB_REVIEW_BODY_MAX as LIB_CAP,
   OUT_OF_DIFF_HEADING,
   partitionInlineVsBody,
   postReview,
@@ -756,26 +756,15 @@ describe("generated-path routing", () => {
 });
 
 describe("review-body size guard", () => {
-  test("a body at the cap passes and one char over refuses", () => {
-    assert.equal(bodyTooLarge(GITHUB_REVIEW_BODY_MAX), null);
-    assert.equal(bodyTooLarge(0), null);
-    const err = bodyTooLarge(GITHUB_REVIEW_BODY_MAX + 1);
-    assert.ok(err);
-    assert.match(err, /over GitHub's 65536-char limit/);
+  test("the cap is re-exported from review_post_lib, which now owns the degrade", () => {
+    // STARK-6094 moved the constant and its handling into postReview, which
+    // degrades (overflow comments) instead of refusing. The re-export keeps the
+    // name resolvable for anything importing it from this tool.
+    assert.equal(GITHUB_REVIEW_BODY_MAX, LIB_CAP);
+    assert.equal(GITHUB_REVIEW_BODY_MAX, 65536);
   });
 
-  test("the refusal names both remedies, since the fallback would lose every finding", () => {
-    // Over the cap the POST 422s with no errors[].index, so extract422Indices
-    // returns [] and postReview folds the inline comments into the SAME body,
-    // retries larger and reports unposted — nothing posted at all. That is
-    // strictly worse than the gating threads this split exists to prevent.
-    const err = bodyTooLarge(200_000);
-    assert.ok(err);
-    assert.match(err, /smaller[\s\S]*batches/);
-    assert.match(err, /--generated-paths/);
-  });
-
-  test("the guard measures the body postReview actually builds, not an estimate", async () => {
+  test("the summary measures the body postReview actually builds, not an estimate", async () => {
     const { ctx, plan } = syncPlan();
     const result = await postReview({
       repo: "o/r",
