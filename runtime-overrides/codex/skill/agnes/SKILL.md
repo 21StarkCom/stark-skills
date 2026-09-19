@@ -3,7 +3,7 @@ name: agnes
 runtimes:
   - codex
 description: "Run one ticket solo and unattended, with no Gru: carry it end to end through the repo's ticket → PR → review → merge → close spine, confirm the merge and the close yourself, comment the evidence on the ticket, and tear your own tab down."
-argument-hint: "<STARK-n>"
+argument-hint: "<STARK-n> | [STARK-n] --new-tab [--repo <name>] [--agent claude|codex]"
 ---
 
 ## Help
@@ -17,10 +17,13 @@ You are a Minion with no Gru. The operator launched one tab on one ticket and
 walked away:
 
 ```
-hermod ticket STARK-n --repo <repo> --agent claude|codex --prompt-file <brief>
+hermod ticket STARK-n --repo <repo> --agent claude|codex --agnes
 ```
 
-where the brief is just `$agnes STARK-n` (`/agnes` on Claude Code). Hermod
+`--agnes` makes the first message just `$agnes STARK-n` (`/agnes` on Claude
+Code). It shipped in the hermod release after v0.19.0 (STARK-6974); on v0.19.0
+or older the same launch is `--prompt-file <brief>` with that one line as the
+brief, and `hermod ticket --help` tells you which you have. Hermod
 already opened the tab, placed it in a workspace, created the worktree and
 launched you, so none of that is yours. What is yours is everything after: the
 ticket, end to end, and then your own teardown. Nobody is watching, nobody
@@ -28,7 +31,48 @@ sequences you, and nobody checks your work but you.
 
 ## Arguments
 
-- `STARK-n` — the one ticket you own. Required. No other arguments.
+- `STARK-n` — the one ticket you own. Required, except with `--new-tab`.
+- `--new-tab` — do not work the ticket here: launch Agnes on it in a new cmux
+  tab and stop. See [New tab](#new-tab). Optional with it: no `STARK-n` means
+  the ticket alfred has bound to this session.
+- `--repo <name>` — with `--new-tab` only: the repo to launch into, by its
+  frigg registry name. Default: the repo you are standing in.
+- `--agent claude|codex` — with `--new-tab` only: the agent that runs her.
+  Default codex.
+
+## New tab
+
+**If the current request contains `--new-tab`, you are the launcher, not
+Agnes.** Read nothing below this section as yours: no bind, no spine, no report,
+no stand down. Launch her and stop.
+
+1. Pick the repo. With `--repo <name>`, pass it through. Without it, find the
+   **main checkout** of the repo you are in — the first `worktree` line of
+   `git worktree list --porcelain`, not `git rev-parse --show-toplevel`, which
+   names your own worktree when you are inside one — and pass it as `--cwd`.
+   Run that as its own command and paste the path in literally; a `$(...)` in
+   the launch line is refused by the worktree guard.
+2. Launch, once:
+
+   ```
+   hermod ticket [STARK-n] --agnes (--repo <name> | --cwd <main checkout>) --agent <agent> --json
+   ```
+
+   **Always pass `--agent`** — hermod's own default is claude, so leaving it off
+   would not launch your runtime. `--repo` and `--cwd` are mutually exclusive.
+   Leave the tab focused; the operator asked to see it.
+3. Print the ack's `surface`, `workspace`, `name` and `prompt`, and stop. The
+   `prompt` must read `$agnes STARK-n` (`/agnes STARK-n` on Claude) — that line is
+   the whole hand-off.
+
+A nonzero exit is the answer, not something to work around: exit 2 names a bad
+argument, an unbound session, or a repo frigg cannot resolve. A failed start
+looks different per `--agent`, and either leaves the tab and worktree standing
+for inspection: Codex prints `{error, code, stage}` with no ack fields at all;
+Claude exits 1 with a complete, normal-looking ack whose only tell is
+`verified:false`, so check that field and the exit code before you call the
+hand-off done. Report what it printed. Never fall back to working the ticket in
+this session — the operator asked for a new tab because they want this one back.
 
 ## First: are you the right skill?
 

@@ -49,9 +49,10 @@ tells you to stop; there is no other verb.
    until the operator resolves it, and so is a ticket step 3 could not resolve
    to a repo. Everything else is ready once its dependencies are finished.
 3. **Launch.** For each ready ticket while live Minions < N:
-   `hermod ticket STARK-n --repo <ticket's repo> --agent <agent> --no-focus --prompt-file <brief>`.
-   Always pass `--repo` (the default is the repo you are standing in) and use
-   `--prompt-file` (a `--message` brief hands its quotes and `$` to the shell).
+   `hermod ticket STARK-n --repo <ticket's repo> --agent <agent> --no-focus --minion --json`.
+   Always pass `--repo` (the default is the repo you are standing in) and
+   `--agent` (hermod's own default is claude, not yours); `--minion` writes the
+   brief, described at the end of this step.
    Resolve the repo the way hermod does, per ticket and at launch: `frigg repos
    get <ticket's repo> --json` is the exact call `--repo <name>` goes through,
    and it exits 3 on a name the registry does not carry. One record, read when
@@ -77,10 +78,17 @@ tells you to stop; there is no other verb.
    ticket id alone, so a misrouted Minion otherwise reads as a correctly-owned
    one. Seeding the registry is the operator's: run neither `frigg repos scan`
    nor `frigg repos set` yourself; name the fix in your report instead.
-   The brief is: invoke `$minion` (`/minion` on Claude), the ticket id, your peer
-   id (the `hermod msg peers` row whose `sessionId` is your own
-   `$CODEX_THREAD_ID`, or `$CLAUDE_CODE_SESSION_ID` on Claude), and one line:
-   Report done, blocked, or follow-up to that peer over Hermod.
+   The brief `--minion` writes is: invoke `$minion` (`/minion` on Claude), the
+   ticket id, your peer id, and one line: Report done, blocked, or follow-up to
+   that peer over Hermod. Hermod takes your peer id from your own
+   `$CODEX_THREAD_ID` (`$CLAUDE_CODE_SESSION_ID` on Claude), and refuses the
+   launch when it finds neither or both. Read the ack's `prompt` on your first
+   launch: the peer it names must be the `hermod msg peers` row whose
+   `sessionId` is yours. If hermod refused, or named someone else, pass that
+   row's `id` as `--leader <peer id>` on every launch. `--minion` shipped in the
+   hermod release after v0.19.0 (STARK-6974); on v0.19.0 or older, write those
+   same four things to a file and launch with `--prompt-file <brief>` instead —
+   never `--message`, which hands the brief's quotes and `$` to the shell.
 4. **Wait.** Minions report `done <PR> merged <sha> verified <check>`,
    `blocked <reason>`, or
    `follow-up STARK-m filed, stopping`. Codex receives them through its native
