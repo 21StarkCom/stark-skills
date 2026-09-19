@@ -109,6 +109,14 @@ line.
   `hermod panes --pane <paneRef>` is no shortcut either — under a stale stamp
   it answers `not_found`.
 
+  This is a workaround with an end date. Hermod main resolves `panes` from the
+  live tree itself (STARK-7262), in no release up to v0.19.0. The two steps stay
+  correct there — the pasted id is simply what hermod would have found — so keep
+  them until this contract pins a minimum hermod version. On that hermod the
+  stamp is ignored once your surface resolves, so a mispasted id produces
+  neither the `not_found` shape below nor the silent one; either then means
+  your surface did not resolve, which the `whoami` step already reports.
+
   Read it as three outcomes, not two. **More than 1** and the last-surface
   refusal is not what will stop you — the claude-lock `partial` below still
   can, so this is one failure mode ruled out, not a guarantee the close lands.
