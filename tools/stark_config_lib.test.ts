@@ -376,26 +376,32 @@ test("generated_paths: defaults when nothing is configured", async () => {
   });
 });
 
-test("generated_paths: `catalog/**` is repo-keyed, never a global default", () => {
-  // It is true of bifrost alone — a sync PR machine-rewrites that tree without
-  // declaring it generated. In the global default it would demote a
-  // hand-written `catalog/` in every other repo.
+test("generated_paths: no catalog glob ships in the defaults, globally or per repo", () => {
+  // `catalog/**` must never reach the global default: it would demote a hand-written
+  // `catalog/` in every other repo. And since STARK-7536 it is not shipped for bifrost
+  // either — bifrost declares its own generated catalog trees, and `catalog/**` was
+  // broader than what is generated, so it also demoted bifrost's CURATED
+  // catalog/*/bundle.yaml and catalog/*/mcp/**. Re-adding it anywhere here silently
+  // stops those findings from opening the inline thread that holds a merge.
   assert.ok(!DEFAULT_GENERATED_PATHS_CONFIG.default.includes("catalog/**"));
-  assert.deepEqual(
-    DEFAULT_GENERATED_PATHS_CONFIG.repos["21StarkCom/bifrost"],
-    { add: ["catalog/**"] },
-  );
+  assert.deepEqual(DEFAULT_GENERATED_PATHS_CONFIG.repos, {});
 });
 
-test("generated_paths: a repo entry is expressible per repo and merges in", async () => {
+test("generated_paths: a repo entry is expressible per repo, from the user layer", async () => {
   await withScratchHome((home) => {
     writeGlobalConfig(home, {
       generated_paths: { repos: { "o/other": { paths: ["gen/**"] } } },
     });
     const cfg = getGeneratedPathsConfig();
     assert.deepEqual(cfg.repos["o/other"], { paths: ["gen/**"] });
-    // The shipped bifrost entry survives the merge rather than being replaced.
-    assert.deepEqual(cfg.repos["21StarkCom/bifrost"], { add: ["catalog/**"] });
+    // No repo entry ships by default since STARK-7536, so the user's is the whole map.
+    // That is why this no longer says "merges in": with an empty base there is nothing to
+    // merge WITH, so it proves only that the user layer is read. `deepMerge`'s actual
+    // map-merge semantics — a user key added without clobbering its siblings — are pinned
+    // on the sections that still ship defaults (`getModelRates`, `getModelLimits`,
+    // `getRuntimeConfig`), and the resolver's own per-repo layering is pinned in
+    // `findings_review_post.test.ts` against an explicit `config`.
+    assert.deepEqual(cfg.repos, { "o/other": { paths: ["gen/**"] } });
   });
 });
 

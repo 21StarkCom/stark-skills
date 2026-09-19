@@ -22,13 +22,7 @@
       ".claude-plugin/**",
       "index.json"
     ],
-    "repos": {
-      "21StarkCom/bifrost": {
-        "add": [
-          "catalog/**"
-        ]
-      }
-    }
+    "repos": {}
   },
   "session": {
     "health_checks": [],
