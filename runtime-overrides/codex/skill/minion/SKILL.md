@@ -69,7 +69,7 @@ and if that is what the operator wants, say so and stop.
    with exit 2 when it finds neither stamp or both. That refusal is fixed by
    naming yourself: find the `hermod msg peers` row whose `sessionId` is yours
    and pass its `id` as `--leader` — you are then still the leader, and step 4
-   still applies. `--minion` shipped in the hermod release after v0.19.0
+   still applies. `--minion` needs hermod v0.20.0 or later
    (STARK-6974); on v0.19.0 or older, launch with `--prompt-file <brief>`
    instead, the brief being the four things [Gru's step 3](../gru/SKILL.md)
    lists — never `--message`, which hands the brief's quotes and `$` to the

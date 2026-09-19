@@ -21,8 +21,8 @@ walked away:
 hermod ticket STARK-n --repo <repo> --agent claude|codex --agnes
 ```
 
-`--agnes` makes the first message just `/agnes STARK-n`. It is on hermod main
-(STARK-6974) and in no release up to v0.19.0; without it the same launch
+`--agnes` makes the first message just `/agnes STARK-n`. It needs hermod v0.20.0
+or later (STARK-6974); on v0.19.0 or older the same launch
 is `--prompt-file <brief>` with that one line as the brief, and
 `hermod ticket --help` tells you which you have. Hermod already opened the tab, placed
 it in a workspace, created the worktree and launched you, so none of that is
