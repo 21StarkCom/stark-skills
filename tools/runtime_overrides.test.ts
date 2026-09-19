@@ -132,6 +132,24 @@ test("Codex runtime override inventory is exact", () => {
   );
 });
 
+// The shared worker docs are runtime-neutral by contract and mirrored
+// byte-identically (CLAUDE.md, STARK-6182). SUPPORT_FILES above only proves the
+// copies EXIST, which is how a stand-down.md edit shipped to Claude alone with
+// every gate green (STARK-7595 review). Any diff here is drift, never a
+// localization — copy the canonical file over the mirror.
+const BYTE_IDENTICAL_MIRRORS = ["standards/stand-down.md", "standards/worker-spine.md"] as const;
+
+test("shared worker docs are mirrored byte-identically into the Codex overlay", () => {
+  for (const rel of BYTE_IDENTICAL_MIRRORS) {
+    assert.ok(SUPPORT_FILES.includes(rel), `${rel} must stay a listed support file`);
+    assert.equal(
+      fs.readFileSync(path.join(CODEX_ROOT, rel), "utf8"),
+      fs.readFileSync(path.join(REPO_ROOT, rel), "utf8"),
+      `${rel} drifted from runtime-overrides/codex/${rel} — the mirror is byte-identical by contract`,
+    );
+  }
+});
+
 test("required Codex parity skills remain model-discoverable", () => {
   // agnes belongs here for the same reason gru and minion do, and one step
   // harder: the operator launches her with `hermod ticket … --agnes`, whose

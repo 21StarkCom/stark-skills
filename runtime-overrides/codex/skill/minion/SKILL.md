@@ -27,7 +27,8 @@ Gru coordinates the other tickets; you never wait on Gru for anything.
   `hermod msg peers` prints its `id` (`claude:<session-id>`, `codex:<thread-id>`).
   Default: you.
 - `--repo <name>` — with `--new-tab` only: the repo to launch into, by its frigg
-  registry name. Default: the repo you are standing in.
+  registry name. Default: the repo the ticket names, else the repo you are
+  standing in.
 - `--agent claude|codex` — with `--new-tab` only: the agent that runs the
   Minion. Default codex.
 
@@ -42,12 +43,26 @@ which one you ran. **There is no third shape in which nobody receives the
 report** — launch-and-walk-away is [`/agnes --new-tab`](../agnes/SKILL.md#new-tab),
 and if that is what the operator wants, say so and stop.
 
-1. Pick the repo. With `--repo <name>`, pass it through. Without it, find the
-   **main checkout** of the repo you are in — the first `worktree` line of
+1. Name the ticket, then pick the repo. With no `STARK-n`, read the one alfred
+   has bound to this session — the `ticket` field of `alfred repo info --json`,
+   the same read hermod makes when the id is omitted — and stop and ask when it
+   has none. Pass the id on the launch line either way; you need it for the
+   check below, and an explicit id launches the same on every hermod. With
+   `--repo <name>`, pass it through. Without it, **read the ticket first**
+   (`alfred task show STARK-n`): a ticket that belongs to another repo than the
+   one you are standing in is launched with `--repo <that repo>`, never into
+   this one — hermod would exit 0 and the Minion would work it in the wrong
+   codebase. A ticket that names no repo is this one's, the default the
+   Arguments state. Only when the ticket is this repo's, find the **main
+   checkout** of the repo you are in — the first `worktree` line of
    `git worktree list --porcelain`, not `git rev-parse --show-toplevel`, which
    names your own worktree when you are inside one — and pass it as `--cwd`.
-   Run that as its own command and paste the path in literally; a `$(...)` in
-   the launch line is refused by the worktree guard.
+   Run that as its own command and paste the path in literally: on Claude, a
+   worktree session's guard refuses a `hermod` line carrying a variable
+   ([measured](../../standards/worker-spine.md#title-your-tab)), and a `$(...)`
+   was [measured](../../standards/stand-down.md#four-rules-about-when) refused on
+   its quoted form only — too fine a line to rest a launch on, and the literal
+   works on either runtime.
    **The ticket's id must be free in that repo**: no `worktree` line of that
    list (with `--repo`, of `git -C <path> worktree list --porcelain`, `<path>`
    from `frigg repos get <name> --json`) may end in `/<the ticket id>`. One that
@@ -59,7 +74,7 @@ and if that is what the operator wants, say so and stop.
 2. Launch, once:
 
    ```
-   hermod ticket [STARK-n] --minion [--leader <peer>] (--repo <name> | --cwd <main checkout>) --agent <agent> --json
+   hermod ticket STARK-n --minion [--leader <peer>] (--repo <name> | --cwd <main checkout>) --agent <agent> --json
    ```
 
    **Always pass `--agent`** — hermod's own default is claude, so leaving it off
@@ -75,9 +90,9 @@ and if that is what the operator wants, say so and stop.
    lists — never `--message`, which hands the brief's quotes and `$` to the
    shell. Write the file with your file tool, or single-quoted: inside double
    quotes the shell expands `$minion` to nothing. That older hermod stamps no
-   leader and resolves no bound ticket, so there both are yours to write: your
-   own `hermod msg peers` `id` in the brief, and the `STARK-n` on the launch
-   line.
+   leader and resolves no bound ticket, so there the leader is yours to write
+   too: your own `hermod msg peers` `id` in the brief. The `STARK-n` is already
+   on the launch line from step 1.
 3. Read the ack before you call it launched. Its `prompt` must read
    `$minion STARK-n` (`/minion STARK-n` on Claude) and name the leader peer you
    meant. A failed start looks different per `--agent`, and either leaves the
