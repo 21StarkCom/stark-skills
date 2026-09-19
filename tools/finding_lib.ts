@@ -30,13 +30,22 @@ export type Classification = "fix" | "false_positive" | "noise" | "ignored";
  * long-standing "Cross-cutting / out-of-diff findings" heading describes.
  *
  * `generated_path` is the case STARK-5637 introduced and STARK-6096 named: the
- * finding IS in the diff, on a real file and line, and was deliberately held
- * out of a thread because its path is generated output (see
- * `findings_review_post.ts`). Filing those under the out-of-diff heading told a
- * reader they were outside the PR's scope — the exact "downgraded away" reading
- * the split exists to prevent. `buildReviewBody` cannot infer this from
- * file/line, because a withheld in-diff finding and an out-of-diff one look
- * identical by the time they reach it; the caller must state it.
+ * finding was deliberately held out of a thread because its path is generated
+ * output (see `findings_review_post.ts`). Typically it IS in the diff, on a real
+ * file and line — filing those under the out-of-diff heading told a reader they
+ * were outside the PR's scope, the exact "downgraded away" reading the split
+ * exists to prevent. `buildReviewBody` cannot infer this from file/line, because
+ * a withheld in-diff finding and an out-of-diff one look identical by the time
+ * they reach it; the caller must state it.
+ *
+ * The label says only "generated path", never "in diff": a reviewer can report a
+ * finding on a generated file the PR never touched, and that one is BOTH. Which
+ * it is, is stated per finding by `generatedFindingNote`, so the heading asserts
+ * neither.
+ *
+ * It records the routing decision made BEFORE posting. A finding that reaches
+ * the body later, because GitHub rejected its anchor with a 422, is the
+ * unlabelled class and `demoteInlineToFinding` strips any label on the way down.
  */
 export type BodyReason = "generated_path";
 

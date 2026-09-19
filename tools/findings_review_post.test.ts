@@ -24,7 +24,13 @@ import {
   toFindings,
   type ReportFindingsPayload,
 } from "./findings_review_post.ts";
-import { partitionInlineVsBody, postReview, buildReviewBody } from "./review_post_lib.ts";
+import {
+  BODY_REASON_HEADINGS,
+  buildReviewBody,
+  OUT_OF_DIFF_HEADING,
+  partitionInlineVsBody,
+  postReview,
+} from "./review_post_lib.ts";
 import { buildMarker } from "./finding_lib.ts";
 
 // --- mapping -----------------------------------------------------------------
@@ -524,26 +530,55 @@ describe("generated-path routing", () => {
     // reader scanning the review must not see an in-diff CONFIRMED finding on
     // `vendor/…/gru.ts:11` presented as being outside the PR's scope.
     const { plan } = syncPlan();
+    // Which files were demoted is `plan.generated.entries` — the tool's own
+    // answer for the globs this run passed. Re-deriving it from a hand-rolled
+    // regex would silently diverge the moment `generatedPaths` changes.
+    const demoted = new Set(plan.generated.entries.map((e) => e.file));
+    assert.ok(demoted.size > 0, "the fixture must demote something");
     for (const f of plan.findings) {
-      const generated =
-        /^(vendor|dist|\.claude-plugin)\//.test(f.file ?? "") || f.file === "index.json";
       assert.equal(
         f.body_reason,
-        generated ? "generated_path" : undefined,
+        demoted.has(f.file ?? "") ? "generated_path" : undefined,
         `${f.file} carries the wrong body_reason`,
       );
     }
     const { bodyFindings } = partitionInlineVsBody(plan.findings, plan.inlineEligibleFiles, "low");
     const body = buildReviewBody("<!-- marker -->", plan.humanSummary, bodyFindings);
-    const genIdx = body.indexOf("## In-diff findings on generated paths");
-    assert.ok(genIdx > 0, "generated findings get their own accurate heading");
-    const outIdx = body.indexOf("## Cross-cutting / out-of-diff findings");
-    if (outIdx >= 0) {
-      assert.ok(
-        body.indexOf("`vendor/stark-skills/tools/gru.ts:11`") > genIdx,
-        "a generated-path finding must sit under the generated heading, not the out-of-diff one",
-      );
-    }
+    assert.ok(
+      body.includes(BODY_REASON_HEADINGS.generated_path),
+      "generated findings get their own accurate heading",
+    );
+    // Every body finding here is a generated one, so the out-of-diff heading
+    // must be absent entirely — a stronger claim than "the generated ones sit
+    // elsewhere", and one that cannot pass vacuously.
+    assert.ok(
+      !body.includes(OUT_OF_DIFF_HEADING),
+      "no out-of-diff heading when every body finding is a generated-path one",
+    );
+    assert.match(body, /`vendor\/stark-skills\/tools\/gru\.ts:11`/);
+  });
+
+  test("a generated path outside the PR's diff is not called in-diff (STARK-6096)", () => {
+    // A reviewer can report a finding on a generated file the PR never touched.
+    // It still loses its thread, but the heading may not assert it was in the
+    // diff while the entry's own note reads "outside this PR's diff" — that is
+    // the same falsehood this ticket fixed, pointing the other way.
+    const ctx = parsePrContext("headsha", JSON.stringify([
+      { filename: "engine/internal/install/install.go", patch: "@@ -1,1 +1,2 @@\n a\n+b" },
+    ]));
+    const plan = planReview(
+      { findings: [{ file: "vendor/untouched/foo.ts", line: 7, short_summary: "never touched", summary: "s" }] },
+      ctx,
+      { agent: "claude", generatedPaths: ["vendor/**"] },
+    );
+    const { bodyFindings } = partitionInlineVsBody(plan.findings, plan.inlineEligibleFiles, "low");
+    const body = buildReviewBody("<!-- marker -->", plan.humanSummary, bodyFindings);
+    assert.match(body, /outside this PR's diff/, "the per-finding note states the truth");
+    assert.doesNotMatch(
+      body,
+      /^## .*\bIn-diff\b/im,
+      "no heading may claim in-diff over an entry that says otherwise",
+    );
   });
 
   test("a finding on an ordinary source path is unchanged", () => {

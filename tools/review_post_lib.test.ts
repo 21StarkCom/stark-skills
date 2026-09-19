@@ -18,15 +18,22 @@ import test from "node:test";
 
 import { buildMarker, type Finding } from "./finding_lib.ts";
 import {
+  BODY_REASON_HEADINGS,
   buildReviewBody,
   findExistingMarker,
   GhError,
+  OUT_OF_DIFF_HEADING,
   partitionInlineVsBody,
   postReview,
   renderAgentsResolvedSummary,
   selectPostingAgent,
   withRetry,
 } from "./review_post_lib.ts";
+
+/** Match a heading constant literally — they carry `/`, `.` and `—`. */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function makeFinding(over: Partial<Finding> = {}): Finding {
   return {
@@ -132,8 +139,30 @@ test("buildReviewBody: generated-path findings do not sit under the out-of-diff 
     makeFinding({ title: "gru drift", file: "vendor/stark-skills/tools/gru.ts", line: 11, body_reason: "generated_path" }),
   ]);
   assert.doesNotMatch(body, /out-of-diff/);
-  assert.match(body, /## In-diff findings on generated paths — withheld from inline threads/);
+  assert.match(body, /## Findings on generated paths — withheld from inline threads/);
   assert.match(body, /vendor\/stark-skills\/tools\/gru\.ts:11/);
+});
+
+test("buildReviewBody: the generated heading claims neither in-diff nor out-of-diff", () => {
+  // A reviewer can report a finding on a generated file the PR never touched,
+  // so the heading spans both cases and may assert neither. Saying "in-diff"
+  // over an entry whose own note reads "outside this PR's diff" is the same
+  // class of falsehood STARK-6096 fixed, pointing the other way.
+  assert.doesNotMatch(BODY_REASON_HEADINGS.generated_path, /\bin-diff\b/i);
+  assert.doesNotMatch(BODY_REASON_HEADINGS.generated_path, /out-of-diff/i);
+});
+
+test("buildReviewBody: an unrecognised body_reason keeps its finding in the body", () => {
+  // The no-drop guarantee outranks the grouping. A label this build does not
+  // know degrades to the unlabelled group; it must never form a heading-less
+  // group that the render loop skips, deleting the finding from the review.
+  const body = buildReviewBody("MARKER", "summary", [
+    // Cast: the point of the test is a value the union does not admit, which is
+    // what any older/newer caller or hand-written payload can still supply.
+    makeFinding({ title: "from the future", body_reason: "future_reason" as never }),
+  ]);
+  assert.match(body, /— from the future/);
+  assert.match(body, new RegExp(escapeRe(OUT_OF_DIFF_HEADING)));
 });
 
 test("buildReviewBody: a mixed body renders both headings with each finding exactly once", () => {
@@ -142,18 +171,21 @@ test("buildReviewBody: a mixed body renders both headings with each finding exac
     makeFinding({ title: "generated", file: "dist/x.js", line: 3, body_reason: "generated_path" }),
     makeFinding({ title: "classic two", file: "untouched.ts", line: 9 }),
   ]);
-  assert.match(body, /## Cross-cutting \/ out-of-diff findings/);
-  assert.match(body, /## In-diff findings on generated paths/);
+  assert.match(body, new RegExp(escapeRe(OUT_OF_DIFF_HEADING)));
+  assert.match(body, new RegExp(escapeRe(BODY_REASON_HEADINGS.generated_path)));
   for (const title of ["classic", "generated", "classic two"]) {
     const hits = body.split("\n").filter((l) => l.endsWith(`— ${title}`)).length;
     assert.equal(hits, 1, `${title} must appear exactly once`);
   }
   // Each finding sits under its own heading, not merely somewhere in the body.
-  const outIdx = body.indexOf("## Cross-cutting / out-of-diff findings");
-  const genIdx = body.indexOf("## In-diff findings on generated paths");
-  assert.ok(outIdx < genIdx, "unlabelled group renders first");
-  assert.ok(body.indexOf("— classic two") < genIdx, "classic findings stay above the generated heading");
-  assert.ok(body.indexOf("— generated") > genIdx, "generated finding sits under its own heading");
+  const outIdx = body.indexOf(OUT_OF_DIFF_HEADING);
+  const genIdx = body.indexOf(BODY_REASON_HEADINGS.generated_path);
+  // Labelled first: the generated-path preamble lives in `humanSummary`, above
+  // every group, and says "each is listed below" — it must not be separated
+  // from the findings it introduces by an unrelated group.
+  assert.ok(genIdx < outIdx, "labelled group renders directly under the preamble");
+  assert.ok(body.indexOf("— generated") < outIdx, "generated findings stay above the out-of-diff heading");
+  assert.ok(body.indexOf("— classic two") > outIdx, "classic findings sit under their own heading");
 });
 
 test("renderAgentsResolvedSummary: emits per-domain agent list", () => {
@@ -270,6 +302,41 @@ test("postReview: a demoted anchor keeps its finding in the review body", async 
   });
   assert.equal(r.posted, true);
   assert.match(bodySeen, /unanchorable but real/);
+});
+
+test("postReview: a 422-demoted finding loses its body_reason label", async () => {
+  // `body_reason` records why a finding was routed to the body up front. This
+  // one is in the body because GitHub rejected its anchor — the unlabelled
+  // class — so carrying the label over would file it under a heading naming a
+  // different reason.
+  const findings: Finding[] = [
+    makeFinding({ id: "kept", title: "rejected anchor", file: "a.ts", line: 1, body_reason: "generated_path" }),
+  ];
+  let bodySeen = "";
+  let post = 0;
+  const ghMock = async (_p: string, opts?: { method?: string; body?: unknown }) => {
+    if (opts?.method !== "POST") return { status: 200, data: [], headers: {} };
+    post++;
+    if (post === 1) throw new GhError(422, "line must be part of the diff", {});
+    bodySeen = (opts.body as { body: string }).body;
+    return { status: 200, data: { id: 1 }, headers: {} };
+  };
+  const r = await postReview({
+    repo: "o/r", pr: 5, round: 1, agent: "codex", runHash: "h",
+    findings, changedFiles: new Set(["a.ts"]), fixThreshold: "low",
+    humanSummary: "s", prHeadSha: "sha", dryRun: false,
+    ghJsonFn: ghMock as Parameters<typeof postReview>[0]["ghJsonFn"],
+  });
+  assert.equal(r.posted, true);
+  assert.match(bodySeen, /rejected anchor/, "the finding still reaches the body");
+  assert.ok(
+    bodySeen.includes(OUT_OF_DIFF_HEADING),
+    "a rejected anchor is the unlabelled class",
+  );
+  assert.ok(
+    !bodySeen.includes(BODY_REASON_HEADINGS.generated_path),
+    "the pre-posting label must not survive the demotion",
+  );
 });
 
 test("postReview: --dry-run skips POST and records payload summary", async () => {
