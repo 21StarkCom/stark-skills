@@ -173,13 +173,24 @@ standing is the operator's to sweep, not yours.
    ticket id, your peer id, and one line: Report done, blocked, or follow-up to
    that peer over Hermod. Hermod takes your peer id from your own
    `$CODEX_THREAD_ID` (`$CLAUDE_CODE_SESSION_ID` on Claude), and refuses the
-   launch when it finds neither or both. Read the ack's `prompt` on your first
-   launch: the peer it names must be the `hermod msg peers` row whose
-   `sessionId` is yours. If hermod refused, or named someone else, pass that
-   row's `id` as `--leader <peer id>` on every launch. `--minion` shipped in the
-   hermod release after v0.19.0 (STARK-6974); on v0.19.0 or older, write those
-   same four things to a file and launch with `--prompt-file <brief>` instead —
-   never `--message`, which hands the brief's quotes and `$` to the shell.
+   launch when it finds neither or both. **Your peer id** is the `id` of the
+   `hermod msg peers` row whose `sessionId` is yours — the whole
+   `<provider>:<id>` address (`claude:<uuid>`), never the bare session id,
+   which `hermod msg` may not resolve. Look it up before your first launch, so
+   you know what the ack has to say. Then read the first ack's `prompt` before
+   you launch a second Minion: the peer it names must be that `id`. If hermod
+   refused, pass the `id` as `--leader <peer id>` on every launch. If it named
+   someone else, that first Minion is briefed with the wrong leader and its
+   report would go to another session, where step 4 never sees it: send it the
+   correction now — `hermod msg send --to <its peer> -- "Your leader peer is
+   <peer id>; report there."` — pass `--leader` on every later launch, and in
+   step 4 read that ticket off the board and its PR rather than waiting on a
+   report.
+   `--minion` and `--leader` are on hermod main (STARK-6974) and in no release
+   up to v0.19.0; `hermod ticket --help` tells you which you have. Without them,
+   write those same four things to a file and launch with
+   `--prompt-file <brief>` instead — never `--message`, which hands the brief's
+   quotes and `$` to the shell.
 4. **Wait.** Minions report `done <PR> merged <sha> verified <check>`,
    `blocked <reason>`, or
    `follow-up STARK-m filed, stopping`. Codex receives them through its native

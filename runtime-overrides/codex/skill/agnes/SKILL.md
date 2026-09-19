@@ -21,8 +21,8 @@ hermod ticket STARK-n --repo <repo> --agent claude|codex --agnes
 ```
 
 `--agnes` makes the first message just `$agnes STARK-n` (`/agnes` on Claude
-Code). It shipped in the hermod release after v0.19.0 (STARK-6974); on v0.19.0
-or older the same launch is `--prompt-file <brief>` with that one line as the
+Code). It is on hermod main (STARK-6974) and in no release up to v0.19.0;
+without it the same launch is `--prompt-file <brief>` with that one line as the
 brief, and `hermod ticket --help` tells you which you have. Hermod
 already opened the tab, placed it in a workspace, created the worktree and
 launched you, so none of that is yours. What is yours is everything after: the
@@ -46,12 +46,18 @@ sequences you, and nobody checks your work but you.
 Agnes.** Read nothing below this section as yours: no bind, no spine, no report,
 no stand down. Launch her and stop.
 
-1. Pick the repo. With `--repo <name>`, pass it through. Without it, find the
+1. Pick the repo. With `--repo <name>`, pass it through. Without it, **read the
+   ticket first** (`alfred task show STARK-n`): a ticket that belongs to another
+   repo than the one you are standing in is launched with `--repo <that repo>`,
+   never into this one — hermod would exit 0 and Agnes would work it, unattended,
+   in the wrong codebase. Only when the ticket is this repo's, find the
    **main checkout** of the repo you are in — the first `worktree` line of
    `git worktree list --porcelain`, not `git rev-parse --show-toplevel`, which
    names your own worktree when you are inside one — and pass it as `--cwd`.
    Run that as its own command and paste the path in literally; a `$(...)` in
-   the launch line is refused by the worktree guard.
+   the launch line can be refused by Claude Code's worktree guard
+   ([measured](../../standards/stand-down.md#four-rules-about-when) on the quoted
+   form only, which is too fine a line to rest a launch on).
 2. Launch, once:
 
    ```
@@ -61,6 +67,13 @@ no stand down. Launch her and stop.
    **Always pass `--agent`** — hermod's own default is claude, so leaving it off
    would not launch your runtime. `--repo` and `--cwd` are mutually exclusive.
    Leave the tab focused; the operator asked to see it.
+
+   `--agnes`, and reading the bound ticket when you pass no `STARK-n`, are both
+   newer than hermod v0.19.0. Check `hermod ticket --help` first: if it lists no
+   `--agnes`, the ticket id is required — with none given, stop and ask for it —
+   and the launch is the same line with `--prompt-file <brief>` in place of
+   `--agnes`, where `<brief>` is a file holding the one hand-off line from step
+   3. That is the same launch on an older hermod, not a workaround.
 3. Print the ack's `surface`, `workspace`, `name` and `prompt`, and stop. The
    `prompt` must read `$agnes STARK-n` (`/agnes STARK-n` on Claude) — that line is
    the whole hand-off.
