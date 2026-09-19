@@ -27,11 +27,7 @@ import {
   type Finding,
   type Severity,
 } from "./finding_lib.ts";
-import {
-  explainTermination,
-  TERMINATION_STDERR_TAIL,
-  type TerminationInfo,
-} from "./child_termination_lib.ts";
+import { explainTermination } from "./child_termination_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 import {
   DEFAULT_GENERATED_PATHS_CONFIG,
@@ -718,14 +714,11 @@ type RunFn = (cmd: string, args: string[]) => { status: number | null; stdout: s
  * silently on exactly the large PRs whose findings matter most. Note that the
  * killed child does NOT necessarily leave `stderr` empty: it keeps whatever it
  * had already written, and `gh` writes there routinely (rate-limit notices,
- * warnings). `explainTermination` below therefore names the cause whenever the
+ * warnings). `explainTermination` (child_termination_lib.ts, shared with
+ * review_post_lib.ts's posting path) therefore names the cause whenever the
  * child was terminated, never gated on an empty stderr.
  */
 export const GH_MAX_BUFFER = 64 * 1024 * 1024;
-
-// `explainTermination` lives in child_termination_lib.ts so review_post_lib.ts's
-// posting path shares it (STARK-6112); re-exported for existing importers.
-export { explainTermination, TERMINATION_STDERR_TAIL, type TerminationInfo };
 
 /**
  * `defaultRun` with an explicit buffer cap. Exported so the termination paths

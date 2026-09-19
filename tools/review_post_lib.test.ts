@@ -462,7 +462,9 @@ async function withFakeGh(script: string, fn: () => Promise<void>): Promise<void
   try {
     await fn();
   } finally {
-    process.env.PATH = prevPath;
+    // Assigning `undefined` to an env var stores the STRING "undefined".
+    if (prevPath === undefined) delete process.env.PATH;
+    else process.env.PATH = prevPath;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -474,6 +476,9 @@ test("ghJsonOnce: a gh killed before writing stderr names the signal, not a bare
       assert.equal(err.status, -1);
       assert.doesNotMatch(err.message, /failed:\s*$/);
       assert.match(err.message, /terminated: killed by signal SIGTERM/);
+      // `postReview` builds `unpostedReason` from `err.body`, never the message —
+      // so the body is what actually reaches the operator on the posting path.
+      assert.match(err.body, /terminated: killed by signal SIGTERM/);
       return true;
     });
   });
@@ -507,8 +512,56 @@ test("ghJsonOnce: a normal non-zero exit keeps the child's own stderr and names 
   await withFakeGh("echo 'gh: connection refused' >&2\nexit 7", async () => {
     await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/reviews"), (err: unknown) => {
       assert.ok(err instanceof GhError);
-      assert.match(err.message, /failed \(exit 7\): gh: connection refused/);
+      assert.match(err.message, /failed: gh exited 7: gh: connection refused/);
       assert.doesNotMatch(err.message, /terminated/);
+      assert.match(err.body, /^gh exited 7: gh: connection refused/);
+      return true;
+    });
+  });
+});
+
+test("ghJsonOnce: a gh killed before draining a large POST body names the signal, not an EPIPE crash", async () => {
+  // The posting path is the one that writes stdin. A body larger than the pipe
+  // buffer is still queued when the child dies, so the write fails with EPIPE
+  // on `child.stdin` — an unlistened stream error is an uncaught exception that
+  // kills the whole tool before `close` can report the cause.
+  const body = { body: "x".repeat(4 * 1024 * 1024) };
+  await withFakeGh("kill -KILL $$", async () => {
+    await assert.rejects(
+      ghJsonOnce("/repos/o/r/pulls/1/reviews", { method: "POST", body }),
+      (err: unknown) => {
+        assert.ok(err instanceof GhError, `expected GhError, got: ${String(err)}`);
+        assert.match(err.body, /killed by signal SIGKILL/);
+        return true;
+      },
+    );
+  });
+});
+
+test("ghJsonOnce: a gh that EXITS non-zero mid-paginate is a failure, never a truncated 200", async () => {
+  // Same truncation as the signal kill, reached by a plain exit: page 1 landed,
+  // page 2 died at the transport (no HTTP block to parse), gh exited 1.
+  const page = 'HTTP/2.0 200 OK\\r\\ncontent-type: application/json\\r\\n\\r\\n[{"id":1}]';
+  await withFakeGh(`printf '${page}'\necho 'gh: connection reset by peer' >&2\nexit 1`, async () => {
+    await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/reviews"), (err: unknown) => {
+      assert.ok(err instanceof GhError);
+      assert.equal(err.status, -1);
+      assert.match(err.body, /^gh exited 1 after a partial 2xx response: gh: connection reset by peer/);
+      return true;
+    });
+  });
+});
+
+test("ghJsonOnce: an HTTP error behind gh's exit 1 keeps its real status and body", async () => {
+  // The partial-2xx guard keys on the exit code, and gh exits 1 on every HTTP
+  // error too. A 422 must still arrive as a 422 with GitHub's body intact — it
+  // is the no-drop fallback's only input.
+  const resp = 'HTTP/2.0 422 Unprocessable Entity\\r\\n\\r\\n{"errors":[{"index":0}]}';
+  await withFakeGh(`printf '${resp}'\necho 'gh: HTTP 422' >&2\nexit 1`, async () => {
+    await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/reviews"), (err: unknown) => {
+      assert.ok(err instanceof GhError);
+      assert.equal(err.status, 422);
+      assert.equal(err.body, '{"errors":[{"index":0}]}');
       return true;
     });
   });

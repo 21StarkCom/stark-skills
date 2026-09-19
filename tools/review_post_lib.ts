@@ -131,6 +131,13 @@ async function spawnCollect(
       };
       tryFinish();
     });
+    // A child that dies before draining its stdin fails the queued write with
+    // EPIPE on `child.stdin`, and an unlistened stream 'error' is an uncaught
+    // exception: it kills the whole tool before `close` can say WHY the child
+    // died. Only a body larger than the pipe buffer is still queued at that
+    // point — i.e. exactly the large review POSTs. `close` is the authoritative
+    // outcome, so the write error itself is dropped.
+    child.stdin.on("error", () => {});
     if (opts.input !== undefined) child.stdin.end(opts.input);
     else child.stdin.end();
   });
@@ -160,13 +167,17 @@ export async function ghJsonOnce(p: string, opts: GhJsonOpts = {}): Promise<GhJs
     throw new GhError(-1, why, {}, `gh api ${p} failed: ${why.slice(0, 400)}`);
   }
   const { headers, body, status } = parseHttpStream(res.stdout);
-  if (status === 0) {
-    throw new GhError(
-      -1,
-      res.stderr || res.stdout,
-      {},
-      `gh api ${p} failed (exit ${res.status}): ${res.stderr.slice(0, 400)}`,
-    );
+  // `gh api` exits 0 on every 2xx, so a non-zero exit behind one is the kill
+  // above reached by a plain exit: an earlier page landed, a later one died at
+  // the transport with no HTTP block to parse. Same truncated 200, same answer.
+  const partial = res.status !== 0 && status >= 200 && status < 300;
+  if (status === 0 || partial) {
+    const own = (partial ? res.stderr : res.stderr || res.stdout).trim();
+    // The exit code goes in the BODY, not only the message: `postReview`
+    // reports `err.body`, so a silent non-zero exit would otherwise surface in
+    // `unpostedReason` as a bare `http_-1: `.
+    const why = `gh exited ${res.status}${partial ? " after a partial 2xx response" : ""}: ${own}`;
+    throw new GhError(-1, why, {}, `gh api ${p} failed: ${why.slice(0, 400)}`);
   }
   let data: unknown = null;
   if (body.length > 0) data = parseConcatenatedJson(body);
