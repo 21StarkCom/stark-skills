@@ -694,3 +694,34 @@ describe("parseArgs generated-path flags", () => {
     );
   });
 });
+
+// --- termination cause survives a noisy child -------------------------------
+
+describe("defaultRun termination cause", () => {
+  // The ENOBUFS explanation used to be gated on stderr being EMPTY. `gh` writes
+  // to stderr routinely (rate-limit notices, warnings), and a child killed for
+  // exceeding maxBuffer keeps whatever it had already written there — so the one
+  // cause we can name precisely was swallowed by an unrelated warning, and the
+  // caller interpolated that warning into `failed (exit null): gh: a warning`.
+  // That is the same silent-on-large-PRs failure this tool exists to prevent,
+  // just relocated to the 64 MiB boundary.
+  test("names the maxBuffer cause even when the child wrote to stderr", () => {
+    const r = defaultRun(process.execPath, [
+      "-e",
+      `process.stderr.write("gh: a warning\\n"); process.stdout.write("x".repeat(${GH_MAX_BUFFER + 1024}))`,
+    ]);
+    assert.equal(r.status, null, "expected a maxBuffer kill, not a normal exit");
+    assert.match(r.stderr, /exceeded maxBuffer/, `cause not named: ${r.stderr}`);
+    assert.match(r.stderr, /gh: a warning/, "the child's own stderr must be preserved");
+  });
+
+  test("names the signal even when the child wrote to stderr", () => {
+    const r = defaultRun(process.execPath, [
+      "-e",
+      "process.stderr.write('noise\\n'); process.kill(process.pid, 'SIGKILL')",
+    ]);
+    assert.equal(r.status, null);
+    assert.match(r.stderr, /terminated/, `cause not named: ${r.stderr}`);
+    assert.match(r.stderr, /noise/, "the child's own stderr must be preserved");
+  });
+});

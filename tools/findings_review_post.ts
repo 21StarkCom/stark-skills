@@ -425,14 +425,23 @@ export const GH_MAX_BUFFER = 64 * 1024 * 1024;
 
 export const defaultRun: RunFn = (cmd, args) => {
   const sp = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: GH_MAX_BUFFER });
-  // A signal kill with no stderr is otherwise indistinguishable from a crash.
-  // ENOBUFS is the one cause we can name precisely, so name it.
+  // A signal kill is otherwise indistinguishable from a crash, and ENOBUFS is
+  // the one cause we can name precisely — so name it whenever the child was
+  // terminated, NOT only when stderr happens to be empty. `gh` writes to stderr
+  // routinely (rate-limit notices, warnings), and a child killed for exceeding
+  // maxBuffer keeps whatever it already wrote there; gating on an empty stderr
+  // let an unrelated warning swallow the real cause and put the caller back to
+  // reporting `failed (exit null): gh: a warning` on exactly the large PRs this
+  // buffer exists for. The child's own stderr is preserved alongside.
   let stderr = sp.stderr ?? "";
-  if (sp.status === null && !stderr) {
+  if (sp.status === null) {
     const why = (sp.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS"
       ? `output exceeded maxBuffer (${GH_MAX_BUFFER} bytes)`
       : sp.error?.message ?? `killed by signal ${sp.signal ?? "unknown"}`;
-    stderr = `${cmd} produced no stderr and was terminated: ${why}`;
+    const own = stderr.trim();
+    stderr = own
+      ? `${cmd} was terminated: ${why}; its own stderr followed: ${own}`
+      : `${cmd} produced no stderr and was terminated: ${why}`;
   }
   return { status: sp.status, stdout: sp.stdout ?? "", stderr };
 };
