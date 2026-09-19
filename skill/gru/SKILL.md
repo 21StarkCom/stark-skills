@@ -49,10 +49,19 @@ tells you to stop; there is no other verb.
    Ticket whose Minion reported `blocked` or `follow-up … stopping` → blocked
    until the operator resolves it. Everything else is ready once its
    dependencies are finished.
-3. **Launch.** For each ready ticket while live Minions < N:
+3. **Launch.** Once, before the first launch, read frigg's repo registry —
+   `frigg repos list --json` — which is what `hermod ticket --repo <name>`
+   resolves a name through. Then for each ready ticket while live Minions < N:
    `hermod ticket STARK-n --repo <ticket's repo> --agent <agent> --no-focus --prompt-file <brief>`.
    Always pass `--repo` (the default is the repo you are standing in) and use
    `--prompt-file` (a `--message` brief hands its quotes and `$` to the shell).
+   A repo the registry does not list cannot be resolved by name — `hermod ticket`
+   exits `unknown repo '<name>'` — so for that ticket alone fall back to
+   `--cwd ~/Code/21Stark/<repo>`, the fleet's one-clone-per-repo layout. The
+   fallback is a path guess, not an equal: never drop `--repo` for a repo the
+   registry does list, and never use `--cwd` wholesale. Do not run
+   `frigg repos scan` yourself — seeding the registry is the operator's, once;
+   name the command in your step 6 report instead.
    The brief is: invoke `/minion` (`$minion` on Codex), the ticket id, your peer
    id (the `hermod msg peers` row whose `sessionId` is your own
    `$CLAUDE_CODE_SESSION_ID`, or `$CODEX_THREAD_ID` on Codex), and one line:
@@ -98,7 +107,9 @@ tells you to stop; there is no other verb.
    the path before you relaunch.
 6. **Loop** steps 2–5 until every ticket is finished or blocked. Then report:
    finished tickets with PR links, blocked tickets with the reason, and
-   follow-up tickets the Minions filed.
+   follow-up tickets the Minions filed. If any repo was unregistered in step 3,
+   add one line naming those repos and the operator's fix:
+   `frigg repos scan ~/Code/21Stark`.
 
 ## Authority
 
