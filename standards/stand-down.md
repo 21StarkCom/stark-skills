@@ -164,11 +164,13 @@ which drifts into a subdirectory the moment anything in your session runs there
 (`hermod v0.19.0`, measured: a session that had been in `<worktree>/tools`
 reported `"worktree":"<worktree>/tools"` and
 `"detail":"…remove worktree <worktree>/tools…"`, while the removal would still
-have correctly targeted `<worktree>`). That is STARK-6168, a hermod bug, and
-until it lands **never read the reported path as the worktree root**. It is
-still guaranteed to be *inside* your worktree, which is all the preflight's
-`git -C` checks need — `git status` and `git log` are repo-wide from any
-subdirectory. When you want the root itself, ask git
+have correctly targeted `<worktree>`). That was STARK-6168, a hermod bug, fixed
+in `hermod v0.20.0` (`845787e`: the ack reports the resolved toplevel). On
+v0.19.0 **never read the reported path as the worktree root**; until this
+contract pins a minimum hermod version, do not rest anything on it on any
+version. It is still guaranteed to be *inside* your worktree, which is all the
+preflight's `git -C` checks need — `git status` and `git log` are repo-wide
+from any subdirectory. When you want the root itself, ask git
 (`git rev-parse --show-toplevel`), not the ack.
 
 If the reported path is not inside your worktree at all, pass
