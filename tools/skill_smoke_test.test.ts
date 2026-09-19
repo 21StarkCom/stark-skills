@@ -513,6 +513,46 @@ for (const { label, file, res } of LINK_SOURCES) {
   });
 }
 
+// The stand-down pane-count check must not depend on `$CMUX_WORKSPACE_ID`
+// (STARK-7263). `hermod panes` lists only the workspace that stamp names, and
+// the stamp goes stale when a tab is moved — so a bare `hermod panes` check
+// printed nothing over a real count of 2, and a finished Minion read "check
+// failed", did not arm, and left agent, worktree and tab behind. The fix is two
+// steps (`hermod whoami --json`, then `hermod panes` under the literal
+// workspaceId it printed); the one-line `$(…)` form reads as equivalent and is
+// refused by Claude Code's worktree-isolation guard, so a tidy-up that folds
+// the steps together — or drops the prefix — has to hit a red test.
+for (const dir of ["standards", "runtime-overrides/codex/standards"]) {
+  test(`skill smoke: ${dir}/stand-down.md — pane count is workspace-stamp independent`, () => {
+    const text = fs.readFileSync(
+      path.join(REPO_ROOT, ...dir.split("/"), "stand-down.md"),
+      "utf8",
+    );
+    const panesLines = text
+      .split("\n")
+      .filter((line) => /hermod panes --json/.test(line));
+    assert.ok(panesLines.length > 0, "the pane-count check is gone");
+    for (const line of panesLines) {
+      assert.match(
+        line,
+        /^\s*CMUX_WORKSPACE_ID=<[^>$]+> hermod panes --json/,
+        `bare or computed-env \`hermod panes\` check: ${line.trim()}`,
+      );
+    }
+    assert.match(text, /^\s*hermod whoami --json\s*$/m, "step 1 (whoami) is gone");
+    assert.doesNotMatch(
+      text,
+      /CMUX_WORKSPACE_ID=["']?\$\(/,
+      "runtime-computed CMUX_WORKSPACE_ID — the worktree-isolation guard refuses it",
+    );
+    assert.doesNotMatch(
+      text,
+      /same\s+ground\s+poison-pill/,
+      "a stale stamp is NOT a poison-pill refusal ground (its dry run answers `completed`)",
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 5. Every distinct in-repo `tools/*.ts` CLI mentioned by any skill exits
 //    cleanly on --help. Run in parallel (~13 spawns total, ~600ms each

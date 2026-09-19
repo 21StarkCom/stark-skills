@@ -83,12 +83,28 @@ line.
   is noise. Fix that first.
 - **Count the surfaces in your pane before you arm**, because cmux refuses to
   close a window's only one and that failure is invisible until after you are
-  dead (see `partial`, below):
+  dead (see `partial`, below). It is two steps, because `hermod panes` lists
+  only the workspace `$CMUX_WORKSPACE_ID` names and that stamp goes stale the
+  moment a tab is moved between workspaces (`hermod v0.19.0`, measured: a moved
+  tab's bare `hermod panes` check printed nothing, rc 0, over a real count of
+  2). First ask where you really are — `whoami` resolves `$CMUX_SURFACE_ID`
+  against the live tree, so its answer is right even under a stale stamp:
 
   ```
-  hermod panes --json | jq '.panes[]
+  hermod whoami --json
+  ```
+
+  Then count, pasting the `workspaceId` it printed as a **literal**:
+
+  ```
+  CMUX_WORKSPACE_ID=<workspaceId from whoami> hermod panes --json | jq '.panes[]
     | select(.surface_ids | index(env.CMUX_SURFACE_ID)) | .surface_count'
   ```
+
+  Do not fold the two into one line with a `$(…)` substitution:
+  Claude Code's worktree-isolation guard refuses a runtime-computed env value
+  on a command, and the pasted literal works on either runtime. `hermod panes --pane <paneRef>` is no shortcut
+  either — under a stale stamp it answers `not_found`.
 
   Read it as three outcomes, not two. **More than 1** and the last-surface
   refusal is not what will stop you — the claude-lock `partial` below still
@@ -97,11 +113,20 @@ line.
   last surface"`): **arm anyway** and say so in your report. Do not skip the
   stand-down over it — that `partial` still exits your agent and removes your
   worktree, which is the whole point of the mandate above, and not arming
-  leaves a live agent, a live worktree *and* the same tab. **No output at all**
-  is not a count: `index` returns nothing when `$CMUX_SURFACE_ID` is unset or
-  your surface is not among this window's panes, and jq still exits 0. That is
-  the same ground poison-pill itself refuses on — treat it as the check having
-  failed: report it and stop.
+  leaves a live agent, a live worktree *and* the same tab. **Unresolvable**
+  is not a count, and it has two shapes. `whoami` exits 1 with a named error
+  when `$CMUX_SURFACE_ID` is unset (`no CMUX_SURFACE_ID in env`) or your
+  surface is gone (`surface … not found in tree`) — loud, where the old
+  one-step check was silent. Or the second step prints nothing: `index`
+  returns nothing when your surface is not among the panes listed, and jq
+  still exits 0 — with the id pasted from `whoami` that means a mispasted id
+  or a surface that vanished between the two steps, never a moved tab. Either
+  way treat it as the check having failed: report it and stop. It is **not**
+  the ground poison-pill itself refuses on. Its foreground refusals
+  (`--dry-run --json`, exit 2) are exactly two — `$CMUX_SURFACE_ID` unset, or
+  no active session on the surface — and a stale workspace stamp is neither:
+  measured, the dry run answers `completed` under one. So a clean dry run does
+  not stand in for this count.
 
 ## What it aims at
 
