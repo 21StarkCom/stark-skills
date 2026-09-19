@@ -68,16 +68,38 @@ jobs:
       # dist tree, while its prose ships. That is exactly how `agnes` shipped
       # un-membered at bifrost v0.31.2 (STARK-6249) — the release published
       # standards/worker-spine.md naming "/agnes" while the skill itself went nowhere,
-      # and every gate below reported clean, because all of them only compare bifrost's
-      # catalog against bifrost's dist. None of them looks back at this tree.
+      # and every gate below reported clean. `validate`, `build --check` and
+      # `check-bumps` only compare bifrost's catalog against bifrost's dist; `sync
+      # --check` IS cross-repo and regenerates from this tree, but it reads only the
+      # skills a bundle already declares. None of them asks the one question this step
+      # asks: is every skill up here claimed by anything at all?
       #
       # Runs BEFORE the regen so an unclaimed skill fails the sync rather than opening a
       # PR that looks publishable. The script is bifrost's (it reads bifrost's catalog
       # membership) and is the SAME file publish.sh calls — do not inline a copy here,
       # two copies of a gate is how it ends up enforced in one place and not the other,
       # which is the bug this step exists to close (STARK-6468).
+      #
+      # A RED run here means publication is STOPPED, not "unpublished but fine": this
+      # step precedes the regen, so no sync PR is opened or refreshed at all, and every
+      # later push to main fails here too until the membership lands in bifrost. Land a
+      # new skill's bundle membership in bifrost BEFORE merging the skill here.
+      #
+      # The script path is a cross-repo contract with bifrost's default branch. Check it
+      # explicitly: a bare invocation of a moved, renamed or non-executable script dies
+      # at exit 127/126 with "No such file or directory", which reads as a broken
+      # workflow rather than as the contract break it is.
       - name: Coverage gate — every skill is claimed by a bundle
-        run: bifrost/docs/scripts/coverage-gate.sh "$GITHUB_WORKSPACE/stark-skills"
+        run: |
+          set -euo pipefail
+          gate="$GITHUB_WORKSPACE/bifrost/docs/scripts/coverage-gate.sh"
+          if [ ! -x "$gate" ]; then
+            # stdout, not stderr: GitHub parses ::error:: workflow commands off a
+            # step's standard output, so redirecting it hides the annotation.
+            echo "::error::bifrost's default branch no longer ships an executable docs/scripts/coverage-gate.sh at that path; marketplace-sync depends on it (STARK-6468). Restore it, or update this step in lockstep."
+            exit 1
+          fi
+          "$gate" "$GITHUB_WORKSPACE/stark-skills"
 
       - uses: actions/setup-go@v5
         with:
