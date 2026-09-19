@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import {
   DEFAULT_TIMEOUT_SEC,
   DispatchError,
+  EXIT_CLOSE_GRACE_MS,
   LENGTH_FLOOR_FAIL,
   LENGTH_FLOOR_WARN,
   REAL_BUILDERS,
@@ -712,6 +713,43 @@ test("realRunner: forwarding handlers exist only while a seat is in flight", { t
     assert.equal(missing.notFound, true);
     assert.equal(process.listenerCount("SIGINT"), before, "a spawn failure left a handler behind");
   } finally {
+    reapPids(pidFile);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// STARK-6735. A seat released its group only at `emit`, which for a leader that
+// exits with an escaped descendant holding stdout is EXIT_CLOSE_GRACE_MS later —
+// a window in which the group is empty, its id free for reuse, and a Ctrl-C
+// would be forwarded to whoever holds it now. The leader's exit now probes the
+// group (signal 0) and an empty one leaves the forwarding set at once. And a
+// timeout that fires after that probe climbs no ladder: SIGTERM at a freed id
+// lands on a stranger. The leader waits for the pid file perl writes AFTER
+// `setsid`, so the group is provably empty when it exits.
+test("realRunner: a seat whose group emptied leaves the forwarding set before emit, and its timeout sends nothing", { timeout: 30_000 }, async () => {
+  const dir = tmpDir("fwd-reclaimed");
+  const pidFile = path.join(dir, "pid");
+  const base = { env: { PATH: process.env.PATH ?? "" }, cwd: dir, stdin: "prompt" };
+  const before = process.listenerCount("SIGINT");
+  const sh = `perl -MPOSIX -e 'POSIX::setsid(); open(F, ">", $ARGV[0]); print F $$; close F; sleep 30' '${pidFile}' & ` +
+    `while [ ! -s '${pidFile}' ]; do sleep 0.05; done; exit 0`;
+  let settled = false;
+  const started = Date.now();
+  // 300 ms: after the leader's exit (~100 ms) and well inside the 2 s grace.
+  const running = realRunner({ ...base, seat: "codex", cmd: "/bin/sh", args: ["-c", sh], timeoutMs: 300 })
+    .then((o) => { settled = true; return o; });
+  try {
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while the seat is live");
+    assert.ok(await waitFor(() => process.listenerCount("SIGINT") === before, 1_500), "an emptied group stayed in the forwarding set");
+    assert.equal(settled, false, "the seat settled first — the drop proves nothing about the exit probe");
+    const outcome = await running;
+    assert.ok(Date.now() - started >= EXIT_CLOSE_GRACE_MS, "settled before the grace — the descendant never held stdout, so nothing here was tested");
+    assert.equal(outcome.timedOut, true);
+    assert.equal(outcome.kill, null, `the ladder climbed a group the kernel had reported gone: ${JSON.stringify(outcome.kill)}`);
+    assert.equal(outcome.code, 0, "the leader's own exit was thrown away");
+    assert.equal(process.listenerCount("SIGINT"), before);
+  } finally {
+    await waitFor(() => readPids(pidFile).length === 1, 2_000);
     reapPids(pidFile);
     fs.rmSync(dir, { recursive: true, force: true });
   }

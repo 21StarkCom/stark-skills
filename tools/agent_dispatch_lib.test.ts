@@ -296,11 +296,9 @@ for (const runtime of ["claude", "codex"] as const) {
       }
     });
 
-    // STARK-6377. The latch only guards this call's OWN ladder. `forward`
-    // signals every id in the forwarding set through the module-level
-    // `killGroup`, which knows nothing about a per-call latch — so a reclaimed
-    // group has to leave that set the moment the latch trips, or a Ctrl-C
-    // delivers the recycled-id signal by the other door. `spawnBounded` learned
+    // STARK-6377. `forward` does not settle with the call — so a reclaimed
+    // group has to leave the forwarding set the moment the latch trips, or a
+    // Ctrl-C delivers the recycled-id signal by the other door. `spawnBounded` learned
     // this in STARK-6245 while both copies of `run()` kept a private latch that
     // never did; they now share `makeGroupKiller`. Same shape as the emptied-
     // group test above: the leader waits for the pid file perl writes AFTER
@@ -336,6 +334,35 @@ for (const runtime of ["claude", "codex"] as const) {
         // The first assertion runs before perl has written its pid. A red there
         // would reap an empty file and leave a `sleep 20` nobody else can reach
         // (it left our session) holding the call open into the next test.
+        await waitFor(() => readPids(pidFile).length === 1, 2_000);
+        reapPids(pidFile);
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // STARK-6735. When "close" never comes the result is SYNTHESIZED, and it
+    // used to claim `signal: "SIGKILL"` outright. Here that is false twice over:
+    // the leader exited 0 on its own at t=0, and the latch — tripped by the exit
+    // probe — swallowed every rung of the ladder, so nothing was ever sent. The
+    // descendant outlives the whole ladder (1 s bound + 5 s + 2 s), so this
+    // settles through the last resort and nowhere else. `timedOut` is what says
+    // the bound fired; `code`/`signal` must report the leader's real exit.
+    test("a last-resort result reports the leader's real exit, not a SIGKILL nobody sent", { timeout: 30_000 }, async () => {
+      const dir = tmpDir("phantom-kill");
+      const pidFile = path.join(dir, "pid");
+      const sh = `perl -MPOSIX -e 'POSIX::setsid(); open(F, ">", $ARGV[0]); print F $$; close F; sleep 30' '${pidFile}' & ` +
+        `while [ ! -s '${pidFile}' ]; do sleep 0.05; done; echo up`;
+      try {
+        const started = Date.now();
+        const { res, sent } = await recordGroupSignals(() => runFn("sh", ["-c", sh], { timeoutSec: 1 }));
+        const elapsed = Date.now() - started;
+        assert.ok(elapsed > 6_000, `settled in ${elapsed}ms — on "close", so the synthesized result went untested`);
+        assert.equal(res.timedOut, true);
+        assert.match(res.stdout, /up/);
+        assert.deepEqual(delivered(sent), [], `the premise failed — something WAS sent: ${JSON.stringify(sent)}`);
+        assert.equal(res.signal, null, "reported a signal for a child that was never signalled");
+        assert.equal(res.code, 0, "the leader's own exit code was thrown away");
+      } finally {
         await waitFor(() => readPids(pidFile).length === 1, 2_000);
         reapPids(pidFile);
         fs.rmSync(dir, { recursive: true, force: true });

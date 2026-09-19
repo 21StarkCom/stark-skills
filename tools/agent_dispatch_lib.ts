@@ -30,7 +30,7 @@ import * as path from "node:path";
 
 import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import { assetConfigPath } from "./asset_root_lib.ts";
-import { makeGroupKiller, trackGroup } from "./bounded_spawn_lib.ts";
+import { makeGroupKiller } from "./bounded_spawn_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 import { geminiAuthSettings, resolveGeminiAuthMode } from "./gemini_auth_lib.ts";
 import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
@@ -185,7 +185,7 @@ const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024; // 32 MiB
 // whatever a headless claude/codex/gemini had spawned was reparented to init and
 // ran on (and billed) past the bound. `detached` also takes the child out of the
 // terminal's foreground group, so Ctrl-C is paid back through bounded_spawn_lib's
-// forwarding half (`trackGroup`, released through the killer); the SIGTERM →
+// claim (`makeGroupKiller`: tracked, latched and released per call); the SIGTERM →
 // SIGKILL ladder stays this function's own.
 
 export async function run(
@@ -222,15 +222,23 @@ export async function run(
     }
 
     const pgid = child.pid;
-    if (pgid !== undefined) trackGroup(pgid);
     // The group id is ours only while the group has members: once it empties
     // the id is free for reuse, and a signal sent there lands on a stranger.
     // `child.kill()` had that guard for free — it is a no-op once the child has
     // exited — while `process.kill(-pgid)` signals whoever holds the id NOW. So
     // ESRCH, the kernel saying the group is gone, latches: nothing follows it.
-    // The latch is the shared one (STARK-6377) — it also drops the group from
-    // the forwarding set, which this file's private copy never did.
+    // The shared door (STARK-6377, STARK-6735) claims the group for Ctrl-C
+    // forwarding, latches, and releases per CALL — synchronously here, so
+    // forwarding is armed before anything can await.
     const killTree = makeGroupKiller(pgid);
+    // What this call can truthfully report about how the child ended
+    // (STARK-6735): the last signal the kernel ACCEPTED, and the leader's own
+    // exit. The last-resort result used to claim `signal: "SIGKILL"` outright —
+    // false for a leader that exited 0 at t=0 with an escaped descendant holding
+    // stdout, where the latch had swallowed every rung and nothing was sent.
+    let delivered: NodeJS.Signals | null = null;
+    let exited: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+    const send = (signal: NodeJS.Signals): void => { if (killTree(signal)) delivered = signal; };
     const ladder: NodeJS.Timeout[] = [];
 
     let settled = false;
@@ -251,8 +259,8 @@ export async function run(
       // a normal close: nothing was killed, so nothing there is ours to signal.
       for (const t of ladder) clearTimeout(t);
       if (timedOutFlag) killTree("SIGKILL");
-      // Through the killer, never a bare `releaseGroup(pgid)`: if the latch has
-      // already let the id go, it may be another call's by now.
+      // The claim ends here, by identity — never by id: if the latch has already
+      // let the id go, that number may be another call's by now.
       killTree.release();
       resolve(closedResult);
     };
@@ -264,9 +272,9 @@ export async function run(
       // stdio-end alone is unsafe — a child can close its FDs while
       // the process keeps running.
       timedOutFlag = true;
-      killTree("SIGTERM");
+      send("SIGTERM");
       ladder.push(setTimeout(() => {
-        killTree("SIGKILL");
+        send("SIGKILL");
         // Last resort: "close" needs BOTH the process to exit and every stdio
         // pipe to end, so a descendant that inherited stdout and outlived the
         // kill holds this promise open forever. After SIGKILL + a grace, tear
@@ -281,9 +289,13 @@ export async function run(
           stdoutEnded = true;
           stderrEnded = true;
           processClosed = true;
+          // "close" never came, so report what is KNOWN: the leader's own exit
+          // if it had one, else the last signal the kernel accepted from us —
+          // `null` when the latch swallowed them all. `timedOut` is what says
+          // the bound fired; `signal` must not invent how the child died.
           closedResult ??= {
-            code: null,
-            signal: "SIGKILL",
+            code: exited !== null ? exited.code : null,
+            signal: exited !== null ? exited.signal : delivered,
             stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
             stderr: Buffer.concat(stderrChunks).toString("utf-8"),
             timedOut: true,
@@ -336,8 +348,12 @@ export async function run(
     // would signal an id freed long before (measured: SIGTERM + 2x SIGKILL).
     // Probe now, while the id cannot have been reused; signal 0 delivers
     // nothing. Not caught: a group an in-group descendant keeps alive past
-    // this probe and that empties later — there the latch stops at one signal.
-    child.once("exit", () => killTree(0));
+    // this probe and that empties later — there the latch stops at ONE signal,
+    // whichever door sends it (this ladder or `forward`; they share the latch).
+    child.once("exit", (code, signal) => {
+      exited = { code, signal };
+      killTree(0);
+    });
 
     child.on("close", (code, signal) => {
       clearTimeout(timer);

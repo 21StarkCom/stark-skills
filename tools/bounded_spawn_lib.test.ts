@@ -13,7 +13,7 @@ import * as nodePath from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { makeGroupKiller, releaseGroup, spawnBounded, trackGroup } from "./bounded_spawn_lib.ts";
+import { makeGroupKiller, spawnBounded } from "./bounded_spawn_lib.ts";
 
 /** A never-settling call must FAIL the suite, not stall the required check. */
 const HANG_GUARD = { timeout: 30_000 };
@@ -186,49 +186,52 @@ for (const bad of [0, NaN, 3_000_000_000]) {
   });
 }
 
-// STARK-6135: `trackGroup` is exported for jury's seats. `process.kill(-0)` is
-// this process's OWN group and `-1` is every process the user owns, so a bad id
-// must never be tracked — a forwarded Ctrl-C would land on strangers.
-for (const bad of [0, 1, -5, 1.5, NaN]) {
-  test(`trackGroup refuses an unsignallable group id: ${String(bad)}`, () => {
+// STARK-6135: jury's seats claim a group through the same door. `process.kill(-0)`
+// is this process's OWN group and `-1` is every process the user owns, so a bad
+// id must never be tracked — a forwarded Ctrl-C would land on strangers.
+for (const bad of [undefined, 0, 1, -5, 1.5, NaN]) {
+  test(`makeGroupKiller refuses an unsignallable group id: ${String(bad)}`, () => {
     const before = process.listenerCount("SIGINT");
-    trackGroup(bad);
+    const killer = makeGroupKiller(bad);
     assert.equal(process.listenerCount("SIGINT"), before, "a refused id must install nothing");
-    releaseGroup(bad);
+    assert.equal(killer("SIGTERM"), false, "a refused id must never be signalled");
+    assert.equal(killer.gone, false, "nothing was probed, so nothing is known to be gone");
+    killer.release();
     assert.equal(process.listenerCount("SIGINT"), before);
   });
 }
 
-test("trackGroup/releaseGroup pair installs and removes the handlers, release is idempotent", () => {
+test("a claim installs the handlers and its release removes them, idempotently", () => {
   const before = process.listenerCount("SIGINT");
   // Never signalled here, so any id above 1 will do.
-  trackGroup(2_000_000_001);
+  const killer = makeGroupKiller(2_000_000_001);
   assert.equal(process.listenerCount("SIGINT"), before + 1);
-  releaseGroup(2_000_000_001);
-  releaseGroup(2_000_000_001);
+  killer.release();
+  killer.release();
   assert.equal(process.listenerCount("SIGINT"), before);
 });
 
-// STARK-6377. `releaseGroup` is idempotent per ID; a call's release has to be
-// idempotent per CALL. Once the latch lets an id go the kernel may hand it to a
-// concurrent call's child, which tracks it again — and the first call's settle
-// path, releasing by id, would then delete the SECOND call's entry and leave a
-// live agent deaf to Ctrl-C. The id here is above any real pid_max, so the group
-// never exists: every signal draws ESRCH, and re-tracking it stands in for the
-// recycle with no pid counter to race.
+// STARK-6377 / STARK-6735. A claim is keyed by CALL, never by id. Once the latch
+// lets an id go the kernel may hand it to a concurrent call's child, which
+// claims it again — and a first call that released BY ID on settling would
+// delete the SECOND call's claim and leave a live agent deaf to Ctrl-C. The id
+// here is above any real pid_max, so the group never exists: every signal draws
+// ESRCH, and claiming it twice stands in for the recycle with no pid counter to
+// race.
 test("a latched call's settle does not release a later call that recycled its group id", () => {
   const before = process.listenerCount("SIGINT");
   const recycled = 2_000_000_002;
-  trackGroup(recycled);
   const first = makeGroupKiller(recycled);
-  first(0);
-  assert.equal(process.listenerCount("SIGINT"), before, "ESRCH did not drop the group from the forwarding set");
-  trackGroup(recycled); // a second call's child was handed the id
+  assert.equal(first(0), false, "a group that does not exist accepted a probe");
+  assert.equal(first.gone, true, "ESRCH did not latch");
+  assert.equal(process.listenerCount("SIGINT"), before, "ESRCH did not drop the claim from the forwarding set");
+  const second = makeGroupKiller(recycled); // a second call's child was handed the id
   try {
     first.release(); // …and only now does the first call settle
-    assert.equal(process.listenerCount("SIGINT"), before + 1, "the first call's settle released the second call's group");
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "the first call's settle released the second call's claim");
+    assert.equal(second.gone, false, "one call's latch leaked into another call's claim on the same id");
   } finally {
-    releaseGroup(recycled);
+    second.release();
   }
   assert.equal(process.listenerCount("SIGINT"), before);
 });
@@ -236,16 +239,48 @@ test("a latched call's settle does not release a later call that recycled its gr
 test("a killer that never latched still releases exactly once at settle", () => {
   const before = process.listenerCount("SIGINT");
   const id = 2_000_000_003;
-  trackGroup(id);
   const killer = makeGroupKiller(id);
   killer.release();
-  assert.equal(process.listenerCount("SIGINT"), before, "the settle-time release did not untrack the group");
-  trackGroup(id);
+  assert.equal(process.listenerCount("SIGINT"), before, "the settle-time release did not end the claim");
+  const later = makeGroupKiller(id);
   try {
     killer.release();
-    assert.equal(process.listenerCount("SIGINT"), before + 1, "a second release from the same call reached another call's entry");
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "a second release from the same call reached another call's claim");
   } finally {
-    releaseGroup(id);
+    later.release();
+  }
+});
+
+// STARK-6735. `forward` used to signal every tracked id through a bare kill that
+// swallowed ESRCH and untracked nothing — so a group that emptied AFTER the
+// leader's exit probe (an in-group descendant outliving it) was re-signalled on
+// every Ctrl-C an embedding tool's own handler survived, at an id free for
+// reuse. It now shares the per-call latch. The extra listener is what makes this
+// safe to run: with another handler present `forward` neither re-raises nor
+// uninstalls, so the signal is delivered to the test process's handlers only.
+test("a forwarded signal latches a reclaimed group: it is signalled once, not once per Ctrl-C", () => {
+  const id = 2_000_000_004; // above any pid_max: every signal draws ESRCH
+  const own = (): void => { /* the embedding tool's own handler */ };
+  process.on("SIGHUP", own);
+  const real = process.kill;
+  let attempts = 0;
+  process.kill = ((pid: number, signal?: string | number): true => {
+    if (pid === -id) attempts += 1;
+    return real.call(process, pid, signal);
+  }) as typeof process.kill;
+  const killer = makeGroupKiller(id);
+  try {
+    process.emit("SIGHUP", "SIGHUP"); // Node passes the name, as a real delivery does
+    assert.equal(attempts, 1, "the forwarded signal never reached the claimed group");
+    assert.equal(killer.gone, true, "forward heard ESRCH and did not latch the call's killer");
+    process.emit("SIGHUP", "SIGHUP"); // Node passes the name, as a real delivery does
+    assert.equal(attempts, 1, "a second Ctrl-C re-signalled an id the kernel had reported gone");
+    assert.equal(killer("SIGKILL"), false, "the call's own ladder signalled after forward had latched");
+    assert.equal(attempts, 1);
+  } finally {
+    process.kill = real;
+    killer.release();
+    process.removeListener("SIGHUP", own);
   }
 });
 
@@ -282,12 +317,10 @@ test("maxBuffer kills the whole group, not only the writer", HANG_GUARD, async (
   }
 });
 
-// STARK-6245. The per-call ESRCH latch only guards `terminate`'s own kill.
-// `forward` signals every id in `liveGroups` through the module-level
-// `killGroup`, which knows nothing about the latch and does not settle with the
-// call — so a group the kernel has already reclaimed has to leave the
-// forwarding set the moment the latch trips, or the recycled-id signal the
-// latch exists to stop is simply delivered by the other door.
+// STARK-6245. `forward` does not settle with the call — so a group the kernel
+// has already reclaimed has to leave the forwarding set the moment the latch
+// trips, or the recycled-id signal the latch exists to stop is simply delivered
+// by the other door.
 test("a group the kernel has reclaimed is untracked while the call is still open", HANG_GUARD, async () => {
   const pidFile = nodePath.join(os.tmpdir(), `bounded-spawn-reclaimed-${process.pid}-${Date.now()}`);
   const before = process.listenerCount("SIGINT");
@@ -304,8 +337,10 @@ test("a group the kernel has reclaimed is untracked while the call is still open
   let settled = false;
   const running = spawnBounded("/bin/sh", ["-c", sh], { timeoutMs: 20_000 })
     .then((r) => { settled = true; return r; });
-  assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while the child is live");
+  // Every assertion sits INSIDE the try (STARK-6735): the descendant is in its
+  // own session, so if one failed out here nothing else could ever reap it.
   try {
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while the child is live");
     const escaped = await pidFrom(pidFile);
     assert.ok(escaped !== null, "the escaped descendant never reported its pid");
     assert.ok(
