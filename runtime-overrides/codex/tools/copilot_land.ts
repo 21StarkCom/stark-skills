@@ -31,7 +31,7 @@
  *                  abandoned run silently resets HEAD onto the old codebase.
  *
  *   land           --repo O/R --branch NAME --title T --body TEXT
- *                  [--base main] [--lead NAME] [--ready]
+ *                  [--base main] [--lead NAME] [--ready] [--ticket STARK-n]
  *                  [--known-prs "812,819"] [--repo-dir DIR]
  *                  [--dry-run] [--json]
  *                  Push the already-committed branch (never --force),
@@ -40,6 +40,11 @@
  *                  via `gh`), and print `{pr, prs}`. `prs` includes all known
  *                  and landed PRs. `--lead NAME` is inert: accepted for caller compatibility and echoed
  *                  only by `--dry-run`. It selects nothing.
+ *                  Then stamps `pr_url` + `pr_state=open` on the ticket via
+ *                  `alfred task edit --field` (STARK-6108) — `--ticket`, else
+ *                  the branch name, else alfred's bound ticket. That write can
+ *                  never fail the landing: every failure prints one
+ *                  `ticket fields: skipped (…)` line and the exit code stands.
  *
  * Arg-parsing house style: explicit boolean/value flag sets, unknown flags are a
  * hard error, and every refusal prints through `fail()` so `--json` callers get
@@ -55,6 +60,7 @@ import {
   type LandDeps,
   type OpenPr,
 } from "./copilot_land_lib.ts";
+import { ticketFromBranch, writePrOpenFields, type FieldRunResult } from "./ticket_fields_lib.ts";
 
 // ── git shell helpers (the CLI owns the side-effect surface) ───────────────
 
@@ -74,6 +80,17 @@ function gh(args: string[], cwd: string = process.cwd()): Shell {
   const r = spawnSync("gh", args, { cwd, encoding: "utf8", timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
   const stderr = [(r.stderr ?? "").trim(), r.error?.message ?? ""].filter(Boolean).join("; ");
   return { code: r.status ?? 1, stdout: (r.stdout ?? "").trim(), stderr };
+}
+
+// `alfred` for the open-time ticket-field stamp (STARK-6108). Bounded like the
+// others, and NEVER allowed to throw: `ticket_fields_lib` degrades every failure
+// to a visible skip, and a spawn failure (no alfred on PATH) must reach it as an
+// ordinary non-zero result rather than an exception that would take the whole
+// landing down after the PR is already open.
+function alfred(args: string[], cwd: string = process.cwd()): FieldRunResult {
+  const r = spawnSync("alfred", args, { cwd, encoding: "utf8", timeout: 60_000 });
+  const stderr = [(r.stderr ?? "").trim(), r.error?.message ?? ""].filter(Boolean).join("; ");
+  return { code: r.status ?? -1, stdout: (r.stdout ?? "").trim(), stderr };
 }
 
 function treeIsDirty(cwd: string): boolean {
@@ -130,11 +147,11 @@ subcommands:
                  --require-base SHA refuses a stale remote branch that
                  does not contain SHA, and asserts HEAD contains it.
   land           --repo OWNER/REPO --branch NAME --title TEXT --body TEXT
-                 [--base BRANCH] [--lead NAME] [--ready]
+                 [--base BRANCH] [--lead NAME] [--ready] [--ticket STARK-n]
                  [--known-prs "812,819"] [--repo-dir DIR]
                  [--dry-run] [--json]
                  Push (never --force), adopt-or-create the PR, print
-                 {pr, prs}.
+                 {pr, prs}, then stamp the ticket's pr_url/pr_state.
 
 options:
   -h, --help   show this help message and exit
@@ -144,6 +161,10 @@ Notes:
   - Draft PRs by default (repo policy); --ready opts out.
   - impl is the only artifact allowed multiple PRs — --known-prs is unioned
     with the landed/adopted number, never treated as a conflict.
+  - land stamps pr_url + pr_state=open on the ticket through
+    'alfred task edit --field'. The ticket is --ticket, else the one the
+    branch names, else alfred's bound ticket. A skip prints one
+    'ticket fields: skipped (...)' line; it never changes the exit code.
 `;
 
 function fail(json: boolean, message: string, code = 2): number {
@@ -414,7 +435,7 @@ async function cmdLand(argv: string[]): Promise<number> {
   const flags = parseFlags(
     argv,
     new Set(["json", "dry-run", "ready"]),
-    new Set(["repo", "branch", "title", "body", "base", "lead", "known-prs", "repo-dir"]),
+    new Set(["repo", "branch", "title", "body", "base", "lead", "known-prs", "repo-dir", "ticket"]),
   );
   const json = flags["json"] === true;
   const dryRun = flags["dry-run"] === true;
@@ -434,6 +455,10 @@ async function cmdLand(argv: string[]): Promise<number> {
   const base = str(flags, "base") || "main";
   const cwd = str(flags, "repo-dir") || process.cwd();
   const knownPrsCsv = str(flags, "known-prs");
+  // `--ticket` names the STARK ticket the open-time field stamp lands on. Blank
+  // is absent (an unset shell variable is not a claim), which is exactly how
+  // `--lead` above treats its own blank value.
+  const ticket = str(flags, "ticket") || null;
 
   if (!repo) return fail(json, "--repo OWNER/REPO is required");
   if (!branch) return fail(json, "--branch is required");
@@ -463,6 +488,11 @@ async function cmdLand(argv: string[]): Promise<number> {
       ready,
       title,
       known_prs: knownPrs,
+      // The ticket the real run would stamp, as far as it can be known WITHOUT
+      // a subprocess: `--ticket`, else the branch name. A dry run deliberately
+      // does not reach alfred for the third rung (its bound ticket), so `null`
+      // here means "not decidable offline", never "no ticket exists".
+      ticket: ticket ?? ticketFromBranch(branch),
     };
     process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
     return 0;
@@ -523,13 +553,31 @@ async function cmdLand(argv: string[]): Promise<number> {
     return fail(json, (err as Error).message, 1);
   }
 
+  // Open-time ticket field stamp (STARK-6108, alfred spec STARK-6093 node T7).
+  // AFTER landImpl, so the URL it writes is the one that actually exists, and
+  // on BOTH the create and the adopt path — see `writePrOpenFields`. This can
+  // only ever add a line to the report: the PR is already open, and a field
+  // write is never allowed to change this command's exit code.
+  const fieldsReport = writePrOpenFields({
+    explicit: ticket,
+    branch,
+    prUrl: result.pr.url,
+    run: (cmd, args) =>
+      cmd === "alfred"
+        ? alfred(args, cwd)
+        : { code: -1, stdout: "", stderr: `unsupported command: ${cmd}` },
+  });
+
   if (json) {
-    process.stdout.write(JSON.stringify({ ok: true, ...result }, null, 2) + "\n");
+    process.stdout.write(
+      JSON.stringify({ ok: true, ...result, ticket_fields: fieldsReport }, null, 2) + "\n",
+    );
   } else {
     process.stdout.write(
       `landed impl on ${branch}: pr=#${result.pr.number} ` +
         `(${result.pr.adopted ? "adopted" : "created"}) prs=[${result.prs.join(",")}]\n`,
     );
+    process.stdout.write(fieldsReport.line + "\n");
   }
   return 0;
 }

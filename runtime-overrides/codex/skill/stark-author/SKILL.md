@@ -362,6 +362,24 @@ gh pr create --head "spec/<slug>" --base main --draft \
   --body "Stage-1 authored spec+plan (stark-author). Sign-off: accepted by operator."
 ```
 
+4. **Stamp the ticket** with the PR you just opened — alfred owns the ticket
+   field schema, and the path that opens a PR is the one authority for `pr_url`
+   and `pr_state` (alfred spec STARK-6093). `spec/<slug>` carries no ticket
+   handle, so the ticket is the one bound to this session:
+
+```bash
+t=$(alfred repo info --json | jq -r '.ticket // empty')
+[ -n "$t" ] && alfred task edit --field "pr_url=<the URL gh printed>" --field pr_state=open --json "$t" \
+  || echo "ticket fields: skipped (no bound ticket) — pr_url, pr_state"
+```
+
+   **This never fails Phase 6.** A skip, a missing `alfred`, an unset
+   `clickup.space_id`, or a ladder refusal costs one `ticket fields:` line and
+   nothing else — the PR is already open, and reporting it is what matters.
+   The canonical form of this rule (the explicit → branch → bound-ticket ladder,
+   and every degrade) is `tools/ticket_fields_lib.ts`; `tools/copilot_land.ts`
+   runs it for `stark-build`'s impl PR.
+
 ## Phase 7 — Handoff
 
 Print, as the final report: the doc path · PR number · `accepted-base` hash ·
