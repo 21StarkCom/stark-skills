@@ -83,6 +83,25 @@ function isAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+/** Every pid a seat has written to `file` so far — empty until it has. */
+function readPids(file: string): number[] {
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8").trim().split(/\s+/).filter((s) => s !== "").map(Number);
+}
+
+/**
+ * `finally` cleanup, read from the FILE rather than from a variable the test
+ * only fills on success: a seat is detached into its own session, so when a run
+ * goes red before the pids are captured nothing else can reach it, and it would
+ * sit on a `sleep 30` with nobody left to run its kill ladder.
+ */
+function reapPids(file: string): void {
+  for (const p of readPids(file)) {
+    if (!Number.isInteger(p) || p <= 1) continue;
+    try { process.kill(p, "SIGKILL"); } catch { /* already gone */ }
+  }
+}
+
 /** A runner that answers from a per-seat script. Records every request. */
 function fakeRunner(
   replies: Partial<Record<SeatId, Partial<RunOutcome>>>,
@@ -600,10 +619,24 @@ test("realRunner: a missing binary is a spawn failure, never a hang", async () =
 // not in it). The grandchild runs in the FOREGROUND of its shell: a
 // non-interactive shell starts `&` jobs with SIGINT ignored, so a backgrounded
 // one would survive a real Ctrl-C too.
+//
+// The signal waits for the dispatcher's ARMED marker, not only for the seat's
+// pids. "The seat reported its pids" does NOT mean forwarding is armed: the
+// seat runs concurrently from the fork, so under load it writes both pids while
+// the dispatcher is still descheduled between `spawn()` returning and
+// `trackGroup`. A signal landing there kills the dispatcher by DEFAULT
+// disposition — it still "dies by the signal", so that assertion passed
+// vacuously — and orphans the seat, failing the test against correct code.
+// Measured under a parallel suite: 4 of 40 runs orphaned the seat, and in all 4
+// the handler was not yet armed (0 orphans with it armed). The marker is
+// written only after `realRunner` has returned — its executor, `trackGroup`
+// included, runs synchronously — and carries the listener count, so "armed" +
+// "died by the signal" can only be a genuine re-raise.
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   test(`realRunner: ${sig} to the dispatcher alone terminates an in-flight seat and its descendants`, { timeout: 30_000 }, async () => {
     const dir = tmpDir(`fwd-${sig}`);
     const pidFile = path.join(dir, "pids");
+    const armedFile = path.join(dir, "armed");
     const sh = `printf '%s ' $$ > '${pidFile}'; sh -c 'echo $$ >> "$0"; exec sleep 30' '${pidFile}'`;
     const req: RunRequest = {
       seat: "claude",
@@ -617,25 +650,26 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     const driver = spawn(process.execPath, [
       "--no-warnings",
       "-e",
-      `import(${JSON.stringify(DISPATCH_URL)}).then((m) => m.realRunner(${JSON.stringify(req)}))`,
+      `import(${JSON.stringify(DISPATCH_URL)}).then((m) => { m.realRunner(${JSON.stringify(req)}); ` +
+        `require("node:fs").writeFileSync(${JSON.stringify(armedFile)}, String(process.listenerCount(${JSON.stringify(sig)}))); })`,
     ], { stdio: "ignore" });
     const exited = new Promise<NodeJS.Signals | null>((res) => driver.once("exit", (_c, s) => res(s)));
-    let pids: number[] = [];
     try {
-      const readPids = (): number[] =>
-        fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf8").trim().split(/\s+/).map(Number) : [];
-      assert.ok(await waitFor(() => readPids().length === 2), "the seat never reported its pids");
-      pids = readPids();
+      assert.ok(await waitFor(() => readPids(pidFile).length === 2 && fs.existsSync(armedFile)),
+        "the seat never reported its pids, or the dispatcher never got past spawning it");
+      const pids = readPids(pidFile);
       assert.ok(pids.every((p) => Number.isInteger(p) && p > 1), `bad pids: ${pids}`);
       assert.ok(pids.every(isAlive), "seat/grandchild died before the signal — the test would pass vacuously");
+      assert.equal(fs.readFileSync(armedFile, "utf8"), "1", `no ${sig} forwarding handler armed with a seat in flight`);
 
       process.kill(driver.pid!, sig);
 
+      // Armed (above) AND dead by the signal: only the re-raise does both.
       assert.equal(await exited, sig, "the dispatcher did not die by the forwarded signal");
       assert.ok(await waitFor(() => !pids.some(isAlive)), `${sig} did not reach the detached seat: ${pids.filter(isAlive)} alive`);
     } finally {
       driver.kill("SIGKILL");
-      for (const p of pids) if (isAlive(p)) process.kill(p, "SIGKILL");
+      reapPids(pidFile);
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -643,25 +677,42 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 
 // A SIGINT listener replaces Node's default exit, so one left behind after the
 // last seat settles would make an idle dispatcher ignore Ctrl-C.
+//
+// The long-lived seat is ended BY the test, not by a short timeout racing the
+// overlapping seat's startup: test files run in parallel, and on a loaded
+// runner a 600 ms head start is not an ordering guarantee — the rule
+// `bounded_spawn_lib.test.ts` already paid for. (Measured: with the overlapping
+// seat slowed to 1.5 s the long one had already timed out and released, and
+// "the handler was dropped with a seat still live" failed against correct
+// code.) The timeout path is therefore asserted on its own, below, with nothing
+// racing it.
 test("realRunner: forwarding handlers exist only while a seat is in flight", { timeout: 30_000 }, async () => {
   const dir = tmpDir("fwd-life");
+  const pidFile = path.join(dir, "pid");
   const base = { env: { PATH: process.env.PATH ?? "" }, cwd: dir, stdin: "prompt" };
   const before = process.listenerCount("SIGINT");
   try {
-    const hung = realRunner({ ...base, seat: "codex", cmd: "/bin/sh", args: ["-c", "exec sleep 30"], timeoutMs: 600 });
+    const running = realRunner({ ...base, seat: "codex", cmd: "/bin/sh", args: ["-c", `echo $$ > '${pidFile}'; exec sleep 30`], timeoutMs: 20_000 });
     assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while a seat is live");
     const quick = realRunner({ ...base, seat: "claude", cmd: process.execPath, args: ["-e", ""], timeoutMs: 20_000 });
     assert.equal(process.listenerCount("SIGINT"), before + 1, "a second seat must share the one handler");
     await quick;
     assert.equal(process.listenerCount("SIGINT"), before + 1, "the handler was dropped with a seat still live");
-    // The timeout path settles through the kill ladder — it must release too.
-    assert.equal((await hung).timedOut, true);
+    assert.ok(await waitFor(() => readPids(pidFile).length === 1), "the long-lived seat never reported its pid");
+    process.kill(readPids(pidFile)[0]!, "SIGKILL");
+    assert.equal((await running).timedOut, false);
     assert.equal(process.listenerCount("SIGINT"), before, "the handler outlived the last seat");
+
+    // The timeout path settles through the kill ladder — it must release too.
+    const hung = await realRunner({ ...base, seat: "codex", cmd: "/bin/sh", args: ["-c", "exec sleep 30"], timeoutMs: 600 });
+    assert.equal(hung.timedOut, true);
+    assert.equal(process.listenerCount("SIGINT"), before, "the kill ladder left a handler behind");
 
     const missing = await realRunner({ ...base, seat: "gemini", cmd: path.join(dir, "no-such-binary"), args: [], timeoutMs: 5_000 });
     assert.equal(missing.notFound, true);
     assert.equal(process.listenerCount("SIGINT"), before, "a spawn failure left a handler behind");
   } finally {
+    reapPids(pidFile);
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

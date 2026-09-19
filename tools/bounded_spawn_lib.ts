@@ -75,10 +75,11 @@ const liveGroups = new Set<number>();
 /**
  * A group id this file may signal. `process.kill(-pgid)` with 0 is THIS
  * process's own group and with 1 is `kill(-1)` — every process the user owns —
- * so neither may ever be tracked or signalled (the guard jury's
- * `killProcessGroup` always had, carried here by STARK-6135).
+ * so neither may ever be tracked or signalled. Born as jury's
+ * `killProcessGroup` guard and carried here by STARK-6135; exported so jury
+ * imports this ONE predicate instead of keeping a second copy that could drift.
  */
-function isSignallableGroup(pgid: number): boolean {
+export function isSignallableGroup(pgid: number): boolean {
   return Number.isInteger(pgid) && pgid > 1;
 }
 

@@ -51,10 +51,23 @@ function reap(file: string): void {
  * `gh` has left. So the faithful simulation signals the tool's pid ALONE: the
  * child and grandchild die only if the tool forwards. (Signalling the tool's
  * group would prove nothing; the child is, by design, not in it.)
+ *
+ * The signal waits for the tool's ARMED marker, not only for the child's pids
+ * (STARK-6135). "The child reported its pids" does NOT mean forwarding is
+ * armed: the child runs concurrently from the fork, so under load it writes
+ * both pids while the tool is still descheduled between `spawn()` returning and
+ * `trackGroup`. A signal landing there kills the tool by DEFAULT disposition —
+ * it still "dies by the signal", so that assertion passed vacuously — and
+ * orphans the child, failing the test against correct code. Measured under a
+ * parallel suite: 2 of 40 runs orphaned the child, both with the handler not
+ * yet armed. The marker is written only after `spawnBounded` has returned (its
+ * executor, `trackGroup` included, runs synchronously) and carries the listener
+ * count, so "armed" + "died by the signal" can only be a genuine re-raise.
  */
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   test(`${sig} to the tool alone still terminates an in-flight child and its descendants`, HANG_GUARD, async () => {
     const pidFile = nodePath.join(os.tmpdir(), `bounded-spawn-fwd-${sig}-${process.pid}-${Date.now()}`);
+    const armedFile = `${pidFile}.armed`;
     // The grandchild runs in the FOREGROUND: a non-interactive shell starts `&`
     // jobs with SIGINT ignored, so a backgrounded one would survive a real
     // terminal Ctrl-C too and prove nothing about forwarding.
@@ -62,26 +75,30 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     const driver = spawn(process.execPath, [
       "--no-warnings",
       "-e",
-      `import(${JSON.stringify(LIB_URL)}).then((m) => m.spawnBounded("/bin/sh", ["-c", ${JSON.stringify(sh)}], { timeoutMs: 25000 }))`,
+      `import(${JSON.stringify(LIB_URL)}).then((m) => { m.spawnBounded("/bin/sh", ["-c", ${JSON.stringify(sh)}], { timeoutMs: 25000 }); ` +
+        `require("node:fs").writeFileSync(${JSON.stringify(armedFile)}, String(process.listenerCount(${JSON.stringify(sig)}))); })`,
     ], { stdio: "ignore" });
     const exited = new Promise<NodeJS.Signals | null>((res) => driver.once("exit", (_c, s) => res(s)));
     let pids: number[] = [];
     try {
-      assert.ok(await waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").trim().split(/\s+/).length === 2),
-        "the child never reported its pids");
+      assert.ok(await waitFor(() => fs.existsSync(armedFile) && fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").trim().split(/\s+/).length === 2),
+        "the child never reported its pids, or the tool never got past spawning it");
       pids = fs.readFileSync(pidFile, "utf8").trim().split(/\s+/).map(Number);
       assert.ok(pids.every((p) => Number.isInteger(p) && p > 1), `bad pids: ${pids}`);
       assert.ok(pids.every(isAlive), "child/grandchild died before the signal — the test would pass vacuously");
+      assert.equal(fs.readFileSync(armedFile, "utf8"), "1", `no ${sig} forwarding handler armed with a child in flight`);
 
       process.kill(driver.pid!, sig);
 
-      // Re-raised, so the tool dies BY the signal, exactly as before `detached`.
+      // Armed (above) AND dead by the signal: only the re-raise does both, so
+      // the tool dies BY the signal exactly as before `detached`.
       assert.equal(await exited, sig, "the tool did not die by the forwarded signal");
       assert.ok(await waitFor(() => !pids.some(isAlive)), `${sig} did not reach the detached group: ${pids.filter(isAlive)} alive`);
     } finally {
       driver.kill("SIGKILL");
       for (const p of pids) if (isAlive(p)) process.kill(p, "SIGKILL");
       fs.rmSync(pidFile, { force: true });
+      fs.rmSync(armedFile, { force: true });
     }
   });
 }

@@ -49,7 +49,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
+import { isSignallableGroup, releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
 import { buildCommand as buildClaude, normalizeOutput as normalizeClaude } from "./agent_claude.ts";
 import { buildCommand as buildCodex, extractLastAgentText as lastCodexText } from "./agent_codex.ts";
 import { buildCommand as buildGemini, normalizeOutput as normalizeGemini } from "./agent_gemini.ts";
@@ -665,7 +665,7 @@ export async function killProcessGroup(pgid: number, deps: KillDeps = {}): Promi
   const intervalMs = deps.survivorIntervalMs ?? SURVIVOR_CHECK_INTERVAL_MS;
   const signals: string[] = [];
 
-  if (!Number.isInteger(pgid) || pgid <= 1) {
+  if (!isSignallableGroup(pgid)) {
     return {
       attempted: false,
       signals,
@@ -795,7 +795,8 @@ export const realRunner: SeatRunner = (req) =>
       clearTimeout(timer);
       const emit = (kill: KillReport | null): void => {
         // Released only once the kill ladder is done: until then the group may
-        // still hold descendants a second Ctrl-C should reach.
+        // still hold descendants, and a Ctrl-C that lands mid-ladder should
+        // still reach them.
         if (pgid !== undefined) releaseGroup(pgid);
         resolve({
           code,
@@ -818,10 +819,9 @@ export const realRunner: SeatRunner = (req) =>
 
     const timer = setTimeout(() => {
       timedOut = true;
-      const pid = child.pid;
       // Do NOT resolve here: the result still waits for "close" so the bytes the
       // child already wrote are captured.
-      killing = pid === undefined ? Promise.resolve(null) : killProcessGroup(pid);
+      killing = pgid === undefined ? Promise.resolve(null) : killProcessGroup(pgid);
       void killing.catch(() => null);
     }, req.timeoutMs);
 
