@@ -416,26 +416,85 @@ type RunFn = (cmd: string, args: string[]) => { status: number | null; stdout: s
  * measured 1.27 MB and blew straight through it.
  *
  * The failure was worse than the limit: exceeding maxBuffer makes Node KILL the
- * child, which sets `status` to null and leaves `stderr` empty, so the tool
- * reported `failed (exit null):` with nothing after the colon — a review-posting
- * tool that fails silently on exactly the large PRs whose findings matter most.
- * The cause is now surfaced explicitly below.
+ * child, which sets `status` to null, so the tool reported `failed (exit null):`
+ * with nothing useful after the colon — a review-posting tool that fails
+ * silently on exactly the large PRs whose findings matter most. Note that the
+ * killed child does NOT necessarily leave `stderr` empty: it keeps whatever it
+ * had already written, and `gh` writes there routinely (rate-limit notices,
+ * warnings). `explainTermination` below therefore names the cause whenever the
+ * child was terminated, never gated on an empty stderr.
  */
 export const GH_MAX_BUFFER = 64 * 1024 * 1024;
 
-export const defaultRun: RunFn = (cmd, args) => {
-  const sp = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: GH_MAX_BUFFER });
-  // A signal kill with no stderr is otherwise indistinguishable from a crash.
-  // ENOBUFS is the one cause we can name precisely, so name it.
-  let stderr = sp.stderr ?? "";
-  if (sp.status === null && !stderr) {
-    const why = (sp.error as NodeJS.ErrnoException | undefined)?.code === "ENOBUFS"
-      ? `output exceeded maxBuffer (${GH_MAX_BUFFER} bytes)`
-      : sp.error?.message ?? `killed by signal ${sp.signal ?? "unknown"}`;
-    stderr = `${cmd} produced no stderr and was terminated: ${why}`;
-  }
-  return { status: sp.status, stdout: sp.stdout ?? "", stderr };
-};
+/**
+ * How much of a terminated child's own stderr is carried alongside the cause.
+ * Callers slice the message to 400 chars anyway; the cap exists so an ENOBUFS
+ * on the *stderr* stream cannot make this function allocate a fresh `maxBuffer`
+ * sized string that is thrown away one line later.
+ */
+export const TERMINATION_STDERR_TAIL = 4000;
+
+/** The `spawnSync` fields the explanation needs — nothing more, so it is testable. */
+export interface TerminationInfo {
+  status: number | null;
+  signal?: NodeJS.Signals | null;
+  error?: Error;
+}
+
+/**
+ * Explain a TERMINATED child, **cause first**, then its own stderr.
+ *
+ * A signal kill is otherwise indistinguishable from a crash, and ENOBUFS is the
+ * one cause we can name precisely — so name it whenever the child was
+ * terminated, NOT only when stderr happens to be empty. A child killed for
+ * exceeding maxBuffer keeps whatever it already wrote to stderr; gating on an
+ * empty stderr let an unrelated `gh` warning swallow the real cause and put the
+ * caller back to reporting `failed (exit null): gh: a warning` on exactly the
+ * large PRs this buffer exists for.
+ *
+ * The ORDER is load-bearing, not cosmetic: every caller interpolates this into
+ * an error and slices it to 400 chars, so a cause appended AFTER a chatty
+ * child's stderr is swallowed by the truncation — the same defect, relocated.
+ * A non-terminated child's stderr is returned untouched.
+ */
+export function explainTermination(
+  cmd: string,
+  sp: TerminationInfo,
+  ownStderr: string,
+  maxBuffer: number,
+): string {
+  if (sp.status !== null) return ownStderr;
+  const err = sp.error as NodeJS.ErrnoException | undefined;
+  const why = err?.code === "ENOBUFS"
+    ? `output exceeded maxBuffer (${maxBuffer} bytes)`
+    : err?.message ?? `killed by signal ${sp.signal ?? "unknown"}`;
+  const own = ownStderr.trim();
+  return own
+    ? `${cmd} was terminated: ${why}; its own stderr follows: ${own.slice(0, TERMINATION_STDERR_TAIL)}`
+    : `${cmd} produced no stderr and was terminated: ${why}`;
+}
+
+/**
+ * `defaultRun` with an explicit buffer cap. Exported so the termination paths
+ * can be exercised against a SMALL cap: forcing a real ENOBUFS kill through
+ * `GH_MAX_BUFFER` costs a 64 MiB write in the child and ~250 MB RSS in the
+ * parent, on every `npm test`, for a mechanism that behaves identically at
+ * 64 KiB.
+ */
+export function runCapturing(
+  cmd: string,
+  args: string[],
+  maxBuffer: number,
+): { status: number | null; stdout: string; stderr: string } {
+  const sp = spawnSync(cmd, args, { encoding: "utf8", maxBuffer });
+  return {
+    status: sp.status,
+    stdout: sp.stdout ?? "",
+    stderr: explainTermination(cmd, sp, sp.stderr ?? "", maxBuffer),
+  };
+}
+
+export const defaultRun: RunFn = (cmd, args) => runCapturing(cmd, args, GH_MAX_BUFFER);
 
 /**
  * Build the PR context from the head sha plus the files listing. `filesJson` is

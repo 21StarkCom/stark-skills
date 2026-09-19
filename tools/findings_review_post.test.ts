@@ -5,10 +5,13 @@ import {
   DEFAULT_GENERATED_PATHS,
   GH_MAX_BUFFER,
   GITHUB_REVIEW_BODY_MAX,
+  TERMINATION_STDERR_TAIL,
   bodyTooLarge,
   anchorableLinesFromPatch,
   bodyFor,
   defaultRun,
+  explainTermination,
+  runCapturing,
   buildHumanSummary,
   flattenSlurped,
   isAnchorable,
@@ -358,9 +361,9 @@ describe("defaultRun", () => {
     assert.ok(GH_MAX_BUFFER > 1024 * 1024, "must exceed Node's default");
   });
 
-  // A signal kill sets status null and leaves stderr empty, which is
-  // indistinguishable from a crash. The caller interpolates stderr straight
-  // into its error, so an empty one produced a message ending in a bare colon.
+  // A signal kill sets status null, which is indistinguishable from a crash.
+  // The caller interpolates stderr straight into its error, so an empty one
+  // produced a message ending in a bare colon.
   test("a signal kill with no stderr is explained, not reported as empty", () => {
     const r = defaultRun(process.execPath, [
       "-e",
@@ -369,6 +372,90 @@ describe("defaultRun", () => {
     assert.equal(r.status, null, "expected a signal kill, not a normal exit");
     assert.notEqual(r.stderr, "", "a killed child must not report empty stderr");
     assert.match(r.stderr, /terminated/);
+  });
+
+  // The ENOBUFS explanation used to be gated on stderr being EMPTY. `gh` writes
+  // to stderr routinely (rate-limit notices, warnings), and a child killed for
+  // exceeding maxBuffer keeps whatever it had already written there — so the one
+  // cause we can name precisely was swallowed by an unrelated warning, and the
+  // caller interpolated that warning into `failed (exit null): gh: a warning`.
+  // That is the same silent-on-large-PRs failure this tool exists to prevent,
+  // just relocated to the maxBuffer boundary.
+  //
+  // Driven through `runCapturing` at 64 KiB rather than `defaultRun` at 64 MiB:
+  // the kill path is identical, and the production constant would cost a 64 MiB
+  // write in the child plus ~250 MB RSS in the parent on every `npm test`.
+  // The child sequences its stdout flood behind the stderr write's callback —
+  // Node pipe writes are asynchronous on macOS, so a bare write-then-flood can
+  // race.
+  test("names the maxBuffer cause even when the child wrote to stderr", () => {
+    const cap = 64 * 1024;
+    const r = runCapturing(process.execPath, [
+      "-e",
+      `process.stderr.write("gh: a warning\\n", () => process.stdout.write("x".repeat(${cap * 2})))`,
+    ], cap);
+    assert.equal(r.status, null, "expected a maxBuffer kill, not a normal exit");
+    assert.match(r.stderr, /exceeded maxBuffer/, `cause not named: ${r.stderr}`);
+    assert.match(r.stderr, /gh: a warning/, "the child's own stderr must be preserved");
+    assert.ok(
+      r.stderr.indexOf("exceeded maxBuffer") < r.stderr.indexOf("gh: a warning"),
+      `the cause must precede the child's stderr, got: ${r.stderr}`,
+    );
+  });
+
+  test("names the signal even when the child wrote to stderr", () => {
+    const r = defaultRun(process.execPath, [
+      "-e",
+      "process.stderr.write('noise\\n', () => process.kill(process.pid, 'SIGKILL'))",
+    ]);
+    assert.equal(r.status, null);
+    assert.match(r.stderr, /terminated/, `cause not named: ${r.stderr}`);
+    assert.match(r.stderr, /noise/, "the child's own stderr must be preserved");
+    assert.ok(
+      r.stderr.indexOf("terminated") < r.stderr.indexOf("noise"),
+      `the cause must precede the child's stderr, got: ${r.stderr}`,
+    );
+  });
+});
+
+// `explainTermination` is where the ordering and the size cap live. Both are
+// invisible to the spawn-backed tests above — a chatty child only reveals them
+// past the caller's 400-char slice — so pin them directly, with no subprocess.
+describe("explainTermination", () => {
+  test("a child that exited normally keeps its stderr verbatim", () => {
+    assert.equal(explainTermination("gh", { status: 1 }, "gh: not found\n", 1024), "gh: not found\n");
+  });
+
+  // fetchPrContext reports `${stderr.slice(0, 400)}`. A cause appended after a
+  // talkative child's stderr is truncated away — the original defect, relocated.
+  test("the cause survives the caller's 400-char slice", () => {
+    const noisy = "gh: rate limit warning. ".repeat(100);
+    const msg = explainTermination(
+      "gh",
+      { status: null, signal: "SIGTERM", error: Object.assign(new Error("x"), { code: "ENOBUFS" }) },
+      noisy,
+      4242,
+    );
+    assert.match(msg.slice(0, 400), /exceeded maxBuffer \(4242 bytes\)/, `cause lost in slice: ${msg.slice(0, 400)}`);
+  });
+
+  // An ENOBUFS on the *stderr* stream would otherwise build a fresh maxBuffer
+  // sized string that the caller discards one line later.
+  test("the child's stderr is capped, not carried at maxBuffer size", () => {
+    const huge = "e".repeat(TERMINATION_STDERR_TAIL * 4);
+    const msg = explainTermination("gh", { status: null, signal: "SIGKILL" }, huge, 1024);
+    assert.ok(msg.length < TERMINATION_STDERR_TAIL + 200, `uncapped stderr: ${msg.length} chars`);
+    assert.match(msg, /killed by signal SIGKILL/);
+  });
+
+  test("a spawn failure with no stderr still names the error", () => {
+    const msg = explainTermination(
+      "gh",
+      { status: null, signal: null, error: Object.assign(new Error("spawnSync gh ENOENT"), { code: "ENOENT" }) },
+      "",
+      1024,
+    );
+    assert.match(msg, /produced no stderr and was terminated: spawnSync gh ENOENT/);
   });
 });
 
