@@ -27,6 +27,11 @@ import {
   type Severity,
 } from "./finding_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
+import {
+  DEFAULT_GENERATED_PATHS_CONFIG,
+  getGeneratedPathsConfig,
+  type GeneratedPathsConfig,
+} from "./stark_config_lib.ts";
 
 /** One entry of the `ReportFindings` tool payload. */
 export interface ReportFinding {
@@ -151,25 +156,306 @@ export function toFindings(
  * gating inline thread to a non-gating body entry that keeps its file, line,
  * severity and disposition. Dispositioning stays the author's job.
  *
- * This list MIRRORS bifrost's `.gitattributes` `linguist-generated=true`
- * entries (`dist/**`, `vendor/**`, `index.json`, `bundles/**`,
- * `.claude-plugin/**`) plus `catalog/**`, which a sync PR machine-rewrites
- * without declaring generated. Because it is a mirror it can drift — when a
- * target repo declares a generated path this list does not carry, pass it with
- * `--generated-paths` rather than assuming the default covers the repo.
+ * This constant is now only the BUILT-IN FALLBACK, the last layer of
+ * {@link resolveGeneratedPaths}'s precedence order (CLI flag > repo config >
+ * the target repo's own `.gitattributes` > here). It used to be the sole
+ * source: a hand-copied mirror of bifrost's `linguist-generated=true` rows,
+ * which had already drifted on arrival (the first cut omitted
+ * `.claude-plugin/**`, the one file every sync rewrites) and applied bifrost's
+ * tree shape to every `--repo O/R` the tool was pointed at. The list a run
+ * actually uses comes from `tools/stark_config_lib.ts`'s `generated_paths`
+ * section; this frozen copy is kept so the mapping helpers stay usable without
+ * touching config or the network, and so its shape is pinned by a test.
+ *
+ * It is DERIVED from `DEFAULT_GENERATED_PATHS_CONFIG.default`, never restated.
+ * The list previously existed three times — here, in the config default, and in
+ * `global/config.json` — so a new generated path had to be added in three
+ * places, and forgetting one silently re-opens a gating thread on that path,
+ * which is the failure this whole split exists to prevent. (`.claude-plugin/**`
+ * is in it because every bifrost sync PR rewrites
+ * `.claude-plugin/marketplace.json`; omitting it left the one machine-written
+ * file every sync touches still opening a thread.)
  */
 export const DEFAULT_GENERATED_PATHS: readonly string[] = Object.freeze([
-  "vendor/**",
-  "dist/**",
-  "bundles/**",
-  "catalog/**",
-  // Every bifrost sync PR rewrites `.claude-plugin/marketplace.json`, and
-  // bifrost's `.gitattributes` marks the tree `linguist-generated=true`.
-  // Omitting it left the one machine-written file the sync touches on every
-  // run still opening a gating thread.
-  ".claude-plugin/**",
-  "index.json",
+  ...DEFAULT_GENERATED_PATHS_CONFIG.default,
 ]);
+
+/**
+ * Translate a target repo's `.gitattributes` into the generated-path globs
+ * this tool matches with.
+ *
+ * DELIBERATELY NOT a gitattributes parser. Real precedence there is
+ * last-match-wins with negation, unset, and `[attr]` macros; this reads one
+ * attribute and refuses to guess about anything else:
+ *
+ *  - a row is taken only when its attribute list carries `linguist-generated`
+ *    Set — written either `linguist-generated=true` or bare (in git, an
+ *    attribute listed bare IS Set, so reading bare as true is a reading, not
+ *    a guess);
+ *  - `-linguist-generated`, `!linguist-generated` and
+ *    `linguist-generated=false` are skipped, never inverted into something
+ *    else's meaning;
+ *  - `[attr]` macro definitions are skipped entirely — resolving a macro
+ *    would be exactly the guessing this avoids.
+ *
+ * ONE deliberate semantic divergence, pinned by test: git matches a
+ * slash-less pattern like `index.json` against the BASENAME at any depth, and
+ * this tool matches the whole repo-relative path. The divergence is the
+ * conservative direction and is the behaviour STARK-5637 chose on purpose —
+ * under basename matching, bifrost's declared `index.json` would also swallow
+ * its hand-written `web/src/__fixtures__/index.json`, whose findings ARE
+ * fixable where they are posted. Demoting a fixable finding costs the author
+ * the thread they needed; leaving a generated one inline costs a thread that
+ * `--add-generated-paths` can put back. A repo that really means any depth
+ * writes the doubled-star prefix itself.
+ */
+export function parseGeneratedGlobs(gitattributes: string): string[] {
+  const out: string[] = [];
+  for (const raw of gitattributes.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#") || line.startsWith("[attr]")) continue;
+    // git lets a pattern containing spaces be double-quoted. Splitting the
+    // whole line on whitespace would tear `"my dir/*" linguist-generated=true`
+    // into the glob `"my` — a garbage pattern that matches nothing and joins
+    // the list silently, which is a fail-narrow wearing a parse bug's hat.
+    const quoted = line.match(/^"((?:[^"\\]|\\.)*)"\s*(.*)$/);
+    const [pattern, ...attrs] = quoted
+      ? [quoted[1], ...(quoted[2] ? quoted[2].split(/\s+/) : [])]
+      : line.split(/\s+/);
+    if (!pattern) continue;
+    const set = attrs.some(
+      (a) => a === "linguist-generated" || a === "linguist-generated=true",
+    );
+    if (!set) continue;
+    // A leading slash anchors to the repo root in gitattributes; whole-path
+    // matching is already root-anchored, so the slash is redundant noise.
+    let glob = pattern.replace(/^\/+/, "");
+    // A trailing slash means "this directory's contents".
+    if (glob.endsWith("/")) glob = glob + "**";
+    if (glob) out.push(glob);
+  }
+  return [...new Set(out)];
+}
+
+export interface GitattributesFetch {
+  /** The file's text, or null when it could not be read. */
+  text: string | null;
+  /**
+   * Why `text` is null, or null when the read succeeded. A plain 404 is NOT a
+   * failure — the repo simply has no `.gitattributes` — so it leaves this null
+   * too and only `text` says so.
+   */
+  failure: string | null;
+}
+
+/**
+ * Read the target repo's `.gitattributes`.
+ *
+ * `ref` pins the read to a commit (the PR head), so a PR that ADDS or CHANGES a
+ * `linguist-generated` row is reviewed against the declaration it ships rather
+ * than the default branch's older one. A fork PR's head sha is not in the base
+ * repo, so that read 404s — callers fall back to the unpinned read.
+ *
+ * A 404 and a 403/rate-limit/network failure are NOT the same event and must
+ * not degrade the same way silently: both fall back to the configured default,
+ * but only the second means the fallback list may be wrong for this repo, which
+ * is the exact defect STARK-6095 exists to kill. The reason is returned so the
+ * warning can say which happened.
+ */
+export function fetchGitattributesResult(
+  repo: string,
+  run: RunFn = defaultRun,
+  ref?: string,
+): GitattributesFetch {
+  const path = `repos/${repo}/contents/.gitattributes${ref ? `?ref=${encodeURIComponent(ref)}` : ""}`;
+  const r = run("gh", ["api", path, "-H", "Accept: application/vnd.github.raw"]);
+  if (r.status === 0) return { text: r.stdout, failure: null };
+  const stderr = (r.stderr ?? "").trim();
+  const notFound = /\b404\b|Not Found/i.test(stderr);
+  return {
+    text: null,
+    failure: notFound ? null : `gh api ${path} failed (exit ${r.status}): ${stderr.slice(0, 200)}`,
+  };
+}
+
+/** Read the target repo's `.gitattributes`, or null when it could not be read. */
+export function fetchGitattributes(
+  repo: string,
+  run: RunFn = defaultRun,
+  ref?: string,
+): string | null {
+  return fetchGitattributesResult(repo, run, ref).text;
+}
+
+/** Which layer of the precedence order supplied the base list. */
+export type GeneratedPathsSource =
+  | "disabled"
+  | "cli"
+  | "repo-config"
+  | "gitattributes"
+  | "default";
+
+export interface ResolvedGeneratedPaths {
+  patterns: string[];
+  source: GeneratedPathsSource;
+  /** Globs layered on top of the base list, in the order they were added. */
+  added: string[];
+  /**
+   * Declared patterns this tool anchored at the repo ROOT that git would have
+   * matched by basename at any depth — the one deliberate divergence, disclosed
+   * so a repo whose declarations all narrow (e.g. a lone `*.pb.go`) is legible
+   * instead of looking configured while splitting nothing. Empty unless
+   * `source === "gitattributes"`.
+   */
+  rootAnchored: string[];
+  /** Fail-open notices — every one of these is also written to stderr. */
+  warnings: string[];
+}
+
+/**
+ * Resolve the generated-path globs for ONE run.
+ *
+ * Precedence, highest first — each layer REPLACES the ones below it:
+ *
+ *   1. `--generated-paths` / `--no-generated-split` (the operator, this run)
+ *   2. `generated_paths.repos["O/R"].paths` (this repo, config)
+ *   3. the target repo's `.gitattributes` `linguist-generated=true` rows
+ *   4. `generated_paths.default` (built-in fallback)
+ *
+ * On top of whichever layer won: `generated_paths.repos["O/R"].add` (skipped
+ * when the CLI replaced the list, because the CLI outranks repo config) and
+ * then `--add-generated-paths`.
+ *
+ * FAIL-OPEN, never fail-narrow. An absent, unfetchable or generated-row-free
+ * `.gitattributes` falls back to the configured default and says so on stderr;
+ * it never resolves to an empty list, because an empty list silently disables
+ * the split and re-opens the gating threads this whole path exists to prevent.
+ * Disabling stays explicit: `--no-generated-split`, or `enabled: false` — and
+ * `enabled: false` is a GLOBAL default, so an explicit `--generated-paths` this
+ * run outranks it like every other layer; only `--no-generated-split` disables
+ * a run the operator gave globs to.
+ */
+export function resolveGeneratedPaths(opts: {
+  repo: string;
+  /** `null` = no `--generated-paths`; `[]` = `--no-generated-split`. */
+  cliPaths?: readonly string[] | null;
+  cliAdd?: readonly string[];
+  /** Raw `.gitattributes` text; `null` = absent or unfetchable. */
+  gitattributes?: string | null;
+  /** Why `gitattributes` is null, when it was a real failure and not a 404. */
+  gitattributesFailure?: string | null;
+  config?: GeneratedPathsConfig;
+}): ResolvedGeneratedPaths {
+  const cfg = opts.config ?? getGeneratedPathsConfig();
+  const warnings: string[] = [];
+  const cliPaths = opts.cliPaths ?? null;
+  const cliAdd = [...(opts.cliAdd ?? [])];
+
+  /**
+   * Config is user-editable JSON with no schema, so a glob list can arrive as
+   * any shape. A bare string is the dangerous one: `"default": "vendor/**"`
+   * passes a `.length` truthiness test and spreads into the one-character globs
+   * `["v","e","n",...]`, which match nothing — a silent disable of the split
+   * wearing a config typo's hat. Anything that is not an array of non-empty
+   * strings is refused loudly and treated as unset.
+   */
+  const globList = (value: unknown, where: string): string[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || !v.trim())) {
+      warnings.push(
+        `${where} must be an array of non-empty glob strings — ignoring it and using the layer below`,
+      );
+      return [];
+    }
+    return (value as string[]).map((v) => v.trim());
+  };
+
+  if (cliPaths !== null && cliPaths.length === 0) {
+    if (cliAdd.length > 0) {
+      // Not a hard error only because `--no-generated-split` + `--generated-paths`
+      // is already pinned as last-wins; but it must never be silent, since a
+      // swallowed `--add-generated-paths` is how a repo's extra generated path
+      // ends up back on a gating thread.
+      warnings.push(
+        "--no-generated-split disables the split, so --add-generated-paths " +
+          `(${cliAdd.join(", ")}) was ignored`,
+      );
+    }
+    return { patterns: [], source: "disabled", added: [], rootAnchored: [], warnings };
+  }
+  if (!cfg.enabled && cliPaths === null) {
+    warnings.push("generated_paths.enabled is false — every finding anchors inline");
+    return { patterns: [], source: "disabled", added: [], rootAnchored: [], warnings };
+  }
+
+  const repoCfg = cfg.repos?.[opts.repo] ?? {};
+  const configuredDefault = globList(cfg.default, "generated_paths.default");
+  const builtIn = configuredDefault.length ? configuredDefault : [...DEFAULT_GENERATED_PATHS];
+  const repoPaths = globList(repoCfg.paths, `generated_paths.repos["${opts.repo}"].paths`);
+  const repoAdd = globList(repoCfg.add, `generated_paths.repos["${opts.repo}"].add`);
+
+  let base: string[];
+  let source: GeneratedPathsSource;
+  let rootAnchored: string[] = [];
+  if (cliPaths !== null) {
+    base = [...cliPaths];
+    source = "cli";
+    if (!cfg.enabled) {
+      warnings.push(
+        "generated_paths.enabled is false, but an explicit --generated-paths outranks it — " +
+          "pass --no-generated-split to disable the split for this run",
+      );
+    }
+  } else if (repoPaths.length) {
+    base = repoPaths;
+    source = "repo-config";
+  } else if (typeof opts.gitattributes === "string") {
+    const declared = parseGeneratedGlobs(opts.gitattributes);
+    if (declared.length > 0) {
+      base = declared;
+      source = "gitattributes";
+      // Git matches a slash-less pattern against the BASENAME at any depth; this
+      // tool anchors it at the repo root (STARK-5637, on purpose: bifrost's
+      // declared `index.json` must not swallow its hand-written
+      // `web/src/__fixtures__/index.json`, whose findings ARE fixable inline).
+      // The divergence stands — but now that the list is read from the REPO's
+      // OWN words rather than hand-authored, a run silently narrows what the
+      // repo said, and a declaration like `*.pb.go` (the most common generated
+      // row there is) then matches nothing at all while `source` still reads
+      // `gitattributes`. Report it in the summary rather than warning on stderr:
+      // a warning would fire on EVERY bifrost run and advise `**/index.json`,
+      // which is precisely the thing STARK-5637 refused.
+      rootAnchored = declared.filter((p) => !p.includes("/"));
+    } else {
+      warnings.push(
+        `${opts.repo}: .gitattributes declares no linguist-generated=true paths — ` +
+          "falling back to the configured default list",
+      );
+      base = builtIn;
+      source = "default";
+    }
+  } else {
+    warnings.push(
+      opts.gitattributesFailure
+        ? `${opts.repo}: .gitattributes could not be read (${opts.gitattributesFailure}) — ` +
+          "falling back to the configured default list, which may not describe this repo"
+        : `${opts.repo}: .gitattributes is absent — ` +
+          "falling back to the configured default list",
+    );
+    base = builtIn;
+    source = "default";
+  }
+
+  // Repo-config `add` is a statement about the repo, so the CLI's explicit
+  // replacement outranks it; `--add-generated-paths` is the operator's own
+  // word this run and always applies.
+  const added = [
+    ...(source === "cli" ? [] : repoAdd),
+    ...cliAdd,
+  ];
+  const patterns = [...new Set([...base, ...added])];
+  return { patterns, source, added: [...new Set(added)], rootAnchored, warnings };
+}
 
 /**
  * The first configured glob `file` matches, or null when it matches none.
@@ -564,8 +850,9 @@ options:
   --findings PATH   ReportFindings JSON; "-" reads stdin (required)
   --agent AGENT     review attribution: claude|codex|gemini (default: claude)
   --generated-paths GLOB[,GLOB...]
-                    replace the generated-output glob list
-                    (default: ${DEFAULT_GENERATED_PATHS.join(",")})
+                    REPLACE the resolved generated-output glob list
+  --add-generated-paths GLOB[,GLOB...]
+                    EXTEND the resolved list (repeatable)
   --no-generated-split
                     anchor generated-path findings inline like any other
   --dry-run         build the payload and print the plan without posting
@@ -579,6 +866,21 @@ auto-resolved — only the gating thread is withheld. Globs are matched against
 the whole repo-relative path, so \`index.json\` means the root file, not every
 file with that name; write the doubled-star prefix to match at any depth.
 
+The glob list is resolved per run, highest layer first: --generated-paths >
+the \`generated_paths.repos["O/R"]\` config entry > the TARGET repo's own
+.gitattributes \`linguist-generated=true\` rows (read at the PR head, so a PR
+that ADDS a row is reviewed against it) > the built-in default. An absent or
+unreadable .gitattributes falls back to the configured default and warns on
+stderr; it never narrows the list to nothing. --no-generated-split disables the
+split; \`generated_paths.enabled: false\` disables it too, but an explicit
+--generated-paths outranks that global default like every other layer.
+
+A declared slash-less pattern (\`index.json\`, \`*.pb.go\`) stays ROOT-anchored
+here while git would match it at any depth. That divergence is deliberate, and
+every pattern it applies to is listed in the JSON summary as
+\`generatedPathSplit.rootAnchored\` — pass \`--add-generated-paths '**/<pat>'\`
+when the repo really meant any depth.
+
 The review is posted as event=COMMENT through the existing gh login.
 The agent selects model attribution only; it never changes authentication.`;
 
@@ -588,7 +890,18 @@ export interface CliArgs {
   findingsPath: string;
   agent: AgentName;
   dryRun: boolean;
+  /**
+   * The list `--generated-paths` / `--no-generated-split` asked for, already
+   * defaulted to {@link DEFAULT_GENERATED_PATHS} when neither was passed.
+   * Read {@link CliArgs.generatedPathsExplicit} before treating it as the
+   * operator's word — only an explicit flag outranks the repo's own
+   * `.gitattributes`.
+   */
   generatedPaths: string[];
+  /** True when the operator passed `--generated-paths` or `--no-generated-split`. */
+  generatedPathsExplicit: boolean;
+  /** `--add-generated-paths`: globs layered ON TOP of whatever resolved. */
+  addGeneratedPaths: string[];
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -598,6 +911,8 @@ export function parseArgs(argv: string[]): CliArgs {
   let agent: AgentName = "claude";
   let dryRun = false;
   let generatedPaths: string[] = [...DEFAULT_GENERATED_PATHS];
+  let generatedPathsExplicit = false;
+  const addGeneratedPaths: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const need = (): string => {
@@ -643,9 +958,26 @@ export function parseArgs(argv: string[]): CliArgs {
           );
         }
         generatedPaths = list;
+        generatedPathsExplicit = true;
         break;
       }
-      case "--no-generated-split": generatedPaths = []; break;
+      case "--add-generated-paths": {
+        const raw = need();
+        const list = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+        // Same rule as --generated-paths: an empty value is a typo, not an
+        // instruction. Here it would be a silent no-op rather than a silent
+        // disable, but a flag that quietly does nothing is how a repo's extra
+        // generated path ends up back on a gating thread.
+        if (list.length === 0) {
+          throw new Error("--add-generated-paths requires at least one glob");
+        }
+        addGeneratedPaths.push(...list);
+        break;
+      }
+      case "--no-generated-split":
+        generatedPaths = [];
+        generatedPathsExplicit = true;
+        break;
       case "--dry-run": dryRun = true; break;
       default:
         throw new Error(`unknown argument: ${a}`);
@@ -654,7 +986,10 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!repo) throw new Error("--repo is required");
   if (pr === undefined) throw new Error("--pr is required");
   if (!findingsPath) throw new Error("--findings is required");
-  return { repo, pr, findingsPath, agent, dryRun, generatedPaths };
+  return {
+    repo, pr, findingsPath, agent, dryRun,
+    generatedPaths, generatedPathsExplicit, addGeneratedPaths,
+  };
 }
 
 export function readPayload(path: string): ReportFindingsPayload {
@@ -700,9 +1035,37 @@ async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const payload = readPayload(args.findingsPath);
   const ctx = await fetchPrContext(args.repo, args.pr);
+  // Only ask GitHub for `.gitattributes` when a lower layer could actually use
+  // it: BOTH higher layers — an explicit flag and a repo-config `paths` entry —
+  // already outrank it, so fetching under either is a round trip bought for
+  // nothing.
+  const cfg = getGeneratedPathsConfig();
+  const repoPinned = Array.isArray(cfg.repos?.[args.repo]?.paths)
+    && (cfg.repos[args.repo].paths as string[]).length > 0;
+  let gitattributes: string | null = null;
+  let gitattributesFailure: string | null = null;
+  if (!args.generatedPathsExplicit && cfg.enabled && !repoPinned) {
+    // Pin the read to the PR head so a PR that ADDS a `linguist-generated` row
+    // is reviewed against the declaration it ships. A fork PR's head sha is not
+    // in the base repo, so fall back to the default branch rather than
+    // degrading a fork review to the built-in default list.
+    let r = fetchGitattributesResult(args.repo, defaultRun, ctx.headSha);
+    if (r.text === null) r = fetchGitattributesResult(args.repo);
+    gitattributes = r.text;
+    gitattributesFailure = r.failure;
+  }
+  const resolved = resolveGeneratedPaths({
+    repo: args.repo,
+    cliPaths: args.generatedPathsExplicit ? args.generatedPaths : null,
+    cliAdd: args.addGeneratedPaths,
+    gitattributes,
+    gitattributesFailure,
+    config: cfg,
+  });
+  for (const w of resolved.warnings) console.error(`findings_review_post: ${w}`);
   const plan = planReview(payload, ctx, {
     agent: args.agent,
-    generatedPaths: args.generatedPaths,
+    generatedPaths: resolved.patterns,
   });
 
   const postOpts = {
@@ -735,6 +1098,10 @@ async function main(argv: string[]): Promise<number> {
     findings: plan.findings.length,
     generatedPathSplit: {
       enabled: plan.generated.enabled,
+      source: resolved.source,
+      added: resolved.added,
+      rootAnchored: resolved.rootAnchored,
+      warnings: resolved.warnings,
       patterns: plan.generated.patterns,
       routedToBody: plan.generated.entries.length,
       findings: plan.generated.entries.map((e) => ({
