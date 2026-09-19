@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<!-- idun:pr-merge pr=1024 runId=1024 sha=8e6c73ff -->
+- Fixed Ctrl-C forwarding to key group kills by call instead of recycled pgid, closing duplicate-signal and stale-kill-report windows in the agent dispatch and jury paths.
 <!-- idun:pr-merge pr=1022 runId=1022 sha=ed132370 -->
 - Fixed: unified the ESRCH-latched process-group killer used by `spawnBounded` and `agent_dispatch_lib::run` into one shared, per-call-released factory, closing a Ctrl-C-to-recycled-pgid hazard.
 <!-- idun:pr-merge pr=1021 runId=1021 sha=a035c9e4 -->
