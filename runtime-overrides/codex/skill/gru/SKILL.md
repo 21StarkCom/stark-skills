@@ -46,21 +46,37 @@ tells you to stop; there is no other verb.
    live Hermod peer (`hermod msg peers`, `liveness` live) whose `cwd`'s last
    path segment is exactly the ticket id → a Minion owns it, do not relaunch.
    Ticket whose Minion reported `blocked` or `follow-up … stopping` → blocked
-   until the operator resolves it. Everything else is ready once its
-   dependencies are finished.
-3. **Launch.** Once, before the first launch, read frigg's repo registry —
-   `frigg repos list --json` — which is what `hermod ticket --repo <name>`
-   resolves a name through. Then for each ready ticket while live Minions < N:
+   until the operator resolves it, and so is a ticket step 3 could not resolve
+   to a repo. Everything else is ready once its dependencies are finished.
+3. **Launch.** For each ready ticket while live Minions < N:
    `hermod ticket STARK-n --repo <ticket's repo> --agent <agent> --no-focus --prompt-file <brief>`.
    Always pass `--repo` (the default is the repo you are standing in) and use
    `--prompt-file` (a `--message` brief hands its quotes and `$` to the shell).
-   A repo the registry does not list cannot be resolved by name — `hermod ticket`
-   exits `unknown repo '<name>'` — so for that ticket alone fall back to
-   `--cwd ~/Code/21Stark/<repo>`, the fleet's one-clone-per-repo layout. The
-   fallback is a path guess, not an equal: never drop `--repo` for a repo the
-   registry does list, and never use `--cwd` wholesale. Do not run
-   `frigg repos scan` yourself — seeding the registry is the operator's, once;
-   name the command in your step 6 report instead.
+   Resolve the repo the way hermod does, per ticket and at launch: `frigg repos
+   get <ticket's repo> --json` is the exact call `--repo <name>` goes through,
+   and it exits 3 on a name the registry does not carry. One record, read when
+   you launch — a whole-registry read cached once per run still answers
+   "unregistered" for a repo the operator seeds mid-run. Exit 3, or a record
+   whose `stale` is true because its path is gone from disk, means the name
+   will not resolve and that ticket needs a path instead. The path is a guess:
+   the fleet is one clone per repo, so take the root from any registered
+   record's `path` (its `dirname` — never a hardcoded `~/Code/21Stark`; the
+   fleet has checkouts under other roots) and try `<root>/<repo>`. **Prove the
+   guess before you launch into it** — `git -C <path> rev-parse --show-toplevel`
+   must print that same path. A `--cwd` hermod cannot use is not refused: it
+   silently cuts the worktree from *your own* repo, exits 0, and the ack looks
+   normal, so the Minion would implement the ticket in the wrong codebase. A
+   guess that does not prove out makes the ticket blocked, not ready — record
+   it with its repo name, leave it alone on later passes, raise it under
+   Authority's escalation rule when it happens rather than only in step 6, and
+   keep every other ticket moving. `--repo` and `--cwd` are mutually exclusive,
+   so the fallback replaces `--repo`: never send both, and never reach for
+   `--cwd` for a repo that resolves by name. After a `--cwd` launch, confirm
+   the Minion landed where you meant — `hermod msg peers`, that peer's `cwd`
+   under the intended repo — because step 2's ownership rule matches on the
+   ticket id alone, so a misrouted Minion otherwise reads as a correctly-owned
+   one. Seeding the registry is the operator's: run neither `frigg repos scan`
+   nor `frigg repos set` yourself; name the fix in your report instead.
    The brief is: invoke `$minion` (`/minion` on Claude), the ticket id, your peer
    id (the `hermod msg peers` row whose `sessionId` is your own
    `$CODEX_THREAD_ID`, or `$CLAUDE_CODE_SESSION_ID` on Claude), and one line:
@@ -108,9 +124,11 @@ tells you to stop; there is no other verb.
    the path before you relaunch.
 6. **Loop** steps 2–5 until every ticket is finished or blocked. Then report:
    finished tickets with PR links, blocked tickets with the reason, and
-   follow-up tickets the Minions filed. If any repo was unregistered in step 3,
-   add one line naming those repos and the operator's fix:
-   `frigg repos scan ~/Code/21Stark`.
+   follow-up tickets the Minions filed. A repo step 3 could not resolve by name
+   gets one line naming it and the operator's fix, per repo and with the path
+   you already resolved: `frigg repos set <repo> --path <p>` — the command
+   hermod's own error names, and the only one that reaches a checkout outside
+   the fleet root that `frigg repos scan <root>` would sweep.
 
 ## Authority
 
