@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<!-- idun:pr-merge pr=1022 runId=1022 sha=ed132370 -->
+- Fixed: unified the ESRCH-latched process-group killer used by `spawnBounded` and `agent_dispatch_lib::run` into one shared, per-call-released factory, closing a Ctrl-C-to-recycled-pgid hazard.
 <!-- idun:pr-merge pr=1021 runId=1021 sha=a035c9e4 -->
 - Fixed a recycled-pgid SIGKILL risk, unhandled read-pipe errors, and bad summary-relocation/segment-header bugs in the gh dispatch and review-posting paths.
 <!-- idun:pr-merge pr=1017 runId=1017 sha=c8daf1ef -->

@@ -296,6 +296,52 @@ for (const runtime of ["claude", "codex"] as const) {
       }
     });
 
+    // STARK-6377. The latch only guards this call's OWN ladder. `forward`
+    // signals every id in the forwarding set through the module-level
+    // `killGroup`, which knows nothing about a per-call latch — so a reclaimed
+    // group has to leave that set the moment the latch trips, or a Ctrl-C
+    // delivers the recycled-id signal by the other door. `spawnBounded` learned
+    // this in STARK-6245 while both copies of `run()` kept a private latch that
+    // never did; they now share `makeGroupKiller`. Same shape as the emptied-
+    // group test above: the leader waits for the pid file perl writes AFTER
+    // `setsid`, so the group is provably empty when it exits, and the escaped
+    // descendant holds stdout so the call is still open when we look.
+    test("a group the kernel has reclaimed is untracked while run() is still open", { timeout: 30_000 }, async () => {
+      const dir = tmpDir("reclaimed");
+      const pidFile = path.join(dir, "pid");
+      const before = process.listenerCount("SIGINT");
+      const sh = `perl -MPOSIX -e 'POSIX::setsid(); open(F, ">", $ARGV[0]); print F $$; close F; sleep 20' '${pidFile}' & ` +
+        `while [ ! -s '${pidFile}' ]; do sleep 0.05; done; exit 0`;
+      // The bound is a safety net, not the mechanism: the descendant is killed
+      // by hand below so the call closes in milliseconds, not at the timeout.
+      let settled = false;
+      const running = runFn("sh", ["-c", sh], { timeoutSec: 20 }).then((r) => { settled = true; return r; });
+      try {
+        assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while the child is live");
+        assert.ok(await waitFor(() => readPids(pidFile).length === 1), "the escaped descendant never reported its pid");
+        assert.ok(
+          await waitFor(() => process.listenerCount("SIGINT") === before),
+          "a group the kernel reported gone stayed in the forwarding set",
+        );
+        // What makes that drop mean the latch and not the settle: `tryFinish`
+        // releases the group on every settle path, so a drop observed after the
+        // call finished would pin nothing at all.
+        assert.equal(settled, false, "the call settled first — the drop proves nothing about the latch");
+        // Let go of stdout so `close` can finally come.
+        for (const pid of readPids(pidFile)) process.kill(pid, "SIGKILL");
+        const res = await running;
+        assert.equal(res.timedOut, false, "the call ran to its bound — the descendant was never released");
+        assert.equal(process.listenerCount("SIGINT"), before);
+      } finally {
+        // The first assertion runs before perl has written its pid. A red there
+        // would reap an empty file and leave a `sleep 20` nobody else can reach
+        // (it left our session) holding the call open into the next test.
+        await waitFor(() => readPids(pidFile).length === 1, 2_000);
+        reapPids(pidFile);
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     // The mirror image: a group that is NOT empty at a normal close is not ours
     // to signal either — nothing was killed, so nothing there was condemned.
     // The leftover keeps the group alive past the exit probe, so the latch

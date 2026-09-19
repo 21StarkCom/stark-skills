@@ -149,6 +149,77 @@ export function releaseGroup(pgid: number): void {
   if (liveGroups.size === 0) untrack();
 }
 
+/**
+ * The ONE latched group-killer (STARK-6377). Three detached spawn paths take
+ * their killer from here — `spawnBounded` below, `agent_dispatch_lib.ts::run`,
+ * and that file's Codex mirror (jury is the exception, named below) — for the reason
+ * `isSignallableGroup` is exported: a safety rule kept in three copies drifts,
+ * and this one did. STARK-6245 taught the `spawnBounded` copy to release the
+ * group on ESRCH while both `run()` copies kept a bare latch, so a Ctrl-C could
+ * still reach a recycled id through `forward` on the path that spawns agents.
+ *
+ * A group id is ours only while the group has members: once it empties the
+ * kernel is free to reuse it, and `process.kill(-pgid)` signals whoever holds it
+ * NOW. A call can outlive its own child — `close` needs the stdio pipes closed,
+ * so a descendant that inherited them AND left the group (`setsid`) keeps the
+ * call open with the group already empty. So ESRCH latches: nothing follows the
+ * kernel saying the group is gone.
+ *
+ * The forwarding set has to learn it too, or the latch protects only half the
+ * file: `forward` signals every id in `liveGroups` through the module-level
+ * `killGroup`, which knows nothing about a per-call latch and does not settle
+ * with the call. Untracking is also the honest state — with the group gone there
+ * is nothing left to forward to, so Node's default exit is the right disposition
+ * again.
+ *
+ * Signal `0` delivers nothing, which makes it the probe: call it from the
+ * leader's `exit`, the first moment the group can have emptied with the call
+ * still open and the last at which the id cannot yet have been reused.
+ *
+ * NOT routed through here: `jury_dispatch.ts::killProcessGroup`, which keeps its
+ * own ladder and stops at its first ESRCH, but releases the seat's group only
+ * when the outcome is emitted — so a seat whose leader exited with an escaped
+ * descendant holding stdout sits in the forwarding set, group possibly empty,
+ * for up to `EXIT_CLOSE_GRACE_MS`. Seconds rather than `run()`'s minutes, and
+ * still open.
+ */
+export function makeGroupKiller(pgid: number | undefined): GroupKiller {
+  const usable = pgid !== undefined && isSignallableGroup(pgid);
+  let groupGone = false;
+  let released = false;
+  const release = (): void => {
+    if (released || !usable) return;
+    released = true;
+    releaseGroup(pgid);
+  };
+  const kill = (signal: NodeJS.Signals | 0): void => {
+    if (groupGone || !usable) return;
+    try {
+      process.kill(-pgid, signal);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ESRCH") return;
+      groupGone = true;
+      release();
+    }
+  };
+  return Object.assign(kill, { release });
+}
+
+/** What `makeGroupKiller` returns: the latched signaller plus THIS CALL's release. */
+export interface GroupKiller {
+  (signal: NodeJS.Signals | 0): void;
+  /**
+   * Drop the group from the forwarding set — at most once per CALL, which is
+   * not what `releaseGroup`'s per-ID idempotence gives. Once the latch has
+   * released an id the kernel is free to hand it to a concurrent call's child,
+   * which tracks it again; a settle path that then ran a bare
+   * `releaseGroup(pgid)` would delete THAT call's entry and leave a live agent
+   * deaf to Ctrl-C — the recycled-id hazard this factory exists for, turned on
+   * our own bookkeeping. So every settle path releases through here.
+   */
+  release(): void;
+}
+
 export async function spawnBounded(
   cmd: string,
   args: string[],
@@ -164,37 +235,9 @@ export async function spawnBounded(
     });
     const pgid = child.pid;
     if (pgid !== undefined) trackGroup(pgid);
-    /**
-     * A group id is ours only while the group has members: once it empties the
-     * kernel is free to reuse it, and `process.kill(-pgid)` signals whoever
-     * holds it NOW. That matters here precisely because this call can outlive
-     * its own child — `close` needs the stdio pipes closed, so a descendant
-     * that inherited them AND left the group (`setsid`) keeps the call open
-     * with the group already empty, and `terminate`'s SIGKILL then lands at the
-     * timeout on a stranger. So ESRCH latches: nothing follows the kernel
-     * saying the group is gone. Same guard `agent_dispatch_lib.ts::run` carries
-     * (STARK-6147); it belongs in the shared primitive too.
-     */
-    let groupGone = false;
-    const killOwnGroup = (signal: NodeJS.Signals | 0): void => {
-      if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
-      try {
-        process.kill(-pgid, signal);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ESRCH") return;
-        groupGone = true;
-        // The forwarding set has to learn it too, or the latch protects only
-        // half the file: `forward` signals every id in `liveGroups` through the
-        // module-level `killGroup`, which knows nothing about this latch and
-        // does not settle with the call. A Ctrl-C arriving after the group
-        // emptied — the window this whole guard exists for, a `setsid`
-        // descendant holding the pipes open — would then deliver the recycled-id
-        // signal by the other door. Untracking is also the honest state: with
-        // the group gone there is nothing left to forward to, so Node's default
-        // exit is the right disposition again.
-        releaseGroup(pgid);
-      }
-    };
+    // Without the latch `terminate`'s SIGKILL can land at the timeout on a
+    // stranger holding a recycled id — see `makeGroupKiller`.
+    const killOwnGroup = makeGroupKiller(pgid);
     // The leader's exit is the first moment the group can have emptied with
     // this call still open. Probe with signal 0 — which delivers nothing —
     // while the id cannot yet have been reused.
@@ -218,7 +261,9 @@ export async function spawnBounded(
       // would hold the process open long after the `gh` call it bounded returned.
       clearTimeout(timer);
       clearTimeout(reapTimer);
-      if (pgid !== undefined) releaseGroup(pgid);
+      // Through the killer, never a bare `releaseGroup(pgid)`: if the latch has
+      // already let the id go, it may be another call's by now.
+      killOwnGroup.release();
       return true;
     };
     const settle = (r: BoundedSpawnResult) => { if (claim()) resolve(r); };

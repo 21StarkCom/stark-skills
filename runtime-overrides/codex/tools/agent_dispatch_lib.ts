@@ -29,7 +29,7 @@ import * as path from "node:path";
 
 import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import { assetConfigPath, stateRoot } from "./asset_root_lib.ts";
-import { isSignallableGroup, releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
+import { makeGroupKiller, trackGroup } from "./bounded_spawn_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 import { geminiAuthSettings, resolveGeminiAuthMode } from "./gemini_auth_lib.ts";
 import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
@@ -175,8 +175,8 @@ const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024; // 32 MiB
 // whatever a headless claude/codex/gemini had spawned was reparented to init and
 // ran on (and billed) past the bound. `detached` also takes the child out of the
 // terminal's foreground group, so Ctrl-C is paid back through bounded_spawn_lib's
-// forwarding half (`trackGroup`/`releaseGroup`); the SIGTERM → SIGKILL ladder
-// stays this function's own.
+// forwarding half (`trackGroup`, released through the killer); the SIGTERM →
+// SIGKILL ladder stays this function's own.
 
 export async function run(
   cmd: string,
@@ -218,13 +218,9 @@ export async function run(
     // `child.kill()` had that guard for free — it is a no-op once the child has
     // exited — while `process.kill(-pgid)` signals whoever holds the id NOW. So
     // ESRCH, the kernel saying the group is gone, latches: nothing follows it.
-    let groupGone = false;
-    const killTree = (signal: NodeJS.Signals | 0): void => {
-      if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
-      try { process.kill(-pgid, signal); } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ESRCH") groupGone = true;
-      }
-    };
+    // The latch is the shared one (STARK-6377) — it also drops the group from
+    // the forwarding set, which this file's private copy never did.
+    const killTree = makeGroupKiller(pgid);
     const ladder: NodeJS.Timeout[] = [];
 
     let settled = false;
@@ -245,7 +241,9 @@ export async function run(
       // a normal close: nothing was killed, so nothing there is ours to signal.
       for (const t of ladder) clearTimeout(t);
       if (timedOutFlag) killTree("SIGKILL");
-      if (pgid !== undefined) releaseGroup(pgid);
+      // Through the killer, never a bare `releaseGroup(pgid)`: if the latch has
+      // already let the id go, it may be another call's by now.
+      killTree.release();
       resolve(closedResult);
     };
 
