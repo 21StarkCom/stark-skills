@@ -381,6 +381,38 @@ for (const name of SKILLS) {
 }
 
 // ---------------------------------------------------------------------------
+// 6b. Every RELATIVE `.md` link out of a SKILL.md resolves. Check 6 above only
+//     covers the skill's own `references/` dir, which left the cross-directory
+//     links unguarded — `../../standards/help.md` from every skill, and since
+//     STARK-6182 `../../standards/worker-spine.md` +
+//     `../../standards/stand-down.md` from `/minion` and `/agnes` (the spine
+//     and the teardown contract now live in exactly one place precisely so the
+//     two workers cannot drift, which only holds while both links resolve) and
+//     `../minion/SKILL.md` from `/agnes`. Renaming a standards doc would
+//     otherwise break every pointer silently: nothing else reads these links.
+// ---------------------------------------------------------------------------
+
+// Inline markdown links whose destination is explicitly relative (`./` or
+// `../`) and lands on a `.md` file, with an optional `#anchor` fragment. Only
+// the file half is checked — an anchor is markdown, not a path.
+const RELATIVE_MD_LINK_RE = /\]\((\.{1,2}\/[^)\s#]+\.md)(#[^)\s]*)?\)/g;
+
+for (const name of SKILLS) {
+  test(`skill smoke: ${name} — every relative .md link resolves`, () => {
+    const skillDir = path.join(SKILLS_ROOT, name);
+    const broken: string[] = [];
+    for (const m of SKILL_CONTENT[name].text.matchAll(RELATIVE_MD_LINK_RE)) {
+      if (!fs.existsSync(path.resolve(skillDir, m[1]))) broken.push(m[1]);
+    }
+    assert.deepEqual(
+      broken,
+      [],
+      `unresolved relative .md links in ${name} — the SKILL.md points at docs that do not exist`,
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
 // 5. Every distinct in-repo `tools/*.ts` CLI mentioned by any skill exits
 //    cleanly on --help. Run in parallel (~13 spawns total, ~600ms each
 //    sequential → ~1.5s with parallelism).
