@@ -23,12 +23,15 @@
  *   - **Marker-aware retry.** Every posted body starts with a marker
  *     (`buildMarker`). Between 5xx retries the poster re-reads the PR's reviews
  *     and stops if the marker is already there, so a
- *     successful-but-unacknowledged POST cannot double-post.
+ *     successful-but-unacknowledged POST cannot double-post. The same read
+ *     happens once up front (STARK-6125, `review_post_rerun.test.ts`), so a
+ *     RERUN over a landed-but-`unposted` review writes nothing either.
  *
  * REST-only by contract: `rejectGraphqlPath` refuses a GraphQL path, and
  * `check-rest-only.sh` guards this file in CI.
  */
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { assertGhTimeoutMs, explainTermination, resolveGhTimeoutMs } from "./child_termination_lib.ts";
 import {
@@ -393,15 +396,46 @@ export async function findExistingMarker(opts: {
   marker: string;
   ghJsonFn?: typeof ghJson;
 }): Promise<boolean> {
+  return (await findMarkedReview(opts)) !== null;
+}
+
+/**
+ * The rows of a list endpoint, or a throw. A 2xx whose body is not a JSON array
+ * is an UNREADABLE read, not an empty one: both idempotency reads (the review
+ * marker, the overflow comments) exist to stop a double-post, and reading
+ * "nothing there" out of a body that said nothing is how one gets through.
+ */
+function listRows(r: GhJsonResult, what: string): unknown[] {
+  if (Array.isArray(r.data)) return r.data;
+  throw new GhError(-1, `${what} was not a JSON array (HTTP ${r.status})`, {});
+}
+
+/** One line naming why a `gh` call failed, for `unpostedReason`. Reads
+ * `GhError.body`, never the message — that is where the transport puts the
+ * cause (see `ghJsonOnce`). */
+function describeGhFailure(e: unknown): string {
+  return e instanceof GhError ? `http_${e.status}: ${e.body.slice(0, 200)}` : String(e);
+}
+
+/** {@link findExistingMarker}, returning the review it found (its id when
+ * GitHub supplied a numeric one) so a skipped rerun can name what it skipped for.
+ * Throws — never "not found" — when the list cannot be read. */
+export async function findMarkedReview(opts: {
+  repo: string;
+  pr: number;
+  marker: string;
+  ghJsonFn?: typeof ghJson;
+}): Promise<{ id?: number } | null> {
   const gh = opts.ghJsonFn ?? ghJson;
   const r = await gh(`/repos/${opts.repo}/pulls/${opts.pr}/reviews`);
-  if (!Array.isArray(r.data)) return false;
-  for (const rev of r.data) {
+  for (const rev of listRows(r, `the reviews list of ${opts.repo}#${opts.pr}`)) {
     if (typeof rev !== "object" || rev === null) continue;
-    const body = (rev as { body?: unknown }).body;
-    if (typeof body === "string" && body.startsWith(opts.marker)) return true;
+    const { body, id } = rev as { body?: unknown; id?: unknown };
+    if (typeof body === "string" && body.startsWith(opts.marker)) {
+      return typeof id === "number" ? { id } : {};
+    }
   }
-  return false;
+  return null;
 }
 
 // ─── postReview: inline-vs-body routing + 422 no-drop fallback ──────────────
@@ -708,6 +742,10 @@ function renderOverflowFooter(links: string[], summaryParts = 0): string {
   return lines.join("\n");
 }
 
+/** Opening of an overflow comment's first line, up to the part number. Shared by
+ * {@link renderOverflowComment} and its inverse {@link overflowPartOf}. */
+const OVERFLOW_PART_PREFIX = "**Review overflow — part ";
+
 /** Body of one overflow issue comment. Content-addressed: the same findings in
  * the same slot always render the same text, which is what lets a rebuild reuse
  * an already-posted comment instead of duplicating it. */
@@ -719,7 +757,7 @@ export function renderOverflowComment(
   const lines: string[] = [
     marker,
     "",
-    `**Review overflow — part ${part}.** These findings did not fit in the review ` +
+    `${OVERFLOW_PART_PREFIX}${part}.** These findings did not fit in the review ` +
       "body's character limit. They are reproduced here in full; none was dropped or truncated.",
     "",
   ];
@@ -774,7 +812,7 @@ function renderSegmentHeader(marker: string, part: number, seg: NonNullable<Over
     return [
       marker,
       "",
-      `**Review overflow — part ${part}: review summary, ${position}.** The review summary did not fit ` +
+      `${OVERFLOW_PART_PREFIX}${part}: review summary,${position}.** The review summary did not fit ` +
         "under the review body's character limit, so it is reproduced here in full" +
         (seg.total > 1 ? " across consecutive comments — read the segments in order" : "") +
         ". Nothing was dropped or truncated.",
@@ -787,7 +825,7 @@ function renderSegmentHeader(marker: string, part: number, seg: NonNullable<Over
   return [
     marker,
     "",
-    `**Review overflow — part ${part}: one finding, ${position}.** This finding is larger than GitHub's ` +
+    `${OVERFLOW_PART_PREFIX}${part}: one finding,${position}.** This finding is larger than GitHub's ` +
       "comment limit, so its text continues across consecutive comments — read the segments in order. " +
       "Nothing was dropped or truncated.",
     "",
@@ -855,6 +893,23 @@ export function countOverflowFindings(chunks: OverflowChunk[]): number {
     (n, c) => n + c.findings.length + (c.segment?.of === "finding" && c.segment.index === 1 ? 1 : 0),
     0,
   );
+}
+
+/**
+ * The 1-based part number of an overflow comment {@link renderOverflowChunk}
+ * wrote for `marker` — whole-findings (`part N.**`) or segment (`part N: …`) —
+ * or null for anything else: another run's comment, a human quoting one, the
+ * review body itself. The inverse of those renderers, kept beside them so they
+ * cannot drift: a rerun uses it to find the comments an earlier run of the SAME
+ * payload already left on the PR.
+ */
+export function overflowPartOf(marker: string, body: string): number | null {
+  const head = `${marker}\n\n${OVERFLOW_PART_PREFIX}`;
+  if (!body.startsWith(head)) return null;
+  const m = /^(\d+)(?:\.\*\*|: )/.exec(body.slice(head.length));
+  if (!m) return null;
+  const part = Number.parseInt(m[1], 10);
+  return part >= 1 ? part : null;
 }
 
 export interface BodySplitPlan {
@@ -1061,11 +1116,43 @@ function extract422IndicesFromString(s: string): number[] {
   return [...idxs].sort((a, b) => a - b);
 }
 
+/**
+ * The review marker's run hash: a digest of EVERYTHING the review would carry,
+ * pinned to the head it anchors to. Pass its result as
+ * {@link PostReviewOpts.runHash}.
+ *
+ * It lives here, beside the skip it protects, because every caller of
+ * {@link postReview} inherits the failure: since STARK-6125 a run whose marker
+ * is already on the PR writes NOTHING, so a marker that collides across
+ * different payloads silently swallows a review nobody has seen. The hash this
+ * replaced was the joined finding ids cut at 40 chars — three 12-hex ids, each
+ * derived from a title alone — so a later review sharing its first three finding
+ * titles, or the same titles with new bodies or lines, collided. That was
+ * harmless while the marker was only read between retries of one run. A wrong
+ * skip loses findings; a missed one only double-posts — so the hash is as narrow
+ * as the payload. The head sha is in it because inline anchors are per-commit:
+ * the same findings on a new head are a new review.
+ */
+export function computeRunHash(findings: Finding[], humanSummary: string, headSha: string): string {
+  const h = createHash("sha256");
+  h.update(JSON.stringify([
+    headSha,
+    humanSummary,
+    findings.map((f) => [f.id, f.severity, f.file ?? null, f.line ?? null, f.title, f.body, f.body_reason ?? null]),
+  ]));
+  return h.digest("hex").slice(0, 40);
+}
+
 export interface PostReviewOpts {
   repo: string;
   pr: number;
   round: number;
   agent: AgentName;
+  /** Identifies THIS payload in the review marker. It is load-bearing: a marker
+   * already on the PR makes {@link postReview} skip the whole run, so two
+   * different payloads sharing a `runHash` means the second is never posted.
+   * Derive it with {@link computeRunHash}; never from a prefix, a count, or the
+   * finding ids alone. */
   runHash: string;
   findings: Finding[];
   changedFiles: Set<string>;
@@ -1107,9 +1194,19 @@ export interface PostReviewResult {
    * non-zero. */
   unposted?: boolean;
   unpostedReason?: string;
-  /** Issue-comment ids created to carry body findings that did not fit under
-   * {@link GITHUB_REVIEW_BODY_MAX}. Empty (and `bodyOverflow` absent) on every
-   * payload that fits, which is the overwhelming majority. */
+  /** Set when the PR already carried this payload's marker before anything was
+   * sent: an earlier run landed it, so this one wrote nothing (no review, no
+   * overflow comment). `posted` is true — the review IS on the PR — `attempts`
+   * is empty, and `reviewId` names the review that was found. `payloadSummary`
+   * and `bodyOverflow` then describe this run's first-pass PLAN, exactly as
+   * `dryRun` reports it — not what the earlier run ended up sending, which a
+   * 422 fallback may have reshaped — and `bodyOverflowComments` stays absent. */
+  alreadyPosted?: boolean;
+  /** Ids of the issue comments carrying body findings that did not fit under
+   * {@link GITHUB_REVIEW_BODY_MAX} — posted by this run or adopted from an
+   * earlier one, and only the ones this review links to. Empty (and
+   * `bodyOverflow` absent) on every payload that fits, which is the
+   * overwhelming majority. */
   bodyOverflowComments?: number[];
   /** Set only when the body overflowed, so a caller can report the split. */
   bodyOverflow?: {
@@ -1261,6 +1358,34 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
   const ghPost = opts.ghJsonOnceFn ?? opts.ghJsonFn ?? ghJsonOnce;
   const retry = opts.retryFn ?? withRetry;
 
+  // Idempotency ACROSS runs (STARK-6125). `checkMarker` below only runs between
+  // retries of this run, but a POST can land and still be reported `unposted` —
+  // a `gh` killed after writing a complete 2xx is refused as a terminated
+  // child's output, and so is our own timeout kill — and the operator's rerun is
+  // a fresh run. So look before the first write of ANY kind: the overflow
+  // comments are synced before the review, and checking only ahead of the review
+  // POST would re-post those while skipping the review.
+  //
+  // A failed read REFUSES rather than proceeding, unlike `checkMarker`: between
+  // retries "unknown" costs one more attempt at a POST already owed, here it
+  // would be the unguarded double-post this check exists to stop. Nothing is
+  // lost by refusing — nothing has been written, and the rerun is safe.
+  try {
+    const existing = await findMarkedReview({
+      repo: opts.repo, pr: opts.pr, marker, ghJsonFn: gh,
+    });
+    if (existing) {
+      result.posted = true;
+      result.alreadyPosted = true;
+      if (existing.id !== undefined) result.reviewId = existing.id;
+      return result;
+    }
+  } catch (e) {
+    result.unposted = true;
+    result.unpostedReason = `marker_check_failed: ${describeGhFailure(e)}`;
+    return result;
+  }
+
   // Overflow comments are SLOT-addressed: chunk i always lives in the same
   // issue comment, edited in place when a rebuild changes what is in it.
   // Addressing them by CONTENT instead looks equivalent and is not: the
@@ -1280,10 +1405,37 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
 
   const failOverflow = (e: unknown): null => {
     result.unposted = true;
-    result.unpostedReason = `overflow_comment_failed: ${
-      e instanceof GhError ? `http_${e.status}: ${e.body.slice(0, 200)}` : String(e)
-    }`;
+    result.unpostedReason = `overflow_comment_failed: ${describeGhFailure(e)}`;
     return null;
+  };
+
+  /**
+   * Seed the slots, once and only when a chunk is about to be written, from the
+   * overflow comments an earlier run of this same payload left on the PR. That
+   * run's review POST truly failed (a landed one is caught by the marker check
+   * above), so its comments sit there linked from nowhere; without this the
+   * rerun posts every chunk a second time. An adopted slot then behaves like any
+   * other: reused when identical, PATCHed when the content moved. Lazy, so the
+   * overwhelming no-overflow majority never pays for the listing; a failed
+   * listing fails the overflow — and with it the review — rather than guessing.
+   */
+  let slotsAdopted = false;
+  const adoptOverflowSlots = async (): Promise<void> => {
+    if (slotsAdopted) return;
+    const r = await gh(`/repos/${opts.repo}/issues/${opts.pr}/comments`);
+    // Unreadable is a throw, same as a failed request: "no comments" read out of
+    // a body that was not a list re-posts every chunk.
+    const rows = listRows(r, `the issue-comments list of ${opts.repo}#${opts.pr}`);
+    slotsAdopted = true;
+    for (const c of rows) {
+      if (typeof c !== "object" || c === null) continue;
+      const { id, body, html_url } = c as { id?: unknown; body?: unknown; html_url?: unknown };
+      if (typeof id !== "number" || typeof body !== "string") continue;
+      const part = overflowPartOf(marker, body);
+      // First match wins: duplicates left by pre-STARK-6125 reruns stay orphans.
+      if (part === null || slots[part - 1]) continue;
+      slots[part - 1] = { id, url: overflowLinkFor(opts.repo, opts.pr, id, html_url), content: body };
+    }
   };
 
   /** Put chunk `i` in its slot — posting the comment the first time, editing it
@@ -1291,6 +1443,11 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
    * return the cross-link, or null after recording why it failed. */
   const syncOverflowSlot = async (i: number, chunk: OverflowChunk): Promise<string | null> => {
     const content = renderOverflowChunk(marker, i + 1, chunk);
+    try {
+      await adoptOverflowSlots();
+    } catch (e) {
+      return failOverflow(e);
+    }
     const slot = slots[i];
     if (slot && slot.content === content) return slot.url;
     if (slot?.id !== undefined) {
@@ -1349,7 +1506,10 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
       if (url === null) return null;
       links.push(url);
     }
+    // Only the slots this plan links to: an adopted slot past the current chunk
+    // count belongs to an earlier, larger split and is not part of this review.
     result.bodyOverflowComments = slots
+      .slice(0, s.chunks.length)
       .map((sl) => sl.id)
       .filter((id): id is number => id !== undefined);
     result.bodyOverflow = summarizeSplit(s);
@@ -1360,10 +1520,15 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
 
   const checkMarker = async (): Promise<{ stopReason?: string } | void> => {
     try {
-      const found = await findExistingMarker({
+      const found = await findMarkedReview({
         repo: opts.repo, pr: opts.pr, marker, ghJsonFn: gh,
       });
-      if (found) return { stopReason: "marker_found" };
+      if (found) {
+        // Same landed-but-unacknowledged event as `alreadyPosted`, so name the
+        // review here too rather than only on the rerun.
+        if (found.id !== undefined) result.reviewId = found.id;
+        return { stopReason: "marker_found" };
+      }
     } catch { /* swallow — retry continues */ }
     return undefined;
   };

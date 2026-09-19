@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<!-- idun:pr-merge pr=1011 runId=1011 sha=b2628cb9 -->
+- Fixed `postReview` re-posting duplicate PR reviews on rerun by checking the review marker once before any write, refusing on an unreadable read, and adopting orphaned overflow comments.
 <!-- idun:pr-merge pr=1010 runId=1010 sha=ebb8271c -->
 - fix(STARK-6116): segment over-cap PR review findings and relocate over-cap summaries instead of silently dropping every finding on a 422
 <!-- idun:pr-merge pr=1009 runId=1009 sha=5badef62 -->
