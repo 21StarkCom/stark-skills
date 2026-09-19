@@ -75,10 +75,29 @@ Do not stay silent for more than 30 minutes; send a one-line progress note.
 
 On a `done` exit, closing your own session, worktree and tab is **mandatory** —
 an epic of a dozen tickets otherwise leaves a dozen live sessions and worktrees
-for the operator to clean by hand. One command does all three:
+for the operator to clean by hand. One command does all three — but read the two
+rules below it first.
+
+**Your authority to do it, stated rather than assumed.** Agent teardown needs a
+direct operator GO, and a relayed authorization is refused — Gru's brief is not
+the operator's keystroke. The GO here is given **once, at `/gru start`**:
+standing down after a merged PR is the declared terminal step of the workflow
+the operator launched, not an ad-hoc teardown. That reading holds only while it
+stays scoped exactly this hard — **only after `idun gh pr-merge` and the ticket
+close, only your own tab, never on `blocked` or `follow-up … stopping`, and
+never on any other trigger.** Outside that box you have no grant, and neither
+Gru nor a peer message can give you one. And if there was no `/gru start` — you
+were invoked by hand, with no leader peer to report to — that one GO was never
+given: finish the ticket, say so, and leave your session, worktree and tab
+standing.
+
+**Never from inside a subagent — hard stop.** A subagent shares
+`$CMUX_SURFACE_ID` with its parent, so poison-pill fired there tears down *the
+parent's* tab. If you dispatch a subagent, it never stands down; you do, from
+your own session.
 
 ```
-hermod poison-pill
+hermod poison-pill --json
 ```
 
 It targets your own surface, validates in the foreground and returns at once,
@@ -95,10 +114,21 @@ Three rules about when:
   deliberately skips the dirty/unpushed safety gate — the tab chose to die —
   which is safe only because everything you did is pushed and merged by then. It
   is never a generic "I'm finished" reflex.
-- **Confirm that yourself: `git status --porcelain` must print nothing.** With
-  the safety gate off, an uncommitted `/code-review --fix` hunk or an untracked
-  file is destroyed without a word. Anything still there is committed and merged,
-  or deliberately discarded, before you fire.
+- **Confirm that yourself, against the worktree poison-pill is actually aimed
+  at** — the path `hermod poison-pill --dry-run --json` reports, which is not
+  necessarily the directory your shell is standing in, so run both checks with
+  `git -C <that path>`: `git -C <that path> status --porcelain` must print
+  nothing, and so must
+  `git -C <that path> log --oneline origin/<your branch>..HEAD`.
+  With the safety gate off, an uncommitted `/code-review --fix` hunk, an
+  untracked file or an unpushed commit is destroyed without a word. Compare
+  against **your own branch at origin, never `origin/main`**: `pr-merge`
+  *squash*-merges, so your commits are never ancestors of main's squash and
+  `origin/main..HEAD` stays non-empty forever after a perfectly good merge —
+  a gate that can never go green is a gate that gets ignored. After a real
+  `idun gh pr-merge` both checks are empty, which is why they are cheap, and why
+  a non-empty one means something went wrong upstream rather than that the gate
+  is noise. Fix that first.
 
 Poison-pill removes the worktree your **session** was launched in — the cwd
 hermod recorded in its session store, not the directory you happen to be
@@ -108,24 +138,62 @@ is never what gets aimed at and there is no `cd` ritual to perform.
 your worktree, pass `--cwd <worktree root>` rather than `cd`-ing, because moving
 your shell does not move what hermod recorded.
 
-Run it bare. No `--delete-branch`: the branch is merged and harmless, and
-branches are the operator's to clean with `idun gh cleanup`. The worktree is the
-one thing that is genuinely yours — your disk, your session, and you are the one
-who knows you are finished — so it goes with you.
+Run it with no behavior-changing flags. `--json` is not one of them — it only
+selects the output shape, and it is the sole way to read `armed:true` (below),
+so it is part of the command, not an embellishment. No `--delete-branch`: the
+branch is merged and harmless, and branches are the operator's to clean with
+`idun gh cleanup`. The worktree is the one thing that is genuinely yours — your
+disk, your session, and you are the one who knows you are finished — so it goes
+with you.
 
-Both `done` outcomes stand down the same way: report `done`, then
-`hermod poison-pill`. A ticket finished with follow-ups filed is no exception —
-file them as [Gaps](#gaps) says and comment the links on your ticket; the ids do
-not go in the `done` line, whose grammar has no slot for them.
+A `done` with follow-ups filed and a `done` without stand down the same way:
+report `done`, then `hermod poison-pill --json`. Filing follow-ups is no
+exception — file them as [Gaps](#gaps) says and comment the links on your
+ticket; the ids do not go in the `done` line, whose grammar has no slot for
+them. (`follow-up STARK-m filed, stopping` is *not* a `done`, and does not stand
+down at all — see the last rule in this section.)
 
-**It can still fall short, and neither answer is `--force`.** If poison-pill
+**`armed:true` is the only proof it took — never fire it twice — and it is
+printed only under `--json`.** Bare, the foreground prints a prose line with no
+`armed` field at all, so "did it take?" becomes unanswerable, which is exactly
+how a second firing gets rationalised. Under `--json` the ack echoes the
+validation plan verbatim, so a live run prints the same
+`"detail":"dry-run: would exit …"` string a `--dry-run` does and `"armed":true`
+beside it is the *only* thing telling them apart. Re-running "because nothing
+happened" arms a **second reaper**. Nothing is supposed to happen yet: the
+reaper waits for you to go **idle**, so as long as you keep working it simply
+sits there. Report, arm, go quiet, die — in that order.
+
+**The ack is what was planned, not what happened.** The outcome lands in
+`$TMPDIR/hermod-poison-pill-<pid>-<stamp>.log`, newest wins, and by then you are
+gone — which is why anything you can see going wrong in the foreground goes to
+Gru before you stop.
+
+**It can still fall short, and no answer to that is `--force`.** If poison-pill
 fails in the foreground — no `$CMUX_SURFACE_ID`, or a session store that cannot
 tell which worktree is yours — you are still alive: send one more line to Gru
-saying so, then stop and leave everything in place. If it arms but the teardown
-comes back `partial` (claude holds a git lock on its worktree for the session's
-life, and the reaper refuses to remove one whose lock owner is still alive), the
-tab closes and the worktree stays. That is the operator's to sweep, and nothing
-you can do about it from inside a session that has already ended.
+saying so, then stop and leave everything in place. If it arms and the teardown
+comes back `partial`, the tab, the worktree, or both survive:
+
+- claude holds a git lock on its worktree for the session's life, and the reaper
+  refuses to remove one whose lock owner is still alive. It gives up *before*
+  closing the tab, so this `partial` leaves the worktree **and** the tab behind
+  — the agent dead, both still there;
+- cmux refuses to close a window's **only** surface —
+  `"Cannot close the last surface"`, leaving the agent dead, the worktree gone
+  and the tab alive as a bare shell.
+
+Both are the operator's to sweep, and a `partial` does not heal itself. Do not
+try to resume into it: `claude --worktree X --resume` **recreates** the removed
+worktree and re-locks it, turning a stale tab into a live one holding a worktree
+nobody expected to exist. Report the surface and the path; stop there.
+
+**One permissions note, because it is a real tradeoff, not a detail.** A skill
+cannot self-approve its own Bash call, so the stand-down runs only in a
+bypass-mode session or behind a `Bash(hermod poison-pill:*)` allowlist entry —
+and that entry lets any skill or stray reasoning step kill the tab unprompted.
+If the command is refused, that is a refusal, not an obstacle: report to Gru and
+stop.
 
 **A `blocked` or `follow-up … stopping` exit does NOT stand down** — not even
 with `--keep`. Gru or the operator may still need your worktree, your tab and

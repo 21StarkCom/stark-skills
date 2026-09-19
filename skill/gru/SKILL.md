@@ -39,7 +39,11 @@ tells you to stop; there is no other verb.
    independent. Do not add tickets the operator did not name.
 2. **Read the board.** Ticket `done`/`Closed` → run step 5's confirm on it, then
    skip; a Minion can die between closing its ticket and sending its report, so a
-   `done` status on its own is a closed ticket, not a confirmed one. Ticket with a
+   `done` status on its own is a closed ticket, not a confirmed one. With no
+   report to read — a rerun `start`, or a Minion that died before sending one —
+   confirm on the PR alone (merged, plus the verification comment on it) and
+   skip. A missing report is never a death when the ticket is already closed.
+   Ticket with a
    live Hermod peer (`hermod msg peers`, `liveness` live) whose `cwd`'s last
    path segment is exactly the ticket id → a Minion owns it, do not relaunch.
    Ticket whose Minion reported `blocked` or `follow-up … stopping` → blocked
@@ -62,11 +66,13 @@ tells you to stop; there is no other verb.
    session to the same worktree). Read the board before you read a corpse: a
    Minion that reported `done` goes dead on purpose moments later — it stands
    down with `hermod poison-pill`, which exits it, removes its worktree and
-   closes its tab — and step 2 confirms and skips its now-`done` ticket. A dead
-   peer is a death only while its ticket is still open **and** no merged PR for
-   it exists; check both, because a Minion can die between closing its ticket and
-   reporting. A dead Claude Minion that is a real death is relaunched once with
-   the same brief. A dead Codex Minion is a blocker:
+   closes its tab — and step 2 confirms and skips its now-`done` ticket. So read
+   the ticket, not the corpse: a dead peer whose ticket is already `done`/`Closed`
+   is a missing report, not a death — confirm it under step 5 and move on. A dead
+   peer whose ticket is **still open is a death, even when its PR already
+   merged**: a Minion can die between the merge and the ticket close, and nobody
+   else is going to close it. A dead Claude Minion that is a real death is
+   relaunched once with the same brief. A dead Codex Minion is a blocker:
    `hermod ticket` refuses its existing worktree; report the path. A second
    death is a blocker. `follow-up … stopping` means the ticket is blocked on
    STARK-m; report it so, and the operator decides whether to add STARK-m.
@@ -76,14 +82,20 @@ tells you to stop; there is no other verb.
    Minion closes at the end of the release chain, so wait for that). Only then
    count it finished and release the tickets that depended on it. The report
    names the live verification the Minion ran and the PR carries that run's
-   command and output as a comment — read the comment, not just the claim. A
-   `done` that names no verification, or names one with nothing on the PR behind
-   it, is not confirmed. If a check fails, tell the Minion what is missing if it
-   is live; if it has ended, treat the report as a death — but do not assume its
-   worktree is gone. The reaper removes it only *after* the agent exits, and
-   refuses outright while claude's worktree lock owner is still alive, so a dead
-   Codex Minion can still be step 4's `hermod ticket` blocker. Check the path
-   before you relaunch.
+   command and output as a comment — read the comment (`gh pr view <PR>
+   --comments`; the `--json state,mergeCommit` form above does not return them),
+   not just the claim. A `done` that names no verification, or names one with
+   nothing on the PR behind it, is not confirmed. The one exception is
+   `verified none (<why>)`: a ticket with no live surface has no run to post, so
+   judge the stated reason and confirm on the merged PR alone. If a check fails,
+   tell the Minion what is missing if it
+   is live; if it has ended, treat the report as a death — but only under step
+   4's rule: a still-open ticket is relaunched, a ticket already `done`/`Closed`
+   whose check fails is an operator escalation, never a relaunch into a closed
+   ticket. Either way, do not assume its worktree is gone. The reaper removes it
+   only *after* the agent exits, and a `partial` can leave it standing, so a dead
+   Codex Minion's worktree can still be step 4's `hermod ticket` blocker. Check
+   the path before you relaunch.
 6. **Loop** steps 2–5 until every ticket is finished or blocked. Then report:
    finished tickets with PR links, blocked tickets with the reason, and
    follow-up tickets the Minions filed.
@@ -109,4 +121,10 @@ tells you to stop; there is no other verb.
   `follow-up … stopping` leaves all three in place for you and the operator.
   You never remove a Minion's worktree yourself — including the one a stand-down
   left behind because its teardown came back partial. Report that path; sweeping
-  it is the operator's.
+  it is the operator's. A dead Minion's tab is reaped with
+  `hermod close-session <surface>`, never `poison-pill` — poison-pill only ever
+  targets the caller's own surface, and close-session is the mirror of it,
+  refusing that one alone — and that is the
+  operator's call, not yours: its dirty/unpushed gate is live for a reason when
+  the tab it is aimed at never said it was finished. Report the surface; do not
+  run it.
