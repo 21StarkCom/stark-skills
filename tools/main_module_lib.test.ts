@@ -24,9 +24,15 @@ const LIB = path.join(HERE, "main_module_lib.ts");
 const REPO_ROOT = path.resolve(HERE, "..");
 
 function run(script: string, args: string[] = []) {
+  // `--no-warnings`: several tests below read "any byte on stdout/stderr" as
+  // proof that main() ran. A Node process warning (the type-stripping
+  // ExperimentalWarning early 24.x still emits, a DeprecationWarning) lands on
+  // stderr whether or not the guard matched, which would make "silent"
+  // unobservable and those tests unable to fail. It is a Node option, so it
+  // stays out of `process.argv` and the guard under test sees the same argv[1].
   const r = spawnSync(
     process.execPath,
-    [script, ...args],
+    ["--no-warnings", script, ...args],
     { encoding: "utf8", cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"] },
   );
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
@@ -182,6 +188,16 @@ const FORMERLY_HAND_ROLLED = [
   "validation_gate.ts",
 ];
 
+/**
+ * One line of a stream for a failure message worth reading. Prefers the line
+ * naming the error: a crashed Node process leads with an internal frame
+ * (`node:internal/modules/esm/resolve:241`), which says nothing.
+ */
+function firstLine(text: string): string {
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  return lines.find((l) => /\bError\b/.test(l)) ?? lines[0] ?? "(no stderr)";
+}
+
 /** Copy the non-test tool sources into `dest` — they import only siblings. */
 function copyToolSources(src: string, dest: string) {
   fs.mkdirSync(dest, { recursive: true });
@@ -195,15 +211,25 @@ test("every formerly hand-rolled CLI still runs main() from a path containing a 
   // End-to-end on the REAL tools. `--help` is the side-effect-free probe: a
   // guard that returned false prints nothing at all and exits 0, so "any
   // output" is exactly the distinction between ran and silently skipped.
+  //
+  // Output alone is not enough, though. A tool that CRASHES ON IMPORT also
+  // writes to stderr — and never reaches its guard. `copyToolSources` copies
+  // only sibling `.ts` files, so a tool that later gains a JSON, npm or
+  // parent-directory import dies here with ERR_MODULE_NOT_FOUND and would read
+  // as "ran main()". Every one of these exits 0 on `--help`; require it.
   withTempDir((dir) => {
     const spacedTools = path.join(dir, SPACED, "tools");
     copyToolSources(HERE, spacedTools);
-    const silent: string[] = [];
+    const failed: string[] = [];
     for (const name of FORMERLY_HAND_ROLLED) {
       const r = run(path.join(spacedTools, name), ["--help"]);
-      if ((r.stdout + r.stderr).trim() === "") silent.push(name);
+      if (r.status !== 0) {
+        failed.push(`${name}: exit ${r.status} — ${firstLine(r.stderr)}`);
+      } else if ((r.stdout + r.stderr).trim() === "") {
+        failed.push(`${name}: silent no-op (exit 0, no output)`);
+      }
     }
-    assert.deepEqual(silent, []);
+    assert.deepEqual(failed, []);
   });
 });
 
@@ -215,7 +241,29 @@ test("the codex self_healer overlay runs main() from a path containing a SPACE",
     copyToolSources(HERE, spacedTools);
     copyToolSources(path.join(REPO_ROOT, "runtime-overrides", "codex", "tools"), spacedTools);
     const r = run(path.join(spacedTools, "self_healer.ts"), ["--help"]);
+    // Exit 0 first: an overlay lib missing from the merged tree crashes on
+    // import, and that stderr would otherwise pass for main() having run.
+    assert.equal(r.status, 0, r.stderr);
     assert.notEqual((r.stdout + r.stderr).trim(), "", "silent no-op from a spaced path");
+  });
+});
+
+test("skill_optimize.ts runs main() when reached through a symlink", () => {
+  // The one converted guard that was broken by a SYMLINK rather than a space:
+  // it compared `pathToFileURL(process.argv[1]).href` to `import.meta.url`
+  // unresolved, so through `~/.claude/code-review` it exited 0 having done
+  // nothing. The spaced-path list above cannot catch that — this guard was
+  // always space-safe — so it gets its own probe.
+  //
+  // A deliberately bogus flag, not `--help`: the CLI rejects unknown arguments
+  // from inside its guarded block with its own `[skill_optimize]` prefix, which
+  // nothing but a main() that ran can print. Anchoring on that prefix (rather
+  // than "any output") keeps the test honest if `--help` is ever implemented.
+  withTempDir((dir) => {
+    const link = path.join(dir, "skill_optimize-link.ts");
+    fs.symlinkSync(path.join(HERE, "skill_optimize.ts"), link);
+    const r = run(link, ["--not-a-real-flag"]);
+    assert.match(r.stderr, /\[skill_optimize\]/, `main() never ran: ${JSON.stringify(r)}`);
   });
 });
 

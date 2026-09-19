@@ -4,8 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const CLI = new URL("./stark_handover.ts", import.meta.url).pathname;
+// fileURLToPath, not `.pathname`: the latter is percent-encoded, so a checkout
+// path containing a space would spawn a `%20` path that does not exist.
+const CLI = fileURLToPath(new URL("./stark_handover.ts", import.meta.url));
 
 function tmpDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));

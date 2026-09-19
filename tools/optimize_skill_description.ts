@@ -435,9 +435,8 @@ function main(argv: string[]): number {
   return 0;
 }
 
-// Run only when invoked directly (not when imported by tests). Resolve real
-// paths so a symlinked install (e.g. `~/.claude/code-review/tools/...`)
-// still triggers main — `tools/stark_session.ts` had this exact bug.
+// Run only when invoked directly (not when imported by tests). `isMainModule`
+// owns the symlink- and space-safe comparison — see `main_module_lib.ts`.
 if (isMainModule(import.meta.url)) {
   try {
     process.exit(main(process.argv.slice(2)));
