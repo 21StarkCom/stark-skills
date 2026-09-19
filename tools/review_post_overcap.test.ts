@@ -27,10 +27,12 @@ import {
   GITHUB_ISSUE_COMMENT_MAX,
   GITHUB_REVIEW_BODY_MAX,
   OVERFLOW_SEGMENT_DELIMITER,
+  overflowPartOf,
   planBodySplit,
   postReview,
   relocatedSummaryStub,
   renderOverflowChunk,
+  segmentChunks,
   splitTextToFit,
 } from "./review_post_lib.ts";
 
@@ -437,4 +439,53 @@ test("postReview: dry-run reports a relocated summary and a segmented finding wi
   assert.equal(r.bodyOverflow!.summaryRelocated, true);
   assert.equal(r.bodyOverflow!.findingsInOverflow, 1, "a segmented finding is ONE finding, not one per segment");
   assert.ok(r.bodyOverflow!.chunks >= 4);
+});
+
+// ─── Review findings on STARK-6245 ──────────────────────────────────────────
+
+test("a refusal reports the floor of the plan that would actually be used, not a relocation that never happened", async () => {
+  // Relocating the summary costs OVERFLOW_PREAMBLE_RESERVE + OVERFLOW_LINK_RESERVE
+  // of extra footer, so when the floor is blown by `postingAgentNote` the second
+  // plan is refused too — and reporting ITS numbers tells the operator to
+  // shorten by an amount that was never the real one, over a body whose summary
+  // was never actually moved. The refusal must describe the un-relocated plan.
+  const summary = structuredText(20_000);
+  const note = "n".repeat(70_000);
+  let posts = 0;
+  const gh = async (_p: string, opts?: { method?: string }) => {
+    if (opts?.method === "POST" || opts?.method === "PATCH") posts++;
+    return { status: 200, data: { id: 1 }, headers: {} };
+  };
+  const r = await postReview({
+    ...BASE,
+    humanSummary: summary,
+    postingAgentNote: note,
+    findings: [makeFinding({ id: "f1", title: "FINDING-ONE" })],
+    ghJsonFn: gh as GhFn,
+  });
+  assert.equal(r.unposted, true);
+  assert.match(r.unpostedReason!, /body_over_cap_without_findings/);
+  assert.equal(posts, 0, "no overflow comment may be posted for a review that cannot land");
+  assert.equal(r.bodyOverflow?.summaryRelocated, undefined, "nothing was relocated, so nothing may claim it was");
+  const nonFinding = Number(/— (\d+) of non-finding parts/.exec(r.unpostedReason!)?.[1]);
+  assert.ok(
+    nonFinding > summary.length + note.length,
+    `the refusal measured ${nonFinding} chars — the stub, not the ${summary.length}-char summary the body still carries`,
+  );
+});
+
+test("a segment header's position reads as prose, so a reader landing mid-way can parse it", () => {
+  // `part 1: one finding,segment 1 of 2.` — the one navigation string a reader
+  // arriving in the middle of a segmented text relies on.
+  const huge = makeFinding({ id: "huge", title: "HUGE", body: structuredText(140_000) });
+  const findingPlan = planBodySplit((kept) => buildReviewBody("M", "s", kept), [huge], "M");
+  assert.match(renderOverflowChunk("M", 1, findingPlan.chunks[0]), /part 1: one finding, segment 1 of \d+\.\*\*/);
+
+  const summaryChunks = segmentChunks({ of: "summary" }, structuredText(200_000), "M", GITHUB_ISSUE_COMMENT_MAX);
+  assert.ok(summaryChunks.length > 1, "fixture: the summary must need more than one comment");
+  assert.match(renderOverflowChunk("M", 1, summaryChunks[0]), /part 1: review summary, segment 1 of \d+\.\*\*/);
+
+  // Still the inverse of the renderer: slot adoption reads the part number back
+  // out of exactly these headers.
+  assert.equal(overflowPartOf("M", renderOverflowChunk("M", 3, summaryChunks[0])), 3);
 });
