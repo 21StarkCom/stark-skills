@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<!-- idun:pr-merge pr=1021 runId=1021 sha=a035c9e4 -->
+- Fixed a recycled-pgid SIGKILL risk, unhandled read-pipe errors, and bad summary-relocation/segment-header bugs in the gh dispatch and review-posting paths.
 <!-- idun:pr-merge pr=1017 runId=1017 sha=c8daf1ef -->
 - fix(STARK-6186): /gru falls back to a proved `--cwd` when a ticket's repo isn't registered with frigg, instead of hard-failing every multi-repo epic.
 <!-- idun:pr-merge pr=1014 runId=1014 sha=09821247 -->
