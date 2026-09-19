@@ -4,7 +4,7 @@ runtimes:
   - claude
   - codex
 description: "Act as a Minion launched by Gru: own one ticket, carry it through the repo's ticket → PR → review → merge → close spine, and report the outcome to Gru over Hermod."
-argument-hint: "<Gru brief: ticket id + leader peer id>"
+argument-hint: "<Gru brief: ticket id + leader peer id> | [STARK-n] --new-tab [--leader <peer>] [--repo <name>] [--agent claude|codex]"
 ---
 
 ## Help
@@ -16,6 +16,78 @@ follow [standard help](../../standards/help.md), then stop.
 
 You own one ticket, named in Gru's brief, in the worktree Hermod placed you in.
 Gru coordinates the other tickets; you never wait on Gru for anything.
+
+## Arguments
+
+- `<Gru brief>` — the ticket id and your leader peer, as Gru's launch wrote
+  them. Required, except with `--new-tab`.
+- `--new-tab` — do not work the ticket here: launch a Minion on it in a new cmux
+  tab. See [New tab](#new-tab). Optional with it: a `STARK-n` (none means the
+  ticket alfred has bound to this session).
+- `--leader <peer>` — with `--new-tab` only: the peer the Minion reports to, as
+  `hermod msg peers` prints its `id` (`claude:<session-id>`, `codex:<thread-id>`).
+  Default: you.
+- `--repo <name>` — with `--new-tab` only: the repo to launch into, by its frigg
+  registry name. Default: the repo you are standing in.
+- `--agent claude|codex` — with `--new-tab` only: the agent that runs the
+  Minion. Default claude.
+
+## New tab
+
+**If `$ARGUMENTS` contains `--new-tab`, you are the launcher, not the Minion.**
+Read nothing below this section as yours: no bind, no spine, no stand down, and
+no tab title — the Minion you launch titles its own tab.
+
+A Minion always reports to someone, so the launch has two shapes and you say
+which one you ran. **There is no third shape in which nobody receives the
+report** — launch-and-walk-away is [`/agnes --new-tab`](../agnes/SKILL.md#new-tab),
+and if that is what the operator wants, say so and stop.
+
+1. Pick the repo. With `--repo <name>`, pass it through. Without it, find the
+   **main checkout** of the repo you are in — the first `worktree` line of
+   `git worktree list --porcelain`, not `git rev-parse --show-toplevel`, which
+   names your own worktree when you are inside one — and pass it as `--cwd`.
+   Run that as its own command and paste the path in literally; a `$(...)` in
+   the launch line is refused by the worktree guard.
+2. Launch, once:
+
+   ```
+   hermod ticket [STARK-n] --minion [--leader <peer>] (--repo <name> | --cwd <main checkout>) [--agent <agent>] --json
+   ```
+
+   `--repo` and `--cwd` are mutually exclusive. Without `--leader`, hermod names
+   **you** as the leader, from your own session stamp
+   (`claude:$CLAUDE_CODE_SESSION_ID`, or `codex:$CODEX_THREAD_ID`), and refuses
+   with exit 2 when it finds neither stamp or both. That refusal is fixed by
+   naming yourself: find the `hermod msg peers` row whose `sessionId` is yours
+   and pass its `id` as `--leader` — you are then still the leader, and step 4
+   still applies. `--minion` shipped in the hermod release after v0.19.0
+   (STARK-6974); on v0.19.0 or older, launch with `--prompt-file <brief>`
+   instead, the brief being the four things [Gru's step 3](../gru/SKILL.md)
+   lists — never `--message`, which hands the brief's quotes and `$` to the
+   shell.
+3. Read the ack before you call it launched. Its `prompt` must read
+   `/minion STARK-n` (`$minion STARK-n` on Codex) and name the leader peer you
+   meant. A failed start looks different per `--agent`, and either leaves the
+   tab and worktree standing for inspection: Claude exits 1 with a complete,
+   normal-looking ack whose only tell is `verified:false`; Codex prints
+   `{error, code, stage}` with no ack fields at all. Exit 2 names a bad
+   argument, an unbound session, or a repo frigg cannot resolve. Report what it
+   printed; a nonzero exit is the answer, not something to work around.
+4. **Then it depends on who the leader is.**
+   - **`--leader <someone else>`**: print the ack's `surface`, `workspace`,
+     `name` and `prompt`, and stop. That peer receives the report and confirms
+     the `done`.
+   - **You are the leader**: you do not stop. You are Gru for exactly one
+     ticket — wait for the Minion's report and handle it by
+     [Gru's protocol](../gru/SKILL.md), steps 4 and 5: what counts as a death,
+     and the confirm that turns a `done` from a claim into a fact (PR merged,
+     the verification comment on it, the ticket closed). Then tell the operator
+     the outcome. Gru's Authority section binds you too: you never edit the
+     Minion's worktree and never reap its tab.
+
+Never fall back to working the ticket in this session — it is the Minion's,
+and the operator asked for it to run in a tab of its own.
 
 ## Work
 
