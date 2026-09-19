@@ -83,12 +83,31 @@ line.
   is noise. Fix that first.
 - **Count the surfaces in your pane before you arm**, because cmux refuses to
   close a window's only one and that failure is invisible until after you are
-  dead (see `partial`, below):
+  dead (see `partial`, below). It is two steps, because `hermod panes` lists
+  only the workspace `$CMUX_WORKSPACE_ID` names and that stamp goes stale the
+  moment a tab is moved between workspaces (`hermod v0.19.0`, measured: a moved
+  tab's bare `hermod panes` check printed nothing, rc 0, over a real count of
+  2). First ask where you really are — `whoami` resolves `$CMUX_SURFACE_ID`
+  against the live tree, so its answer is right even under a stale stamp:
 
   ```
-  hermod panes --json | jq '.panes[]
+  hermod whoami --json
+  ```
+
+  Then count, pasting the `workspaceId` it printed as a **literal**:
+
+  ```
+  CMUX_WORKSPACE_ID=<workspaceId from whoami> hermod panes --json | jq '.panes[]
     | select(.surface_ids | index(env.CMUX_SURFACE_ID)) | .surface_count'
   ```
+
+  Do not fold the two into one line with a `$(…)` substitution. Claude Code's
+  worktree-isolation guard refuses a runtime-computed env value on a command —
+  measured (Claude Code 2.1.278) on the quoted `VAR="$(…)"` form, while the
+  unquoted one got through, a distinction too fine to rest a mandatory step on
+  — and the pasted literal works on either runtime, whatever a guard thinks.
+  `hermod panes --pane <paneRef>` is no shortcut either — under a stale stamp
+  it answers `not_found`.
 
   Read it as three outcomes, not two. **More than 1** and the last-surface
   refusal is not what will stop you — the claude-lock `partial` below still
@@ -97,11 +116,32 @@ line.
   last surface"`): **arm anyway** and say so in your report. Do not skip the
   stand-down over it — that `partial` still exits your agent and removes your
   worktree, which is the whole point of the mandate above, and not arming
-  leaves a live agent, a live worktree *and* the same tab. **No output at all**
-  is not a count: `index` returns nothing when `$CMUX_SURFACE_ID` is unset or
-  your surface is not among this window's panes, and jq still exits 0. That is
-  the same ground poison-pill itself refuses on — treat it as the check having
-  failed: report it and stop.
+  leaves a live agent, a live worktree *and* the same tab. **Unresolvable**
+  is not a count, and it has three shapes. `whoami` exits 1 with a named error
+  when `$CMUX_SURFACE_ID` is unset (`no CMUX_SURFACE_ID in env`) or your
+  surface is gone (`surface … not found in tree`) — loud, where the old
+  one-step check was silent. Poison-pill refuses on both of those itself, so
+  there is nothing left to arm: report it and stop. Or the second step
+  **errors** — hermod answers `not_found: Workspace not found`, exit 1, and jq
+  dies on `Cannot iterate over null`, exit 5 — because what you pasted is not
+  a workspace id: `whoami` prints three UUIDs (`id`, `workspaceId`,
+  `windowId`) and only `workspaceId` will do, whole. Or the second step prints
+  **nothing**, jq exit 0: `index` found your surface in none of the panes
+  listed, so the id names a real workspace you are not in — another one's, or
+  your own from before a move that landed between the two steps. Those last
+  two shapes are a slip, not a verdict, and a slip is no reason to skip a
+  mandatory stand-down: run **both** steps again, once, re-reading `whoami`
+  rather than re-pasting from scrollback. Still unresolvable, treat it as the
+  check having failed: report it and stop.
+
+  A stale workspace stamp is **not** a ground poison-pill itself refuses on,
+  so a clean dry run does not stand in for this count. Its foreground
+  validation (`--dry-run --json`) refuses, exit 2, on an unset
+  `$CMUX_SURFACE_ID`, on no active session on the surface, and on a session
+  store that cannot name one supported agent and one worktree cwd; and it
+  answers `aborted-not-worktree`, exit 1, when that cwd is not a git
+  repository. A stale stamp is none of those: measured, the dry run answers
+  `completed` under one.
 
 ## What it aims at
 

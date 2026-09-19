@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<!-- idun:pr-merge pr=1027 runId=1027 sha=e06d576f -->
+- Fixed the stand-down pane-count check false-failing on a tab moved between workspaces by resolving the live workspace via `hermod whoami` instead of the stale env stamp.
 <!-- idun:pr-merge pr=1024 runId=1024 sha=8e6c73ff -->
 - Fixed Ctrl-C forwarding to key group kills by call instead of recycled pgid, closing duplicate-signal and stale-kill-report windows in the agent dispatch and jury paths.
 <!-- idun:pr-merge pr=1022 runId=1022 sha=ed132370 -->
