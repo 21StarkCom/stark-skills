@@ -1,5 +1,7 @@
 /**
- * child_termination_lib.ts — name WHY a child process was terminated.
+ * child_termination_lib.ts — name WHY a child process was terminated, and own
+ * the one termination this tool causes itself: the time bound on every `gh`
+ * subprocess (STARK-6113 — `resolveGhTimeoutMs` / `assertGhTimeoutMs`).
  *
  * Hoisted out of `findings_review_post.ts` (STARK-371) when the same defect
  * turned up in `review_post_lib.ts`'s posting path (STARK-6112): that file is
@@ -15,6 +17,64 @@
  * sized string that is thrown away one line later.
  */
 export const TERMINATION_STDERR_TAIL = 4000;
+
+/**
+ * 120 s — the time bound on every `gh` subprocess the posting path spawns
+ * (STARK-6113). Without one, a `gh api --paginate` stalled on a hung connection
+ * blocks forever: no cause, no output, no exit — the one termination the rest of
+ * this file cannot name, because it never happens.
+ *
+ * Chosen from a measurement, not guessed (2026-09-19, `gh api
+ * repos/O/R/pulls/N/files --paginate --slurp`, the heaviest call class here):
+ *
+ *   - bifrost#264 —  1.35 MB              → 1.4 s
+ *   - bifrost#226 — 855 files, 9 pages, 7.1 MB → 6.7 s  (~0.75 s/page)
+ *
+ * GitHub caps `/pulls/N/files` at 3000 files = 30 pages, so the worst
+ * legitimate paginate extrapolates to ~25 s. 120 s is ~5x that: slow-network
+ * headroom without making a genuine hang cost more than two minutes. (The
+ * sibling runner in `copilot_land.ts` uses 60 s for single, non-paginated calls.)
+ */
+export const GH_TIMEOUT_MS_DEFAULT = 120_000;
+
+/** Largest delay a Node timer honours (2^31-1 ms, ~24.8 days). */
+export const GH_TIMEOUT_MS_MAX = 2_147_483_647;
+
+/** Env override for {@link GH_TIMEOUT_MS_DEFAULT}, in milliseconds. */
+export const GH_TIMEOUT_ENV = "STARK_GH_TIMEOUT_MS";
+
+/**
+ * The bound to enforce: `STARK_GH_TIMEOUT_MS` when set, else the default.
+ *
+ * A set-but-unusable value is a hard error, never a fallback and never "no
+ * bound": `0`, a negative, `abc` or `1e3junk` silently meaning "unbounded" is
+ * how the hang this exists to stop comes back wearing a config typo's hat, and
+ * silently meaning "default" hides that the operator's override did nothing.
+ */
+export function resolveGhTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[GH_TIMEOUT_ENV];
+  if (raw === undefined || raw === "") return GH_TIMEOUT_MS_DEFAULT;
+  // Digits only, checked on the STRING: `Number("1e3")` and `Number("0x10")`
+  // are perfectly good integers, so the numeric check alone would let them in.
+  const n = /^\d+$/.test(raw.trim()) ? Number(raw) : NaN;
+  return assertGhTimeoutMs(n, GH_TIMEOUT_ENV, JSON.stringify(raw));
+}
+
+/**
+ * Refuse a bound no spawn path can honour, whichever way it arrived. The env
+ * var is not the only door: `ghJsonOnce` takes `opts.timeoutMs` and
+ * `runCapturing` takes it positionally, and unvalidated the two paths read the
+ * SAME bad value in opposite directions — `spawnSync` treats `timeout: 0` as
+ * "no bound" (the hang, back), while `setTimeout` fires 0, NaN and anything
+ * past 2^31-1 ms after ~1 ms ("effectively unbounded" becomes "kill at once").
+ * `shown` is what the error quotes, so the env path can show the raw string.
+ */
+export function assertGhTimeoutMs(ms: number, source: string, shown: string = String(ms)): number {
+  if (!Number.isInteger(ms) || ms <= 0 || ms > GH_TIMEOUT_MS_MAX) {
+    throw new Error(`${source} must be an integer of milliseconds in 1..${GH_TIMEOUT_MS_MAX}, got ${shown}`);
+  }
+  return ms;
+}
 
 /** The spawn-result fields the explanation needs — nothing more, so it is testable. */
 export interface TerminationInfo {
@@ -41,18 +101,24 @@ export interface TerminationInfo {
  * A non-terminated child's stderr is returned untouched.
  *
  * `maxBuffer` is only meaningful to a caller that set one (`spawnSync`); an
- * async `spawn` has no such cap and omits it.
+ * async `spawn` has no such cap and omits it. `timeoutMs` is the bound the
+ * caller enforced: a timeout kill (`ETIMEDOUT`) names it and the env var that
+ * moves it, because "killed by signal SIGTERM" sends an operator hunting for
+ * whoever sent the signal when the sender was this tool.
  */
 export function explainTermination(
   cmd: string,
   sp: TerminationInfo,
   ownStderr: string,
   maxBuffer?: number,
+  timeoutMs?: number,
 ): string {
   if (sp.status !== null) return ownStderr;
   const err = sp.error as NodeJS.ErrnoException | undefined;
   const why = err?.code === "ENOBUFS"
     ? `output exceeded maxBuffer${maxBuffer === undefined ? "" : ` (${maxBuffer} bytes)`}`
+    : err?.code === "ETIMEDOUT"
+    ? `timed out${timeoutMs === undefined ? "" : ` after ${timeoutMs} ms`} (the bound is ${GH_TIMEOUT_ENV} unless the caller passed its own)`
     : err?.message ?? `killed by signal ${sp.signal ?? "unknown"}`;
   const own = ownStderr.trim();
   return own

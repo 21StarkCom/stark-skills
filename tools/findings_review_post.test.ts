@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 import * as nodeFs from "node:fs";
+import * as nodeOs from "node:os";
 import * as nodePathMod from "node:path";
 
 import {
@@ -21,6 +22,7 @@ import {
   planReview,
   resolveGeneratedPaths,
   fetchGitattributes,
+  fetchGitattributesResult,
   severityFromVerdict,
   titleFor,
   toFindings,
@@ -406,7 +408,7 @@ describe("defaultRun", () => {
     const r = runCapturing(process.execPath, [
       "-e",
       `process.stderr.write("gh: a warning\\n", () => process.stdout.write("x".repeat(${cap * 2})))`,
-    ], cap);
+    ], cap, 30_000);
     assert.equal(r.status, null, "expected a maxBuffer kill, not a normal exit");
     assert.match(r.stderr, /exceeded maxBuffer/, `cause not named: ${r.stderr}`);
     assert.match(r.stderr, /gh: a warning/, "the child's own stderr must be preserved");
@@ -428,6 +430,62 @@ describe("defaultRun", () => {
       r.stderr.indexOf("terminated") < r.stderr.indexOf("noise"),
       `the cause must precede the child's stderr, got: ${r.stderr}`,
     );
+  });
+
+  // STARK-6113. A `gh api --paginate` stalled on a hung connection used to
+  // block `spawnSync` forever — the one termination nothing could name, because
+  // it never happened. Driven at 300 ms; the child would otherwise idle 15 s.
+  test("a hung child is bounded, and the error names the timeout and its value", () => {
+    const started = Date.now();
+    const r = runCapturing(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], 64 * 1024, 300);
+    assert.ok(Date.now() - started < 10_000, "the hung child was not bounded");
+    assert.equal(r.status, null);
+    assert.match(r.stderr, /timed out after 300 ms/, `timeout not named: ${r.stderr}`);
+  });
+
+  // `spawnSync` keeps waiting after it sends `killSignal`, so under the SIGTERM
+  // default a child that ignores it is not bounded at all (measured: the
+  // SIGTERM mutant of this test blocks the child's full 15 s). The pid write is
+  // the sync point — the handler is provably installed before the bound fires;
+  // without it the signal can land during Node startup and the test passes for
+  // the wrong reason (it did, at 300 ms).
+  test("a child that ignores SIGTERM is still bounded, and is dead afterwards", () => {
+    const started = Date.now();
+    const r = runCapturing(
+      process.execPath,
+      ["-e", "process.on('SIGTERM', () => {}); process.stderr.write('pid=' + process.pid, () => setTimeout(() => {}, 15000))"],
+      64 * 1024,
+      1000,
+    );
+    assert.ok(Date.now() - started < 10_000, "a SIGTERM-deaf child escaped the bound");
+    assert.match(r.stderr, /timed out after 1000 ms/);
+    const pid = Number(/pid=(\d+)/.exec(r.stderr)?.[1]);
+    assert.ok(pid > 0, `child pid not captured: ${r.stderr}`);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "the timed-out child is still alive");
+  });
+
+  test("a child that finishes inside the bound is untouched", () => {
+    const r = runCapturing(process.execPath, ["-e", "process.stdout.write('ok')"], 64 * 1024, 30_000);
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, "ok");
+    assert.equal(r.stderr, "");
+  });
+
+  // `spawnSync` reads `timeout: 0` as NO bound (measured: a 2 s child ran its
+  // full 2 s), so an unvalidated 0 is the hang this exists to stop, arriving by
+  // the argument instead of the env var. Refused BEFORE the spawn: the marker
+  // file proves the child never ran, rather than ran and was cleaned up after.
+  test("a bound of 0 is refused before spawning, never read as 'unbounded'", () => {
+    const marker = nodePathMod.join(nodeOs.tmpdir(), `run-capturing-zero-${process.pid}-${Date.now()}`);
+    try {
+      assert.throws(
+        () => runCapturing(process.execPath, ["-e", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran")`], 64 * 1024, 0),
+        /timeoutMs must be/,
+      );
+      assert.equal(nodeFs.existsSync(marker), false, "the child was spawned despite the unusable bound");
+    } finally {
+      nodeFs.rmSync(marker, { force: true });
+    }
   });
 });
 
@@ -1193,6 +1251,24 @@ describe("fetchGitattributes", () => {
   test("a 404 (no .gitattributes) returns null rather than throwing", () => {
     const text = fetchGitattributes("o/none", () => ({ status: 1, stdout: "", stderr: "HTTP 404" }));
     assert.equal(text, null);
+  });
+
+  // A terminated child's stderr is partly OUR text since STARK-6113, and a
+  // bound of 404 renders "timed out after 404 ms". Read as a 404 it nulls the
+  // failure, dropping the one warning that says the fallback list may be wrong.
+  test("a TERMINATED gh is a failure, never a 404, whatever its stderr reads", () => {
+    const r = fetchGitattributesResult("o/r", () => ({
+      status: null,
+      stdout: "",
+      stderr: "gh produced no stderr and was terminated: timed out after 404 ms (the bound is STARK_GH_TIMEOUT_MS unless the caller passed its own)",
+    }));
+    assert.equal(r.text, null);
+    assert.match(r.failure ?? "", /timed out after 404 ms/, "a timeout was classified as a missing file");
+  });
+
+  test("a real 404 is still not a failure (the guard did not over-reach)", () => {
+    const r = fetchGitattributesResult("o/none", () => ({ status: 1, stdout: "", stderr: "gh: Not Found (HTTP 404)" }));
+    assert.deepEqual(r, { text: null, failure: null });
   });
 });
 

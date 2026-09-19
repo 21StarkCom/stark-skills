@@ -27,7 +27,7 @@ import {
   type Finding,
   type Severity,
 } from "./finding_lib.ts";
-import { explainTermination } from "./child_termination_lib.ts";
+import { assertGhTimeoutMs, explainTermination, resolveGhTimeoutMs } from "./child_termination_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 import {
   DEFAULT_GENERATED_PATHS_CONFIG,
@@ -273,7 +273,11 @@ export function fetchGitattributesResult(
   const r = run("gh", ["api", path, "-H", "Accept: application/vnd.github.raw"]);
   if (r.status === 0) return { text: r.stdout, failure: null };
   const stderr = (r.stderr ?? "").trim();
-  const notFound = /\b404\b|Not Found/i.test(stderr);
+  // A TERMINATED child (`status: null` — timeout, maxBuffer, signal) is never a
+  // 404, whatever its stderr reads. Its text is now partly ours: a bound of 404
+  // renders "timed out after 404 ms", which would otherwise match, null the
+  // failure and drop the one warning that says the fallback list may be wrong.
+  const notFound = r.status !== null && /\b404\b|Not Found/i.test(stderr);
   return {
     text: null,
     failure: notFound ? null : `gh api ${path} failed (exit ${r.status}): ${stderr.slice(0, 200)}`,
@@ -726,21 +730,33 @@ export const GH_MAX_BUFFER = 64 * 1024 * 1024;
  * `GH_MAX_BUFFER` costs a 64 MiB write in the child and ~250 MB RSS in the
  * parent, on every `npm test`, for a mechanism that behaves identically at
  * 64 KiB.
+ *
+ * `timeoutMs` bounds the child (STARK-6113): without it a `gh api --paginate`
+ * stalled on a hung connection blocks `spawnSync` forever. The kill is SIGKILL,
+ * not the SIGTERM default — a bound a child can ignore is not a bound, and `gh`
+ * on a read call has nothing to clean up. A timeout leaves `status: null` +
+ * `error.code: ETIMEDOUT`, which `explainTermination` names with the value.
  */
 export function runCapturing(
   cmd: string,
   args: string[],
   maxBuffer: number,
+  timeoutMs: number,
 ): { status: number | null; stdout: string; stderr: string } {
-  const sp = spawnSync(cmd, args, { encoding: "utf8", maxBuffer });
+  // `spawnSync` reads `timeout: 0` as NO bound, so an unvalidated 0 is the hang
+  // this exists to stop, arriving by the argument instead of the env var.
+  assertGhTimeoutMs(timeoutMs, "runCapturing timeoutMs");
+  const sp = spawnSync(cmd, args, { encoding: "utf8", maxBuffer, timeout: timeoutMs, killSignal: "SIGKILL" });
   return {
     status: sp.status,
     stdout: sp.stdout ?? "",
-    stderr: explainTermination(cmd, sp, sp.stderr ?? "", maxBuffer),
+    stderr: explainTermination(cmd, sp, sp.stderr ?? "", maxBuffer, timeoutMs),
   };
 }
 
-export const defaultRun: RunFn = (cmd, args) => runCapturing(cmd, args, GH_MAX_BUFFER);
+// The bound is resolved per call, not at import: an unusable
+// `STARK_GH_TIMEOUT_MS` must fail the run that reads it, not every importer.
+export const defaultRun: RunFn = (cmd, args) => runCapturing(cmd, args, GH_MAX_BUFFER, resolveGhTimeoutMs());
 
 /**
  * Build the PR context from the head sha plus the files listing. `filesJson` is
@@ -812,6 +828,12 @@ options:
                     anchor generated-path findings inline like any other
   --dry-run         build the payload and print the plan without posting
   -h, --help        show this help message and exit
+
+Environment:
+  STARK_GH_TIMEOUT_MS
+                    bound on each gh subprocess, in ms (default 120000). A hung
+                    gh is killed and the error names the timeout. An unusable
+                    value (0, negative, non-integer) is refused, never "unbounded".
 
 A finding whose only anchor is a generated path is reported in the review BODY,
 with the file and line it would have anchored to, instead of as an inline
