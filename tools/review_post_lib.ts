@@ -571,8 +571,32 @@ export const GITHUB_ISSUE_COMMENT_MAX = 65536;
  * split because the real footer cannot be rendered until the overflow comments
  * exist and have URLs. */
 const OVERFLOW_PREAMBLE_RESERVE = 400;
-/** Upper bound on one rendered cross-link line, reserved per overflow chunk. */
-const OVERFLOW_LINK_RESERVE = 200;
+/**
+ * Upper bound on one rendered cross-link line, reserved per overflow chunk.
+ *
+ * This is a **true** bound, not an estimate, and {@link overflowLinkFor} is what
+ * makes it one: a returned `html_url` longer than this is discarded in favour of
+ * the canonical `#issuecomment-<id>` link, whose length is bounded by GitHub's
+ * own owner (39) + repo (100) name limits. Without that clamp the reserve is a
+ * guess, and a body that overshoots it cannot be repaired by moving findings
+ * out — each one moved buys back a few hundred chars of finding while adding a
+ * whole new link line, so the "fix" diverges and empties the body.
+ */
+const OVERFLOW_LINK_RESERVE = 320;
+
+/** The cross-link for one overflow comment, clamped so a rendered link line can
+ * never exceed {@link OVERFLOW_LINK_RESERVE}. */
+export function overflowLinkFor(
+  repo: string,
+  pr: number,
+  id: number | undefined,
+  htmlUrl: unknown,
+): string {
+  const canonical = `https://github.com/${repo}/pull/${pr}#issuecomment-${id ?? "unknown"}`;
+  if (typeof htmlUrl !== "string" || htmlUrl.length === 0) return canonical;
+  // `- overflow 99 of 99: ` is the longest realistic prefix; budget generously.
+  return htmlUrl.length + 64 <= OVERFLOW_LINK_RESERVE ? htmlUrl : canonical;
+}
 
 /** Render one body finding exactly as {@link buildReviewBody} does, so an
  * overflow comment is byte-for-byte the text the body would have carried. */
@@ -861,6 +885,32 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
   const overflowUrlByContent = new Map<string, string>();
   const overflowIds: number[] = [];
 
+  /** Post one overflow chunk (reusing the comment already posted for identical
+   * content) and return its URL, or null after recording why it failed. */
+  const postOverflowChunk = async (part: number, chunk: Finding[]): Promise<string | null> => {
+    const content = renderOverflowComment(marker, part, chunk);
+    const seen = overflowUrlByContent.get(content);
+    if (seen !== undefined) return seen;
+    try {
+      const r = await ghPost(`/repos/${opts.repo}/issues/${opts.pr}/comments`, {
+        method: "POST",
+        body: { body: content },
+      });
+      const d = (r.data ?? {}) as { id?: unknown; html_url?: unknown };
+      const id = typeof d.id === "number" ? d.id : undefined;
+      const url = overflowLinkFor(opts.repo, opts.pr, id, d.html_url);
+      if (id !== undefined) overflowIds.push(id);
+      overflowUrlByContent.set(content, url);
+      return url;
+    } catch (e) {
+      result.unposted = true;
+      result.unpostedReason = `overflow_comment_failed: ${
+        e instanceof GhError ? `http_${e.status}: ${e.body.slice(0, 200)}` : String(e)
+      }`;
+      return null;
+    }
+  };
+
   /**
    * Plan the split for `findings`, post any overflow chunk not already on the
    * PR, and return the review body carrying real cross-links. Returns null when
@@ -876,32 +926,9 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     }
     const links: string[] = [];
     for (let i = 0; i < s.chunks.length; i++) {
-      const content = renderOverflowComment(marker, i + 1, s.chunks[i]);
-      const seen = overflowUrlByContent.get(content);
-      if (seen !== undefined) {
-        links.push(seen);
-        continue;
-      }
-      try {
-        const r = await ghPost(`/repos/${opts.repo}/issues/${opts.pr}/comments`, {
-          method: "POST",
-          body: { body: content },
-        });
-        const d = (r.data ?? {}) as { id?: unknown; html_url?: unknown };
-        const id = typeof d.id === "number" ? d.id : undefined;
-        const url = typeof d.html_url === "string"
-          ? d.html_url
-          : `https://github.com/${opts.repo}/pull/${opts.pr}#issuecomment-${id ?? "unknown"}`;
-        if (id !== undefined) overflowIds.push(id);
-        overflowUrlByContent.set(content, url);
-        links.push(url);
-      } catch (e) {
-        result.unposted = true;
-        result.unpostedReason = `overflow_comment_failed: ${
-          e instanceof GhError ? `http_${e.status}: ${e.body.slice(0, 200)}` : String(e)
-        }`;
-        return null;
-      }
+      const url = await postOverflowChunk(i + 1, s.chunks[i]);
+      if (url === null) return null;
+      links.push(url);
     }
     result.bodyOverflowComments = [...overflowIds];
     result.bodyOverflow = {
@@ -910,6 +937,8 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
       findingsInBody: s.kept.length,
       findingsInOverflow: s.chunks.reduce((n, c) => n + c.length, 0),
     };
+    // The reserve is an upper bound (see OVERFLOW_LINK_RESERVE), so the rendered
+    // body is under the cap by construction rather than by luck.
     return renderBody(s.kept, links);
   };
 

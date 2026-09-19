@@ -23,6 +23,7 @@ import {
   GhError,
   GITHUB_ISSUE_COMMENT_MAX,
   GITHUB_REVIEW_BODY_MAX,
+  overflowLinkFor,
   partitionInlineVsBody,
   planBodySplit,
   postReview,
@@ -159,6 +160,69 @@ test("postReview: every overflow comment fits under the issue-comment cap", asyn
   for (const c of comments) {
     assert.ok(c.length <= GITHUB_ISSUE_COMMENT_MAX, `overflow comment was ${c.length} chars`);
   }
+});
+
+test("postReview: an absurd html_url is clamped, so the body stays under the cap", async () => {
+  // The footer reserve is only an upper bound if a link line cannot exceed it.
+  // A returned `html_url` longer than the reserve is discarded in favour of the
+  // canonical #issuecomment link, whose length GitHub's own owner/repo name
+  // limits bound. Without the clamp the body renders over the cap and 422s
+  // exactly as before — and it cannot be repaired by moving findings out, since
+  // each one moved adds a whole new link line.
+  //
+  // Small findings pack the body prefix tight against the cap, so the footer
+  // reserve — not a 9 KB finding boundary — is what the links must fit inside.
+  const findings = oversizeBodyFindings(250, 300);
+  const reviews: string[] = [];
+  let commentId = 0;
+  const gh = async (p: string, opts?: { method?: string; body?: unknown }) => {
+    if (opts?.method !== "POST") return { status: 200, data: [], headers: {} };
+    if (p.includes("/issues/")) {
+      commentId++;
+      return {
+        status: 201,
+        data: { id: commentId, html_url: `https://github.example/${"u".repeat(900)}#c${commentId}` },
+        headers: {},
+      };
+    }
+    reviews.push((opts.body as { body: string }).body);
+    return { status: 200, data: { id: 1 }, headers: {} };
+  };
+  const r = await postReview({
+    ...BASE,
+    findings,
+    changedFiles: new Set<string>(),
+    dryRun: false,
+    ghJsonFn: gh as GhFn,
+  });
+  assert.equal(r.posted, true);
+  assert.ok(
+    reviews[0].length <= GITHUB_REVIEW_BODY_MAX,
+    `review body was ${reviews[0].length} chars, over the ${GITHUB_REVIEW_BODY_MAX} cap`,
+  );
+  assert.equal(
+    r.bodyOverflow!.findingsInBody + r.bodyOverflow!.findingsInOverflow,
+    findings.length,
+    "clamping a link must not lose a finding",
+  );
+  assert.ok(!reviews[0].includes("u".repeat(900)), "the absurd url must not be rendered");
+  assert.match(reviews[0], /#issuecomment-1\b/, "the canonical link is used instead");
+});
+
+test("overflowLinkFor: keeps a sane html_url, falls back for a missing or absurd one", () => {
+  assert.equal(
+    overflowLinkFor("o/r", 5, 42, "https://github.com/o/r/pull/5#issuecomment-42"),
+    "https://github.com/o/r/pull/5#issuecomment-42",
+  );
+  assert.equal(overflowLinkFor("o/r", 5, 42, undefined), "https://github.com/o/r/pull/5#issuecomment-42");
+  assert.equal(overflowLinkFor("o/r", 5, undefined, ""), "https://github.com/o/r/pull/5#issuecomment-unknown");
+  assert.equal(
+    overflowLinkFor("o/r", 5, 42, `https://x/${"u".repeat(900)}`),
+    "https://github.com/o/r/pull/5#issuecomment-42",
+  );
+  // The canonical link is bounded by GitHub's own owner (39) + repo (100) limits.
+  const worst = overflowLinkFor(`${"o".repeat(39)}/${"r".repeat(100)}`, 999999, 99999999999, undefined);
+  assert.ok(worst.length + 64 <= 320, `worst-case canonical link was ${worst.length} chars`);
 });
 
 test("postReview: the overflow split is deterministic for a fixed payload", async () => {
