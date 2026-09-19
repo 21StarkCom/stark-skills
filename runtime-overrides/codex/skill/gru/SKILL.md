@@ -56,7 +56,11 @@ tells you to stop; there is no other verb.
    check `hermod msg peers`. A peer is dead only when Hermod reports its
    `liveness` dead or its `pid` gone, never because it is missing from the list
    (a fresh Claude session is absent for its first moments, and a relaunch then
-   would attach a second session to the same worktree). A dead Claude Minion
+   would attach a second session to the same worktree). Read the board before
+   you read a corpse: a Minion that reported `done` goes dead on purpose moments
+   later — it stands down with `hermod poison-pill`, which exits it, removes its
+   worktree and closes its tab — and Phase 2 skips its now-`done` ticket. A dead
+   peer is a death only while its ticket is still open. A dead Claude Minion
    with its ticket open is relaunched once with the same brief. A dead Codex
    Minion is a blocker: `hermod ticket` refuses its existing worktree; report
    the path. A second death is a blocker. `follow-up … stopping` means the
@@ -66,9 +70,12 @@ tells you to stop; there is no other verb.
    (`gh pr view <PR> --json state,mergeCommit`) and alfred shows the ticket
    `done` or `Closed` (in a repo whose `AGENTS.md` defines done as released, the
    Minion closes at the end of the release chain, so wait for that). Only then
-   count it finished and release the tickets that depended on it. If a check
-   fails, tell the Minion what is missing if it is live; if it has ended, treat
-   the report as a death.
+   count it finished and release the tickets that depended on it. The report
+   also names the live verification the Minion ran; a `done` that names none is
+   not confirmed. If a check fails, tell the Minion what is missing if it is
+   live; if it has ended, treat the report as a death — a Minion that stood
+   down has already removed its worktree, so that relaunch gets a clean one and
+   is not blocked even on Codex.
 6. **Loop** steps 2–5 until every ticket is finished or blocked. Then report:
    finished tickets with PR links, blocked tickets with the reason, and
    follow-up tickets the Minions filed.
@@ -87,4 +94,9 @@ tells you to stop; there is no other verb.
   evidence, and keep every other ticket moving meanwhile.
 - Publishing by hand, live infrastructure, credential, and destructive actions
   keep their operator gates. Neither you nor a Minion may relay that approval.
-- Keep worktrees and branches; cleanup is `idun gh cleanup`, run by the operator.
+- Branches stay; cleaning them is `idun gh cleanup`, run by the operator, and
+  neither you nor a Minion deletes one. Worktrees are the Minion's own: a Minion
+  that reported `done` stands down with `hermod poison-pill`, taking its session,
+  worktree and tab with it. A Minion that reported `blocked` or
+  `follow-up … stopping` leaves all three in place for you and the operator.
+  You never remove a Minion's worktree yourself.
