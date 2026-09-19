@@ -17,12 +17,16 @@ import {
   isAnchorable,
   matchGeneratedPath,
   parseArgs,
+  parseGeneratedGlobs,
   parsePrContext,
   planReview,
+  resolveGeneratedPaths,
+  fetchGitattributes,
   severityFromVerdict,
   titleFor,
   toFindings,
   type ReportFindingsPayload,
+  type GeneratedPathsSource,
 } from "./findings_review_post.ts";
 import {
   BODY_REASON_HEADINGS,
@@ -31,6 +35,7 @@ import {
   partitionInlineVsBody,
   postReview,
 } from "./review_post_lib.ts";
+import { DEFAULT_GENERATED_PATHS_CONFIG, type GeneratedPathsConfig } from "./stark_config_lib.ts";
 import { buildMarker } from "./finding_lib.ts";
 
 // --- mapping -----------------------------------------------------------------
@@ -307,6 +312,8 @@ describe("parseArgs", () => {
       agent: "codex",
       dryRun: true,
       generatedPaths: [...DEFAULT_GENERATED_PATHS],
+      generatedPathsExplicit: false,
+      addGeneratedPaths: [],
     });
   });
 
@@ -464,6 +471,35 @@ describe("explainTermination", () => {
     assert.match(msg, /produced no stderr and was terminated: spawnSync gh ENOENT/);
   });
 });
+
+const BIFROST = "21StarkCom/bifrost";
+
+/**
+ * Verbatim from `21StarkCom/bifrost`'s `.gitattributes` — the five
+ * `linguist-generated=true` rows plus the `text eol=lf` row that must NOT be
+ * read as generated. `catalog/**` appears there only as `text eol=lf`; it
+ * reaches the resolved list through the repo CONFIG entry, which is the one
+ * deliberate addition.
+ */
+const BIFROST_GITATTRIBUTES = [
+  "* text=auto eol=lf",
+  "",
+  "dist/**            linguist-generated=true",
+  "vendor/**          linguist-generated=true",
+  "index.json         linguist-generated=true",
+  "bundles/**         linguist-generated=true",
+  ".claude-plugin/**  linguist-generated=true",
+  "catalog/**         text eol=lf",
+  "",
+].join("\n");
+
+/** A config with no repo entries at all, so a layer under test stands alone. */
+const BARE_CONFIG: GeneratedPathsConfig = {
+  enabled: true,
+  default: ["vendor/**", "dist/**", "bundles/**", ".claude-plugin/**", "index.json"],
+  repos: {},
+};
+
 
 // --- generated-path routing --------------------------------------------------
 
@@ -649,13 +685,20 @@ describe("generated-path routing", () => {
     assert.equal(matchGeneratedPath("engine/internal/install/testdata/index.json", DEFAULT_GENERATED_PATHS), null);
   });
 
-  test("the default globs cover every path a bifrost sync PR machine-rewrites", () => {
+  test("the resolved bifrost list covers every path a sync PR machine-rewrites", () => {
     // Taken from `git show --stat` on a real sync commit plus bifrost's
     // `.gitattributes` `linguist-generated=true` rows. `.claude-plugin/**` was
-    // missing from the first cut of this list, so the one file every sync
-    // touches kept opening a gating thread — the exact failure the split exists
-    // to prevent. `CHANGELOG.md` is the counter-case: a sync writes it, but it
-    // is hand-reviewable, so it must keep its inline thread.
+    // missing from the first cut of the hand-copied list, so the one file every
+    // sync touches kept opening a gating thread — the exact failure the split
+    // exists to prevent. That is why the rows are now READ from the repo:
+    // resolving them here, not restating them. `CHANGELOG.md` is the
+    // counter-case: a sync writes it, but it is hand-reviewable, so it must
+    // keep its inline thread.
+    const { patterns } = resolveGeneratedPaths({
+      repo: BIFROST,
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: DEFAULT_GENERATED_PATHS_CONFIG,
+    });
     for (const f of [
       "vendor/stark-skills/tools/gru.ts",
       "dist/claude/stark-ops/skills/gru/SKILL.md",
@@ -664,9 +707,9 @@ describe("generated-path routing", () => {
       ".claude-plugin/marketplace.json",
       "index.json",
     ]) {
-      assert.notEqual(matchGeneratedPath(f, DEFAULT_GENERATED_PATHS), null, `${f} must demote`);
+      assert.notEqual(matchGeneratedPath(f, patterns), null, `${f} must demote`);
     }
-    assert.equal(matchGeneratedPath("CHANGELOG.md", DEFAULT_GENERATED_PATHS), null);
+    assert.equal(matchGeneratedPath("CHANGELOG.md", patterns), null);
   });
 
   test("a generated finding outside every hunk still carries its declared line", () => {
@@ -840,6 +883,314 @@ describe("parseArgs generated-path flags", () => {
     assert.deepEqual(
       parseArgs([...base, "--generated-paths", "x/**", "--no-generated-split"]).generatedPaths,
       [],
+    );
+  });
+});
+
+
+// --- generated-path resolution (STARK-6095) ----------------------------------
+
+describe("parseGeneratedGlobs", () => {
+  test("reads exactly the linguist-generated=true rows, in file order", () => {
+    assert.deepEqual(parseGeneratedGlobs(BIFROST_GITATTRIBUTES), [
+      "dist/**",
+      "vendor/**",
+      "index.json",
+      "bundles/**",
+      ".claude-plugin/**",
+    ]);
+  });
+
+  test("a bare `linguist-generated` is Set, so it counts", () => {
+    assert.deepEqual(parseGeneratedGlobs("gen/** linguist-generated"), ["gen/**"]);
+  });
+
+  test("unset, negated and false rows are skipped, never inverted", () => {
+    const text = [
+      "a/** -linguist-generated",
+      "b/** !linguist-generated",
+      "c/** linguist-generated=false",
+      "d/** linguist-vendored=true",
+      "e/** text eol=lf",
+    ].join("\n");
+    assert.deepEqual(parseGeneratedGlobs(text), []);
+  });
+
+  test("comments, blanks and [attr] macro definitions are skipped", () => {
+    const text = [
+      "# dist/** linguist-generated=true",
+      "",
+      "   ",
+      "[attr]binary -diff -merge -text linguist-generated=true",
+      "real/** linguist-generated=true",
+    ].join("\n");
+    assert.deepEqual(parseGeneratedGlobs(text), ["real/**"]);
+  });
+
+  test("a leading slash is dropped and a trailing slash becomes a directory glob", () => {
+    assert.deepEqual(
+      parseGeneratedGlobs("/out.json linguist-generated=true\ngen/ linguist-generated=true"),
+      ["out.json", "gen/**"],
+    );
+  });
+
+  test("a slash-less pattern stays ROOT-anchored, diverging from git on purpose", () => {
+    // git would match the basename at any depth. Doing that here would demote
+    // bifrost's hand-written `web/src/__fixtures__/index.json`, whose findings
+    // are fixable exactly where they are posted.
+    const patterns = parseGeneratedGlobs("index.json linguist-generated=true");
+    assert.deepEqual(patterns, ["index.json"]);
+    assert.equal(matchGeneratedPath("index.json", patterns), "index.json");
+    assert.equal(matchGeneratedPath("web/src/__fixtures__/index.json", patterns), null);
+  });
+});
+
+describe("resolveGeneratedPaths precedence", () => {
+  const layered: GeneratedPathsConfig = {
+    enabled: true,
+    default: ["default/**"],
+    repos: { [BIFROST]: { paths: ["repocfg/**"] } },
+  };
+
+  test("layer 1 — an explicit --generated-paths outranks every other layer", () => {
+    const r = resolveGeneratedPaths({
+      repo: BIFROST,
+      cliPaths: ["cli/**"],
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: layered,
+    });
+    assert.deepEqual(r.patterns, ["cli/**"]);
+    assert.equal(r.source, "cli");
+  });
+
+  test("layer 2 — the repo config entry outranks the repo's .gitattributes", () => {
+    const r = resolveGeneratedPaths({
+      repo: BIFROST,
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: layered,
+    });
+    assert.deepEqual(r.patterns, ["repocfg/**"]);
+    assert.equal(r.source, "repo-config");
+  });
+
+  test("layer 3 — .gitattributes outranks the built-in default", () => {
+    const r = resolveGeneratedPaths({
+      repo: "o/other",
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: layered,
+    });
+    assert.equal(r.source, "gitattributes");
+    assert.ok(!r.patterns.includes("default/**"));
+  });
+
+  test("layer 4 — the built-in default is the last resort", () => {
+    const r = resolveGeneratedPaths({ repo: "o/other", gitattributes: null, config: layered });
+    assert.deepEqual(r.patterns, ["default/**"]);
+    assert.equal(r.source, "default");
+  });
+});
+
+describe("resolveGeneratedPaths against a real repo", () => {
+  test("bifrost with no flags resolves its own five rows plus catalog/**", () => {
+    // The acceptance case: sourced from the repo's `.gitattributes`, not from a
+    // hand-copied mirror. `catalog/**` is the one deliberate addition and comes
+    // from the repo-keyed config entry, because it is true of bifrost alone.
+    const r = resolveGeneratedPaths({
+      repo: BIFROST,
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: DEFAULT_GENERATED_PATHS_CONFIG,
+    });
+    assert.equal(r.source, "gitattributes");
+    assert.deepEqual(r.patterns.slice().sort(), [
+      ".claude-plugin/**",
+      "bundles/**",
+      "catalog/**",
+      "dist/**",
+      "index.json",
+      "vendor/**",
+    ]);
+    assert.deepEqual(r.added, ["catalog/**"]);
+    assert.deepEqual(r.warnings, []);
+  });
+
+  test("a repo declaring a glob the built-in default lacks honors it with no flag", () => {
+    const r = resolveGeneratedPaths({
+      repo: "o/other",
+      gitattributes: "gen/proto/** linguist-generated=true",
+      config: DEFAULT_GENERATED_PATHS_CONFIG,
+    });
+    assert.deepEqual(r.patterns, ["gen/proto/**"]);
+    assert.equal(matchGeneratedPath("gen/proto/api.pb.go", r.patterns), "gen/proto/**");
+  });
+
+  test("a repo with a hand-written root index.json keeps its inline thread", () => {
+    // The bifrost-shaped default used to be applied to every repo, so a
+    // hand-written `index.json` silently lost the thread its finding needed.
+    const r = resolveGeneratedPaths({
+      repo: "o/other",
+      gitattributes: "gen/proto/** linguist-generated=true",
+      config: DEFAULT_GENERATED_PATHS_CONFIG,
+    });
+    assert.equal(matchGeneratedPath("index.json", r.patterns), null);
+    assert.equal(matchGeneratedPath("catalog/thing.yaml", r.patterns), null);
+  });
+});
+
+describe("resolveGeneratedPaths fails open, never narrow", () => {
+  test("an absent or unfetchable .gitattributes falls back and warns", () => {
+    const r = resolveGeneratedPaths({ repo: "o/other", gitattributes: null, config: BARE_CONFIG });
+    assert.equal(r.source, "default");
+    assert.deepEqual(r.patterns, BARE_CONFIG.default);
+    assert.equal(r.warnings.length, 1);
+    assert.match(r.warnings[0], /absent or could not be read/);
+  });
+
+  test("a .gitattributes with no generated rows falls back and warns", () => {
+    const r = resolveGeneratedPaths({
+      repo: "o/other",
+      gitattributes: "* text=auto eol=lf\n",
+      config: BARE_CONFIG,
+    });
+    assert.equal(r.source, "default");
+    assert.deepEqual(r.patterns, BARE_CONFIG.default);
+    assert.match(r.warnings[0], /declares no linguist-generated=true paths/);
+  });
+
+  test("an empty configured default still resolves to the built-in list", () => {
+    // Never an empty list by accident: an empty list IS a silent disable.
+    const r = resolveGeneratedPaths({
+      repo: "o/other",
+      gitattributes: null,
+      config: { enabled: true, default: [], repos: {} },
+    });
+    assert.deepEqual(r.patterns, [...DEFAULT_GENERATED_PATHS]);
+    assert.ok(r.patterns.length > 0);
+  });
+
+  test("only an explicit disable yields an empty list", () => {
+    const off = resolveGeneratedPaths({ repo: BIFROST, cliPaths: [], config: BARE_CONFIG });
+    assert.deepEqual(off.patterns, []);
+    assert.equal(off.source, "disabled");
+
+    const configOff = resolveGeneratedPaths({
+      repo: BIFROST,
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: { ...BARE_CONFIG, enabled: false },
+    });
+    assert.deepEqual(configOff.patterns, []);
+    assert.equal(configOff.source, "disabled");
+    assert.match(configOff.warnings[0], /enabled is false/);
+  });
+});
+
+describe("resolveGeneratedPaths extend vs replace", () => {
+  test("--add-generated-paths yields the resolved list PLUS the glob", () => {
+    const r = resolveGeneratedPaths({
+      repo: "o/other",
+      cliAdd: ["extra/**"],
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: BARE_CONFIG,
+    });
+    assert.equal(r.source, "gitattributes");
+    assert.ok(r.patterns.includes("dist/**"), "the resolved list survives");
+    assert.ok(r.patterns.includes("extra/**"), "and the added glob is layered on");
+    assert.deepEqual(r.added, ["extra/**"]);
+  });
+
+  test("--generated-paths yields EXACTLY the glob, repo add included out", () => {
+    const r = resolveGeneratedPaths({
+      repo: BIFROST,
+      cliPaths: ["only/**"],
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: DEFAULT_GENERATED_PATHS_CONFIG,
+    });
+    assert.deepEqual(r.patterns, ["only/**"]);
+    assert.deepEqual(r.added, []);
+  });
+
+  test("--add-generated-paths still extends an explicit --generated-paths", () => {
+    const r = resolveGeneratedPaths({
+      repo: BIFROST,
+      cliPaths: ["only/**"],
+      cliAdd: ["also/**"],
+      config: DEFAULT_GENERATED_PATHS_CONFIG,
+    });
+    assert.deepEqual(r.patterns, ["only/**", "also/**"]);
+  });
+
+  test("a duplicate glob is layered once", () => {
+    const r = resolveGeneratedPaths({
+      repo: "o/other",
+      cliAdd: ["dist/**"],
+      gitattributes: BIFROST_GITATTRIBUTES,
+      config: BARE_CONFIG,
+    });
+    assert.equal(r.patterns.filter((g) => g === "dist/**").length, 1);
+  });
+
+  test("every source value is one of the declared union members", () => {
+    const sources: GeneratedPathsSource[] = ["disabled", "cli", "repo-config", "gitattributes", "default"];
+    for (const r of [
+      resolveGeneratedPaths({ repo: "o/r", cliPaths: [], config: BARE_CONFIG }),
+      resolveGeneratedPaths({ repo: "o/r", cliPaths: ["a/**"], config: BARE_CONFIG }),
+      resolveGeneratedPaths({ repo: "o/r", gitattributes: BIFROST_GITATTRIBUTES, config: BARE_CONFIG }),
+      resolveGeneratedPaths({ repo: "o/r", gitattributes: null, config: BARE_CONFIG }),
+    ]) {
+      assert.ok(sources.includes(r.source));
+    }
+  });
+});
+
+describe("fetchGitattributes", () => {
+  test("asks for the raw file and returns its text", () => {
+    const calls: string[][] = [];
+    const text = fetchGitattributes(BIFROST, (cmd, args) => {
+      calls.push([cmd, ...args]);
+      return { status: 0, stdout: BIFROST_GITATTRIBUTES, stderr: "" };
+    });
+    assert.equal(text, BIFROST_GITATTRIBUTES);
+    assert.deepEqual(calls, [[
+      "gh", "api", `repos/${BIFROST}/contents/.gitattributes`,
+      "-H", "Accept: application/vnd.github.raw",
+    ]]);
+  });
+
+  test("a 404 (no .gitattributes) returns null rather than throwing", () => {
+    const text = fetchGitattributes("o/none", () => ({ status: 1, stdout: "", stderr: "HTTP 404" }));
+    assert.equal(text, null);
+  });
+});
+
+describe("parseArgs --add-generated-paths", () => {
+  const base = ["--repo", "o/r", "--pr", "1", "--findings", "-"];
+
+  test("no flag means no explicit list and nothing added", () => {
+    const a = parseArgs(base);
+    assert.equal(a.generatedPathsExplicit, false);
+    assert.deepEqual(a.addGeneratedPaths, []);
+  });
+
+  test("--generated-paths and --no-generated-split both mark the list explicit", () => {
+    assert.equal(parseArgs([...base, "--generated-paths", "x/**"]).generatedPathsExplicit, true);
+    assert.equal(parseArgs([...base, "--no-generated-split"]).generatedPathsExplicit, true);
+  });
+
+  test("--add-generated-paths collects globs without marking the list explicit", () => {
+    const a = parseArgs([...base, "--add-generated-paths", "gen/**, out/**"]);
+    assert.deepEqual(a.addGeneratedPaths, ["gen/**", "out/**"]);
+    assert.equal(a.generatedPathsExplicit, false, "adding must not suppress .gitattributes");
+  });
+
+  test("repeated --add-generated-paths accumulate", () => {
+    const a = parseArgs([...base, "--add-generated-paths", "a/**", "--add-generated-paths", "b/**"]);
+    assert.deepEqual(a.addGeneratedPaths, ["a/**", "b/**"]);
+  });
+
+  test("an empty or flag-shaped value is refused, never a silent no-op", () => {
+    assert.throws(() => parseArgs([...base, "--add-generated-paths", ""]), /at least one glob/);
+    assert.throws(
+      () => parseArgs([...base, "--add-generated-paths", "--dry-run"]),
+      /requires a value, got the flag --dry-run/,
     );
   });
 });

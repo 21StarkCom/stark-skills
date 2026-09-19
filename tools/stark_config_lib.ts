@@ -212,6 +212,54 @@ export const DEFAULT_IAC_REVIEW = {
   max_bytes_per_file: 100_000,
 };
 
+/**
+ * generated_paths — config for the generated-output split in
+ * `tools/findings_review_post.ts` (a finding whose only anchor is a generated
+ * path is reported in the review body, never as a gating inline thread).
+ *
+ * `default` is the BUILT-IN FALLBACK only — the last layer in the precedence
+ * order, used when the target repo declares nothing. It is bifrost-shaped for
+ * historical reasons (STARK-5637 hand-copied bifrost's `.gitattributes`); the
+ * source of truth is now the target repo's own
+ * `linguist-generated=true` rows, fetched per run.
+ *
+ * `repos` is keyed by `owner/name`, so a repo-specific list is expressible
+ * without a flag: `{ paths: [...] }` REPLACES the layer below it,
+ * `{ add: [...] }` EXTENDS it. `catalog/**` lives here rather than in
+ * `default` because it is true of bifrost alone — a sync PR machine-rewrites
+ * that tree without declaring it generated — and baking it into the built-in
+ * default would demote a hand-written `catalog/` in every other repo.
+ *
+ * `enabled: false` turns the split off globally, exactly like
+ * `--no-generated-split` per run.
+ */
+export interface GeneratedPathsRepoEntry {
+  /** Replace the resolved list for this repo. */
+  paths?: string[];
+  /** Extend the resolved list for this repo. */
+  add?: string[];
+}
+
+export interface GeneratedPathsConfig {
+  enabled: boolean;
+  default: string[];
+  repos: Record<string, GeneratedPathsRepoEntry>;
+}
+
+export const DEFAULT_GENERATED_PATHS_CONFIG: GeneratedPathsConfig = {
+  enabled: true,
+  default: [
+    "vendor/**",
+    "dist/**",
+    "bundles/**",
+    ".claude-plugin/**",
+    "index.json",
+  ],
+  repos: {
+    "21StarkCom/bifrost": { add: ["catalog/**"] },
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -354,6 +402,12 @@ export function getCostConfig(): typeof DEFAULT_COST {
 }
 export function getIacReviewConfig(): typeof DEFAULT_IAC_REVIEW {
   return getSection(DEFAULT_IAC_REVIEW, "iac_review");
+}
+export function getGeneratedPathsConfig(): GeneratedPathsConfig {
+  return getSection(
+    DEFAULT_GENERATED_PATHS_CONFIG as unknown as Record<string, unknown>,
+    "generated_paths",
+  ) as unknown as GeneratedPathsConfig;
 }
 
 // ---------------------------------------------------------------------------

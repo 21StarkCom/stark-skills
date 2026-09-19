@@ -13,6 +13,23 @@
     "max_files": 80,
     "max_bytes_per_file": 100000
   },
+  "generated_paths": {
+    "enabled": true,
+    "default": [
+      "vendor/**",
+      "dist/**",
+      "bundles/**",
+      ".claude-plugin/**",
+      "index.json"
+    ],
+    "repos": {
+      "21StarkCom/bifrost": {
+        "add": [
+          "catalog/**"
+        ]
+      }
+    }
+  },
   "session": {
     "health_checks": [],
     "doc_paths": [

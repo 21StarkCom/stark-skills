@@ -357,3 +357,55 @@ test("the DEFAULT jury panel validates against the shipped model tables", () => 
     assert.ok(DEFAULT_MODEL_LIMITS[seat.model], `${seat.model} missing from DEFAULT_MODEL_LIMITS`);
   }
 });
+
+
+// --- generated_paths (STARK-6095) -------------------------------------------
+// The generated-output glob list `findings_review_post.ts` splits on. It lives
+// in config rather than as a frozen constant in the tool because a repo-agnostic
+// `--repo O/R` tool must not carry ONE repo's tree shape as a hardcoded default.
+import {
+  DEFAULT_GENERATED_PATHS_CONFIG,
+  getGeneratedPathsConfig,
+} from "./stark_config_lib.ts";
+
+test("generated_paths: defaults when nothing is configured", async () => {
+  await withScratchHome(() => {
+    const cfg = getGeneratedPathsConfig();
+    assert.equal(cfg.enabled, true);
+    assert.deepEqual(cfg.default, DEFAULT_GENERATED_PATHS_CONFIG.default);
+  });
+});
+
+test("generated_paths: `catalog/**` is repo-keyed, never a global default", () => {
+  // It is true of bifrost alone — a sync PR machine-rewrites that tree without
+  // declaring it generated. In the global default it would demote a
+  // hand-written `catalog/` in every other repo.
+  assert.ok(!DEFAULT_GENERATED_PATHS_CONFIG.default.includes("catalog/**"));
+  assert.deepEqual(
+    DEFAULT_GENERATED_PATHS_CONFIG.repos["21StarkCom/bifrost"],
+    { add: ["catalog/**"] },
+  );
+});
+
+test("generated_paths: a repo entry is expressible per repo and merges in", async () => {
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, {
+      generated_paths: { repos: { "o/other": { paths: ["gen/**"] } } },
+    });
+    const cfg = getGeneratedPathsConfig();
+    assert.deepEqual(cfg.repos["o/other"], { paths: ["gen/**"] });
+    // The shipped bifrost entry survives the merge rather than being replaced.
+    assert.deepEqual(cfg.repos["21StarkCom/bifrost"], { add: ["catalog/**"] });
+  });
+});
+
+test("generated_paths: enabled:false is expressible, and the default list is replaceable", async () => {
+  await withScratchHome((home) => {
+    writeGlobalConfig(home, {
+      generated_paths: { enabled: false, default: ["only/**"] },
+    });
+    const cfg = getGeneratedPathsConfig();
+    assert.equal(cfg.enabled, false);
+    assert.deepEqual(cfg.default, ["only/**"], "an array override REPLACES, never unions");
+  });
+});
