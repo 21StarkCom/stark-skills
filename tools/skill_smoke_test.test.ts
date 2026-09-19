@@ -41,6 +41,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import { stripCodeFences } from "./jury_verify.ts";
+
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const SKILLS_ROOT = path.join(REPO_ROOT, "skill");
 
@@ -469,6 +471,10 @@ function brokenMdLinks(file: string, res: RegExp[]): string[] {
 
 const CODEX_SKILL_ROOT = path.join(REPO_ROOT, "runtime-overrides", "codex", "skill");
 const SHARED_WORKER_DOCS = ["stand-down.md", "worker-spine.md"];
+// Every tree that ships a copy of the shared worker docs. One list, because the
+// link check and the pane-count guard below both walk it — a runtime tree added
+// to one and not the other is a copy nothing reads.
+const SHARED_DOC_DIRS = ["standards", "runtime-overrides/codex/standards"];
 
 const LINK_SOURCES: { label: string; file: string; res: RegExp[] }[] = [
   ...SKILLS.map((name) => ({
@@ -484,7 +490,7 @@ const LINK_SOURCES: { label: string; file: string; res: RegExp[] }[] = [
       file: path.join(CODEX_SKILL_ROOT, entry.name, "SKILL.md"),
       res: [RELATIVE_MD_LINK_RE],
     })),
-  ...["standards", "runtime-overrides/codex/standards"].flatMap((dir) =>
+  ...SHARED_DOC_DIRS.flatMap((dir) =>
     SHARED_WORKER_DOCS.map((name) => ({
       label: `${dir}/${name}`,
       file: path.join(REPO_ROOT, ...dir.split("/"), name),
@@ -519,31 +525,59 @@ for (const { label, file, res } of LINK_SOURCES) {
 // printed nothing over a real count of 2, and a finished Minion read "check
 // failed", did not arm, and left agent, worktree and tab behind. The fix is two
 // steps (`hermod whoami --json`, then `hermod panes` under the literal
-// workspaceId it printed); the one-line `$(…)` form reads as equivalent and is
-// refused by Claude Code's worktree-isolation guard, so a tidy-up that folds
-// the steps together — or drops the prefix — has to hit a red test.
-for (const dir of ["standards", "runtime-overrides/codex/standards"]) {
+// workspaceId it printed). The one-line `$(…)` form reads as equivalent and is
+// not: Claude Code's worktree-isolation guard refused the quoted `VAR="$(…)"`
+// spelling and passed the unquoted one (measured, 2.1.278), so whether a fold
+// even runs turns on a quote mark. A tidy-up that folds the steps together —
+// or drops the prefix — has to hit a red test.
+//
+// Commands are read out of the FENCED blocks, not every line. Keyed on the
+// literal `hermod panes --json` across the whole file, the guard could not tell
+// a check from a sentence about one — prose quoting the old command was a
+// false red — while a bare check under the `list-panes` alias or the `--plain`
+// porcelain (the spelling hermod's own session-start block recommends) matched
+// nothing and passed. `stripCodeFences` blanks fenced lines in place, so the
+// lines it changed are exactly the fenced ones.
+function fencedLines(text: string): string[] {
+  const prose = stripCodeFences(text).split("\n");
+  return text.split("\n").filter((line, i) => prose[i] !== line);
+}
+
+for (const dir of SHARED_DOC_DIRS) {
   test(`skill smoke: ${dir}/stand-down.md — pane count is workspace-stamp independent`, () => {
     const text = fs.readFileSync(
       path.join(REPO_ROOT, ...dir.split("/"), "stand-down.md"),
       "utf8",
     );
-    const panesLines = text
-      .split("\n")
-      .filter((line) => /hermod panes --json/.test(line));
+    const commands = fencedLines(text);
+    const panesLines = commands.filter((line) => /\bhermod\s+(list-)?panes\b/.test(line));
     assert.ok(panesLines.length > 0, "the pane-count check is gone");
     for (const line of panesLines) {
       assert.match(
         line,
-        /^\s*CMUX_WORKSPACE_ID=<[^>$]+> hermod panes --json/,
+        /^\s*CMUX_WORKSPACE_ID=<[^>$]+> hermod (list-)?panes\b/,
         `bare or computed-env \`hermod panes\` check: ${line.trim()}`,
       );
     }
-    assert.match(text, /^\s*hermod whoami --json\s*$/m, "step 1 (whoami) is gone");
+    assert.ok(
+      commands.some((line) => /^\s*hermod whoami --json\s*$/.test(line)),
+      "step 1 (whoami) is gone",
+    );
+    // ANY runtime-computed value, not just `$(…)`: backticks and `$ws` fold the
+    // steps just as well, and on a line of their own (`export …`) they never
+    // reach the per-line check above. Whole text, not just fences — fail closed.
     assert.doesNotMatch(
       text,
-      /CMUX_WORKSPACE_ID=["']?\$\(/,
-      "runtime-computed CMUX_WORKSPACE_ID — the worktree-isolation guard refuses it",
+      /CMUX_WORKSPACE_ID=["']?[$`]/,
+      "runtime-computed CMUX_WORKSPACE_ID — paste the literal `whoami` printed",
+    );
+    // Pin the claim, not only the absence of the sentence that got it wrong: a
+    // reworded "that is also a ground poison-pill refuses on" sails straight
+    // past a match on the old wording.
+    assert.match(
+      text,
+      /\*\*not\*\*\s+a\s+ground\s+poison-pill/,
+      "the doc no longer says a stale stamp is NOT a poison-pill refusal ground",
     );
     assert.doesNotMatch(
       text,

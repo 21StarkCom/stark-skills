@@ -101,10 +101,13 @@ line.
     | select(.surface_ids | index(env.CMUX_SURFACE_ID)) | .surface_count'
   ```
 
-  Do not fold the two into one line with a `$(…)` substitution:
-  Claude Code's worktree-isolation guard refuses a runtime-computed env value
-  on a command, and the pasted literal works on either runtime. `hermod panes --pane <paneRef>` is no shortcut
-  either — under a stale stamp it answers `not_found`.
+  Do not fold the two into one line with a `$(…)` substitution. Claude Code's
+  worktree-isolation guard refuses a runtime-computed env value on a command —
+  measured (Claude Code 2.1.278) on the quoted `VAR="$(…)"` form, while the
+  unquoted one got through, a distinction too fine to rest a mandatory step on
+  — and the pasted literal works on either runtime, whatever a guard thinks.
+  `hermod panes --pane <paneRef>` is no shortcut either — under a stale stamp
+  it answers `not_found`.
 
   Read it as three outcomes, not two. **More than 1** and the last-surface
   refusal is not what will stop you — the claude-lock `partial` below still
@@ -114,19 +117,31 @@ line.
   stand-down over it — that `partial` still exits your agent and removes your
   worktree, which is the whole point of the mandate above, and not arming
   leaves a live agent, a live worktree *and* the same tab. **Unresolvable**
-  is not a count, and it has two shapes. `whoami` exits 1 with a named error
+  is not a count, and it has three shapes. `whoami` exits 1 with a named error
   when `$CMUX_SURFACE_ID` is unset (`no CMUX_SURFACE_ID in env`) or your
   surface is gone (`surface … not found in tree`) — loud, where the old
-  one-step check was silent. Or the second step prints nothing: `index`
-  returns nothing when your surface is not among the panes listed, and jq
-  still exits 0 — with the id pasted from `whoami` that means a mispasted id
-  or a surface that vanished between the two steps, never a moved tab. Either
-  way treat it as the check having failed: report it and stop. It is **not**
-  the ground poison-pill itself refuses on. Its foreground refusals
-  (`--dry-run --json`, exit 2) are exactly two — `$CMUX_SURFACE_ID` unset, or
-  no active session on the surface — and a stale workspace stamp is neither:
-  measured, the dry run answers `completed` under one. So a clean dry run does
-  not stand in for this count.
+  one-step check was silent. Poison-pill refuses on both of those itself, so
+  there is nothing left to arm: report it and stop. Or the second step
+  **errors** — hermod answers `not_found: Workspace not found`, exit 1, and jq
+  dies on `Cannot iterate over null`, exit 5 — because what you pasted is not
+  a workspace id: `whoami` prints three UUIDs (`id`, `workspaceId`,
+  `windowId`) and only `workspaceId` will do, whole. Or the second step prints
+  **nothing**, jq exit 0: `index` found your surface in none of the panes
+  listed, so the id names a real workspace you are not in — another one's, or
+  your own from before a move that landed between the two steps. Those last
+  two shapes are a slip, not a verdict, and a slip is no reason to skip a
+  mandatory stand-down: run **both** steps again, once, re-reading `whoami`
+  rather than re-pasting from scrollback. Still unresolvable, treat it as the
+  check having failed: report it and stop.
+
+  A stale workspace stamp is **not** a ground poison-pill itself refuses on,
+  so a clean dry run does not stand in for this count. Its foreground
+  validation (`--dry-run --json`) refuses, exit 2, on an unset
+  `$CMUX_SURFACE_ID`, on no active session on the surface, and on a session
+  store that cannot name one supported agent and one worktree cwd; and it
+  answers `aborted-not-worktree`, exit 1, when that cwd is not a git
+  repository. A stale stamp is none of those: measured, the dry run answers
+  `completed` under one.
 
 ## What it aims at
 
