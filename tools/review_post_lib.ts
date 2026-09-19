@@ -30,7 +30,7 @@
  */
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
 
-import { explainTermination } from "./child_termination_lib.ts";
+import { explainTermination, resolveGhTimeoutMs } from "./child_termination_lib.ts";
 import {
   buildMarker,
   compareSeverityDesc,
@@ -48,6 +48,9 @@ export interface GhJsonOpts {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   body?: unknown;
   paginate?: boolean;
+  /** Bound on the `gh` subprocess. Default: `resolveGhTimeoutMs()`
+   * (`STARK_GH_TIMEOUT_MS`, else the measured 120 s — see child_termination_lib). */
+  timeoutMs?: number;
 }
 
 export interface GhJsonResult {
@@ -87,6 +90,8 @@ interface SpawnResult {
   status: number | null;
   /** Signal that killed the child, if any. */
   signal: NodeJS.Signals | null;
+  /** Set (code `ETIMEDOUT`, as `spawnSync` does) when OUR bound killed it. */
+  error?: Error;
 }
 
 async function spawnCollect(
@@ -96,6 +101,8 @@ async function spawnCollect(
     input?: string;
     env?: NodeJS.ProcessEnv;
     cwd?: string;
+    /** Kill the child and settle after this long (STARK-6113). */
+    timeoutMs?: number;
   } = {},
 ): Promise<SpawnResult> {
   return await new Promise<SpawnResult>((resolve, reject) => {
@@ -110,18 +117,50 @@ async function spawnCollect(
     let stderrEnded = false;
     let closed: SpawnResult | null = null;
     let settled = false;
-    const tryFinish = () => {
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (r: SpawnResult) => {
       if (settled) return;
+      settled = true;
+      // Cleared on EVERY settle: a live 120 s timer would hold the process open
+      // long after the `gh` call it bounded had returned.
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const tryFinish = () => {
       if (closed === null) return;
       if (!stdoutEnded || !stderrEnded) return;
-      settled = true;
-      resolve(closed);
+      settle(closed);
     };
     child.stdout.on("data", (b) => out.push(b as Buffer));
     child.stderr.on("data", (b) => err.push(b as Buffer));
     child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
     child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
-    child.on("error", reject);
+    child.on("error", (e) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+    if (opts.timeoutMs !== undefined) {
+      const ms = opts.timeoutMs;
+      timer = setTimeout(() => {
+        // SIGKILL, not SIGTERM: a bound the child can ignore is not a bound.
+        child.kill("SIGKILL");
+        // Settle NOW rather than on `close`. `close` waits for the stdio pipes,
+        // and a grandchild that inherited them keeps them open after the kill —
+        // so waiting would make the bound hold only for well-behaved children.
+        // Whatever arrives later is discarded; partial output is never a result.
+        child.stdout.destroy();
+        child.stderr.destroy();
+        settle({
+          stdout: Buffer.concat(out).toString("utf8"),
+          stderr: Buffer.concat(err).toString("utf8"),
+          status: null,
+          signal: "SIGKILL",
+          error: Object.assign(new Error(`${cmd} timed out after ${ms} ms`), { code: "ETIMEDOUT" }),
+        });
+      }, ms);
+    }
     child.on("close", (code, signal) => {
       closed = {
         stdout: Buffer.concat(out).toString("utf8"),
@@ -158,12 +197,15 @@ export async function ghJsonOnce(p: string, opts: GhJsonOpts = {}): Promise<GhJs
   args.push(p);
   const input = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
   if (input !== undefined) args.push("--input", "-");
-  const res = await spawnCollect("gh", args, { input, env: { ...process.env } });
+  // Resolved before the spawn, so an unusable STARK_GH_TIMEOUT_MS is refused
+  // outright instead of running `gh` unbounded.
+  const timeoutMs = opts.timeoutMs ?? resolveGhTimeoutMs();
+  const res = await spawnCollect("gh", args, { input, env: { ...process.env }, timeoutMs });
   if (res.status === null) {
     // Checked BEFORE stdout is parsed: a `--paginate` killed between pages
     // leaves complete HTTP blocks behind, which parse as a clean 200 silently
     // missing every later page. A terminated child's output is never a result.
-    const why = explainTermination("gh", res, res.stderr);
+    const why = explainTermination("gh", res, res.stderr, undefined, timeoutMs);
     throw new GhError(-1, why, {}, `gh api ${p} failed: ${why.slice(0, 400)}`);
   }
   const { headers, body, status } = parseHttpStream(res.stdout);

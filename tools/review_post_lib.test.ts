@@ -567,6 +567,80 @@ test("ghJsonOnce: an HTTP error behind gh's exit 1 keeps its real status and bod
   });
 });
 
+// ─── ghJsonOnce: a hung `gh` is bounded (STARK-6113) ────────────────────────
+
+/**
+ * `node:test` has no default timeout, and the regression these tests exist to
+ * catch is a call that NEVER settles — so without this a broken bound stalls
+ * the suite (and the required `test` check) instead of failing it. Measured:
+ * the settle-on-`close` mutant hung indefinitely before this was added.
+ */
+const HANG_GUARD = { timeout: 30_000 };
+
+/** Assert a timeout rejection that names the bound, and that it came promptly. */
+async function assertTimesOut(p: Promise<unknown>, ms: number): Promise<void> {
+  const started = Date.now();
+  await assert.rejects(p, (err: unknown) => {
+    assert.ok(err instanceof GhError);
+    assert.equal(err.status, -1, "a timeout must stay non-retriable");
+    assert.match(err.message, new RegExp(`timed out after ${ms} ms`));
+    assert.match(err.body, new RegExp(`timed out after ${ms} ms`), "postReview reads err.body");
+    return true;
+  });
+  assert.ok(Date.now() - started < 10_000, "the hung gh was not bounded");
+}
+
+test("ghJsonOnce: a hung gh is bounded, and the error names the timeout and its value", HANG_GUARD, async () => {
+  await withFakeGh("exec sleep 20", async () => {
+    await assertTimesOut(ghJsonOnce("/repos/o/r/pulls/1/files", { timeoutMs: 300 }), 300);
+  });
+});
+
+test("ghJsonOnce: the bound holds when a GRANDCHILD keeps gh's pipes open", HANG_GUARD, async () => {
+  // No `exec`: `sleep` is a grandchild that inherits stdout/stderr. Killing the
+  // shell alone leaves the pipes open, so a settle that waits for `close` would
+  // hang for as long as the grandchild lives — the bound in name only.
+  await withFakeGh("sleep 20", async () => {
+    await assertTimesOut(ghJsonOnce("/repos/o/r/pulls/1/files", { timeoutMs: 300 }), 300);
+  });
+});
+
+test("ghJsonOnce: a timed-out gh with a complete page on stdout is a failure, never a truncated 200", HANG_GUARD, async () => {
+  const page = 'HTTP/2.0 200 OK\\r\\n\\r\\n[{"id":1}]';
+  await withFakeGh(`printf '${page}'\nexec sleep 20`, async () => {
+    await assertTimesOut(ghJsonOnce("/repos/o/r/pulls/1/files", { timeoutMs: 300 }), 300);
+  });
+});
+
+test("ghJsonOnce: STARK_GH_TIMEOUT_MS overrides the default bound; an unusable value is refused before spawning", HANG_GUARD, async () => {
+  const prev = process.env.STARK_GH_TIMEOUT_MS;
+  try {
+    process.env.STARK_GH_TIMEOUT_MS = "300";
+    await withFakeGh("exec sleep 20", async () => {
+      await assertTimesOut(ghJsonOnce("/repos/o/r/pulls/1/files"), 300);
+    });
+    process.env.STARK_GH_TIMEOUT_MS = "0";
+    await withFakeGh("exec sleep 20", async () => {
+      await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/files"), /STARK_GH_TIMEOUT_MS must be/);
+    });
+  } finally {
+    if (prev === undefined) delete process.env.STARK_GH_TIMEOUT_MS;
+    else process.env.STARK_GH_TIMEOUT_MS = prev;
+  }
+});
+
+test("ghJsonOnce: a gh that finishes inside the bound leaves no timer holding the process open", async () => {
+  const page = 'HTTP/2.0 200 OK\\r\\n\\r\\n[{"id":1}]';
+  await withFakeGh(`printf '${page}'`, async () => {
+    const before = process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+    // 5 s, not the production 120 s: if the timer ever leaks again, the suite
+    // lingers 5 s and fails here — instead of stalling for the full bound.
+    await ghJsonOnce("/repos/o/r/pulls/1/reviews", { timeoutMs: 5_000 });
+    const after = process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+    assert.equal(after, before, "the bound's timer outlived the call it bounded");
+  });
+});
+
 test("ghJsonOnce: a healthy gh still parses (the fake-gh harness itself works)", async () => {
   const page = 'HTTP/2.0 200 OK\\r\\n\\r\\n[{"id":1}]';
   await withFakeGh(`printf '${page}'`, async () => {

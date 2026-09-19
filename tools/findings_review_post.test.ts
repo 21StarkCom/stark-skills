@@ -406,7 +406,7 @@ describe("defaultRun", () => {
     const r = runCapturing(process.execPath, [
       "-e",
       `process.stderr.write("gh: a warning\\n", () => process.stdout.write("x".repeat(${cap * 2})))`,
-    ], cap);
+    ], cap, 30_000);
     assert.equal(r.status, null, "expected a maxBuffer kill, not a normal exit");
     assert.match(r.stderr, /exceeded maxBuffer/, `cause not named: ${r.stderr}`);
     assert.match(r.stderr, /gh: a warning/, "the child's own stderr must be preserved");
@@ -428,6 +428,45 @@ describe("defaultRun", () => {
       r.stderr.indexOf("terminated") < r.stderr.indexOf("noise"),
       `the cause must precede the child's stderr, got: ${r.stderr}`,
     );
+  });
+
+  // STARK-6113. A `gh api --paginate` stalled on a hung connection used to
+  // block `spawnSync` forever — the one termination nothing could name, because
+  // it never happened. Driven at 300 ms; the child would otherwise idle 15 s.
+  test("a hung child is bounded, and the error names the timeout and its value", () => {
+    const started = Date.now();
+    const r = runCapturing(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], 64 * 1024, 300);
+    assert.ok(Date.now() - started < 10_000, "the hung child was not bounded");
+    assert.equal(r.status, null);
+    assert.match(r.stderr, /timed out after 300 ms/, `timeout not named: ${r.stderr}`);
+  });
+
+  // `spawnSync` keeps waiting after it sends `killSignal`, so under the SIGTERM
+  // default a child that ignores it is not bounded at all (measured: the
+  // SIGTERM mutant of this test blocks the child's full 15 s). The pid write is
+  // the sync point — the handler is provably installed before the bound fires;
+  // without it the signal can land during Node startup and the test passes for
+  // the wrong reason (it did, at 300 ms).
+  test("a child that ignores SIGTERM is still bounded, and is dead afterwards", () => {
+    const started = Date.now();
+    const r = runCapturing(
+      process.execPath,
+      ["-e", "process.on('SIGTERM', () => {}); process.stderr.write('pid=' + process.pid, () => setTimeout(() => {}, 15000))"],
+      64 * 1024,
+      1000,
+    );
+    assert.ok(Date.now() - started < 10_000, "a SIGTERM-deaf child escaped the bound");
+    assert.match(r.stderr, /timed out after 1000 ms/);
+    const pid = Number(/pid=(\d+)/.exec(r.stderr)?.[1]);
+    assert.ok(pid > 0, `child pid not captured: ${r.stderr}`);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "the timed-out child is still alive");
+  });
+
+  test("a child that finishes inside the bound is untouched", () => {
+    const r = runCapturing(process.execPath, ["-e", "process.stdout.write('ok')"], 64 * 1024, 30_000);
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, "ok");
+    assert.equal(r.stderr, "");
   });
 });
 
