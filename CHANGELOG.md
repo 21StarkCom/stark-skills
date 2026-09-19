@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<!-- idun:pr-merge pr=1012 runId=1012 sha=563eca69 -->
+- Fixed: a timed-out `gh` call now kills its whole process group (not just the direct child), and Ctrl-C is forwarded to in-flight `gh` subprocesses.
 <!-- idun:pr-merge pr=1011 runId=1011 sha=b2628cb9 -->
 - Fixed `postReview` re-posting duplicate PR reviews on rerun by checking the review marker once before any write, refusing on an unreadable read, and adopting orphaned overflow comments.
 <!-- idun:pr-merge pr=1010 runId=1010 sha=ebb8271c -->

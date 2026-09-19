@@ -30,8 +30,9 @@
  * REST-only by contract: `rejectGraphqlPath` refuses a GraphQL path, and
  * `check-rest-only.sh` guards this file in CI.
  */
-import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { createHash } from "node:crypto";
+
+import { spawnBounded } from "./bounded_spawn_lib.ts";
 
 import { assertGhTimeoutMs, explainTermination, resolveGhTimeoutMs } from "./child_termination_lib.ts";
 import {
@@ -83,104 +84,6 @@ function rejectGraphqlPath(p: string): void {
   }
 }
 
-interface SpawnResult {
-  stdout: string;
-  stderr: string;
-  /** Exit code, or `null` when the child was killed by a signal — a killed
-   * process has no exit code, and inventing one (-1) is what let the caller
-   * format a bare "failed:" with the cause thrown away. Same shape as
-   * `spawnSync`, so `explainTermination` reads it directly. */
-  status: number | null;
-  /** Signal that killed the child, if any. */
-  signal: NodeJS.Signals | null;
-  /** Set (code `ETIMEDOUT`, as `spawnSync` does) when OUR bound killed it. */
-  error?: Error;
-}
-
-async function spawnCollect(
-  cmd: string,
-  args: string[],
-  opts: {
-    input?: string;
-    env?: NodeJS.ProcessEnv;
-    cwd?: string;
-    /** Kill the child and settle after this long (STARK-6113). */
-    timeoutMs?: number;
-  } = {},
-): Promise<SpawnResult> {
-  return await new Promise<SpawnResult>((resolve, reject) => {
-    const sopts: SpawnOptionsWithoutStdio = {
-      env: opts.env ?? process.env,
-      cwd: opts.cwd,
-    };
-    const child = spawn(cmd, args, sopts);
-    const out: Buffer[] = [];
-    const err: Buffer[] = [];
-    let stdoutEnded = false;
-    let stderrEnded = false;
-    let closed: SpawnResult | null = null;
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-    /** Claim the one settlement; false when an earlier outcome already won. */
-    const claim = (): boolean => {
-      if (settled) return false;
-      settled = true;
-      // Cleared on EVERY settle, resolve and reject alike: a live 120 s timer
-      // would hold the process open long after the `gh` call it bounded returned.
-      clearTimeout(timer);
-      return true;
-    };
-    const settle = (r: SpawnResult) => { if (claim()) resolve(r); };
-    const tryFinish = () => {
-      if (closed === null) return;
-      if (!stdoutEnded || !stderrEnded) return;
-      settle(closed);
-    };
-    child.stdout.on("data", (b) => out.push(b as Buffer));
-    child.stderr.on("data", (b) => err.push(b as Buffer));
-    child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
-    child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
-    child.on("error", (e) => { if (claim()) reject(e); });
-    if (opts.timeoutMs !== undefined) {
-      const ms = opts.timeoutMs;
-      timer = setTimeout(() => {
-        // SIGKILL, not SIGTERM: a bound the child can ignore is not a bound.
-        child.kill("SIGKILL");
-        // Settle NOW rather than on `close`. `close` waits for the stdio pipes,
-        // and a grandchild that inherited them keeps them open after the kill —
-        // so waiting would make the bound hold only for well-behaved children.
-        // Whatever arrives later is discarded; partial output is never a result.
-        child.stdout.destroy();
-        child.stderr.destroy();
-        settle({
-          stdout: Buffer.concat(out).toString("utf8"),
-          stderr: Buffer.concat(err).toString("utf8"),
-          status: null,
-          signal: "SIGKILL",
-          error: Object.assign(new Error(`${cmd} timed out after ${ms} ms`), { code: "ETIMEDOUT" }),
-        });
-      }, ms);
-    }
-    child.on("close", (code, signal) => {
-      closed = {
-        stdout: Buffer.concat(out).toString("utf8"),
-        stderr: Buffer.concat(err).toString("utf8"),
-        status: code,
-        signal: signal ?? null,
-      };
-      tryFinish();
-    });
-    // A child that dies before draining its stdin fails the queued write with
-    // EPIPE on `child.stdin`, and an unlistened stream 'error' is an uncaught
-    // exception: it kills the whole tool before `close` can say WHY the child
-    // died. Only a body larger than the pipe buffer is still queued at that
-    // point — i.e. exactly the large review POSTs. `close` is the authoritative
-    // outcome, so the write error itself is dropped.
-    child.stdin.on("error", () => {});
-    if (opts.input !== undefined) child.stdin.end(opts.input);
-    else child.stdin.end();
-  });
-}
 /**
  * Call `gh api` against a REST endpoint. Forbids any 'graphql' substring in the
  * path. With paginate=true (default for GET array endpoints), uses gh's
@@ -204,7 +107,7 @@ export async function ghJsonOnce(p: string, opts: GhJsonOpts = {}): Promise<GhJs
   const timeoutMs = opts.timeoutMs === undefined
     ? resolveGhTimeoutMs()
     : assertGhTimeoutMs(opts.timeoutMs, "opts.timeoutMs");
-  const res = await spawnCollect("gh", args, { input, env: { ...process.env }, timeoutMs });
+  const res = await spawnBounded("gh", args, { input, env: { ...process.env }, timeoutMs });
   if (res.status === null) {
     // Checked BEFORE stdout is parsed: a `--paginate` killed between pages
     // leaves complete HTTP blocks behind, which parse as a clean 200 silently

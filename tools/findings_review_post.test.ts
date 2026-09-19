@@ -362,9 +362,9 @@ describe("defaultRun", () => {
   // 1.27 MB), and the tool reported `failed (exit null):` with empty stderr —
   // a review-posting tool failing precisely on the large PRs whose findings
   // matter most. 2 MB here is over the old default and far under the new one.
-  test("returns the whole payload when it exceeds Node's 1 MiB default", () => {
+  test("returns the whole payload when it exceeds Node's 1 MiB default", async () => {
     const bytes = 2 * 1024 * 1024;
-    const r = defaultRun(process.execPath, [
+    const r = await defaultRun(process.execPath, [
       "-e",
       `process.stdout.write("x".repeat(${bytes}))`,
     ]);
@@ -379,8 +379,8 @@ describe("defaultRun", () => {
   // A signal kill sets status null, which is indistinguishable from a crash.
   // The caller interpolates stderr straight into its error, so an empty one
   // produced a message ending in a bare colon.
-  test("a signal kill with no stderr is explained, not reported as empty", () => {
-    const r = defaultRun(process.execPath, [
+  test("a signal kill with no stderr is explained, not reported as empty", async () => {
+    const r = await defaultRun(process.execPath, [
       "-e",
       "process.kill(process.pid, 'SIGKILL')",
     ]);
@@ -403,9 +403,9 @@ describe("defaultRun", () => {
   // The child sequences its stdout flood behind the stderr write's callback —
   // Node pipe writes are asynchronous on macOS, so a bare write-then-flood can
   // race.
-  test("names the maxBuffer cause even when the child wrote to stderr", () => {
+  test("names the maxBuffer cause even when the child wrote to stderr", async () => {
     const cap = 64 * 1024;
-    const r = runCapturing(process.execPath, [
+    const r = await runCapturing(process.execPath, [
       "-e",
       `process.stderr.write("gh: a warning\\n", () => process.stdout.write("x".repeat(${cap * 2})))`,
     ], cap, 30_000);
@@ -418,8 +418,8 @@ describe("defaultRun", () => {
     );
   });
 
-  test("names the signal even when the child wrote to stderr", () => {
-    const r = defaultRun(process.execPath, [
+  test("names the signal even when the child wrote to stderr", async () => {
+    const r = await defaultRun(process.execPath, [
       "-e",
       "process.stderr.write('noise\\n', () => process.kill(process.pid, 'SIGKILL'))",
     ]);
@@ -433,25 +433,24 @@ describe("defaultRun", () => {
   });
 
   // STARK-6113. A `gh api --paginate` stalled on a hung connection used to
-  // block `spawnSync` forever — the one termination nothing could name, because
+  // block forever — the one termination nothing could name, because
   // it never happened. Driven at 300 ms; the child would otherwise idle 15 s.
-  test("a hung child is bounded, and the error names the timeout and its value", () => {
+  test("a hung child is bounded, and the error names the timeout and its value", async () => {
     const started = Date.now();
-    const r = runCapturing(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], 64 * 1024, 300);
+    const r = await runCapturing(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], 64 * 1024, 300);
     assert.ok(Date.now() - started < 10_000, "the hung child was not bounded");
     assert.equal(r.status, null);
     assert.match(r.stderr, /timed out after 300 ms/, `timeout not named: ${r.stderr}`);
   });
 
-  // `spawnSync` keeps waiting after it sends `killSignal`, so under the SIGTERM
-  // default a child that ignores it is not bounded at all (measured: the
-  // SIGTERM mutant of this test blocks the child's full 15 s). The pid write is
+  // A SIGTERM bound is only as good as the child's manners: under the SIGTERM
+  // default a child that ignores it simply outlives the bound. The pid write is
   // the sync point — the handler is provably installed before the bound fires;
   // without it the signal can land during Node startup and the test passes for
   // the wrong reason (it did, at 300 ms).
-  test("a child that ignores SIGTERM is still bounded, and is dead afterwards", () => {
+  test("a child that ignores SIGTERM is still bounded, and is dead afterwards", async () => {
     const started = Date.now();
-    const r = runCapturing(
+    const r = await runCapturing(
       process.execPath,
       ["-e", "process.on('SIGTERM', () => {}); process.stderr.write('pid=' + process.pid, () => setTimeout(() => {}, 15000))"],
       64 * 1024,
@@ -464,24 +463,58 @@ describe("defaultRun", () => {
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, "the timed-out child is still alive");
   });
 
-  test("a child that finishes inside the bound is untouched", () => {
-    const r = runCapturing(process.execPath, ["-e", "process.stdout.write('ok')"], 64 * 1024, 30_000);
+  test("a child that finishes inside the bound is untouched", async () => {
+    const r = await runCapturing(process.execPath, ["-e", "process.stdout.write('ok')"], 64 * 1024, 30_000);
     assert.equal(r.status, 0);
     assert.equal(r.stdout, "ok");
     assert.equal(r.stderr, "");
   });
 
-  // `spawnSync` reads `timeout: 0` as NO bound (measured: a 2 s child ran its
-  // full 2 s), so an unvalidated 0 is the hang this exists to stop, arriving by
-  // the argument instead of the env var. Refused BEFORE the spawn: the marker
-  // file proves the child never ran, rather than ran and was cleaned up after.
-  test("a bound of 0 is refused before spawning, never read as 'unbounded'", () => {
+  // STARK-6131. The bound used to kill only the direct child, so whatever it
+  // had spawned was reparented to init and ran on — orphaned, not bounded. The
+  // grandchild redirects its stdio away so nothing but the GROUP kill can reach
+  // it, and the pid write is the sync point: it provably exists before the
+  // bound fires. Polled, because SIGKILL to a process we do not parent is
+  // delivered, not awaited.
+  test("a timed-out child leaves no descendant alive", async () => {
+    const r = await runCapturing(
+      "/bin/sh",
+      ["-c", "sleep 30 </dev/null >/dev/null 2>&1 & echo gpid=$! >&2; sleep 30"],
+      64 * 1024,
+      1000,
+    );
+    assert.match(r.stderr, /timed out after 1000 ms/);
+    const gpid = Number(/gpid=(\d+)/.exec(r.stderr)?.[1]);
+    assert.ok(gpid > 1, `grandchild pid not captured: ${r.stderr}`);
+    let alive = true;
+    for (let i = 0; i < 50 && alive; i++) {
+      try { process.kill(gpid, 0); await new Promise((res) => setTimeout(res, 100)); } catch { alive = false; }
+    }
+    if (alive) process.kill(gpid, "SIGKILL");
+    assert.equal(alive, false, "the grandchild survived the timeout — orphaned, not bounded");
+  });
+
+  // The async spawn REJECTS on ENOENT where `spawnSync` returned a result; no
+  // caller catches, so an uncaught rejection would replace "gh api … failed"
+  // with a bare stack trace.
+  test("a command that cannot be spawned is a named result, not a rejection", async () => {
+    const r = await runCapturing("/nonexistent/stark-6131-no-such-gh", [], 64 * 1024, 30_000);
+    assert.equal(r.status, null);
+    assert.match(r.stderr, /terminated: .*ENOENT/, `cause not named: ${r.stderr}`);
+  });
+
+  // An unvalidated 0 fires `setTimeout` after ~1 ms and kills every call (under
+  // the old `spawnSync` it meant NO bound — the hang, back). Refused BEFORE the
+  // spawn: the marker file proves the child never ran, rather than ran and was
+  // cleaned up after — hence the wait, since an async spawn returns first.
+  test("a bound of 0 is refused before spawning, never read as 'unbounded'", async () => {
     const marker = nodePathMod.join(nodeOs.tmpdir(), `run-capturing-zero-${process.pid}-${Date.now()}`);
     try {
-      assert.throws(
+      await assert.rejects(
         () => runCapturing(process.execPath, ["-e", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran")`], 64 * 1024, 0),
         /timeoutMs must be/,
       );
+      await new Promise((res) => setTimeout(res, 500));
       assert.equal(nodeFs.existsSync(marker), false, "the child was spawned despite the unusable bound");
     } finally {
       nodeFs.rmSync(marker, { force: true });
@@ -1235,9 +1268,9 @@ describe("resolveGeneratedPaths extend vs replace", () => {
 });
 
 describe("fetchGitattributes", () => {
-  test("asks for the raw file and returns its text", () => {
+  test("asks for the raw file and returns its text", async () => {
     const calls: string[][] = [];
-    const text = fetchGitattributes(BIFROST, (cmd, args) => {
+    const text = await fetchGitattributes(BIFROST, (cmd, args) => {
       calls.push([cmd, ...args]);
       return { status: 0, stdout: BIFROST_GITATTRIBUTES, stderr: "" };
     });
@@ -1248,16 +1281,16 @@ describe("fetchGitattributes", () => {
     ]]);
   });
 
-  test("a 404 (no .gitattributes) returns null rather than throwing", () => {
-    const text = fetchGitattributes("o/none", () => ({ status: 1, stdout: "", stderr: "HTTP 404" }));
+  test("a 404 (no .gitattributes) returns null rather than throwing", async () => {
+    const text = await fetchGitattributes("o/none", () => ({ status: 1, stdout: "", stderr: "HTTP 404" }));
     assert.equal(text, null);
   });
 
   // A terminated child's stderr is partly OUR text since STARK-6113, and a
   // bound of 404 renders "timed out after 404 ms". Read as a 404 it nulls the
   // failure, dropping the one warning that says the fallback list may be wrong.
-  test("a TERMINATED gh is a failure, never a 404, whatever its stderr reads", () => {
-    const r = fetchGitattributesResult("o/r", () => ({
+  test("a TERMINATED gh is a failure, never a 404, whatever its stderr reads", async () => {
+    const r = await fetchGitattributesResult("o/r", () => ({
       status: null,
       stdout: "",
       stderr: "gh produced no stderr and was terminated: timed out after 404 ms (the bound is STARK_GH_TIMEOUT_MS unless the caller passed its own)",
@@ -1266,8 +1299,8 @@ describe("fetchGitattributes", () => {
     assert.match(r.failure ?? "", /timed out after 404 ms/, "a timeout was classified as a missing file");
   });
 
-  test("a real 404 is still not a failure (the guard did not over-reach)", () => {
-    const r = fetchGitattributesResult("o/none", () => ({ status: 1, stdout: "", stderr: "gh: Not Found (HTTP 404)" }));
+  test("a real 404 is still not a failure (the guard did not over-reach)", async () => {
+    const r = await fetchGitattributesResult("o/none", () => ({ status: 1, stdout: "", stderr: "gh: Not Found (HTTP 404)" }));
     assert.deepEqual(r, { text: null, failure: null });
   });
 });

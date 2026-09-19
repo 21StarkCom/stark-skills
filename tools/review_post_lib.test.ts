@@ -605,6 +605,29 @@ test("ghJsonOnce: the bound holds when a GRANDCHILD keeps gh's pipes open", HANG
   });
 });
 
+test("ghJsonOnce: a timed-out gh leaves no descendant alive", HANG_GUARD, async () => {
+  // STARK-6131. The test above passed while leaving its `sleep 20` running:
+  // the kill reached `gh` alone, so the grandchild was reparented and lived on.
+  // Here it detaches from gh's pipes, so only the process-GROUP kill reaches it.
+  const pidFile = nodePath.join(os.tmpdir(), `fake-gh-grandchild-${process.pid}-${Date.now()}`);
+  try {
+    await withFakeGh(`sleep 30 </dev/null >/dev/null 2>&1 &\necho $! > '${pidFile}'\nsleep 30`, async () => {
+      await assertTimesOut(ghJsonOnce("/repos/o/r/pulls/1/files", { timeoutMs: 1000 }), 1000);
+    });
+    const gpid = Number(fs.readFileSync(pidFile, "utf8"));
+    assert.ok(Number.isInteger(gpid) && gpid > 1, "grandchild pid not captured");
+    // Polled: SIGKILL to a process we do not parent is delivered, not awaited.
+    let alive = true;
+    for (let i = 0; i < 50 && alive; i++) {
+      try { process.kill(gpid, 0); await new Promise((res) => setTimeout(res, 100)); } catch { alive = false; }
+    }
+    if (alive) process.kill(gpid, "SIGKILL");
+    assert.equal(alive, false, "the grandchild survived the timeout — orphaned, not bounded");
+  } finally {
+    fs.rmSync(pidFile, { force: true });
+  }
+});
+
 test("ghJsonOnce: a timed-out gh with a complete page on stdout is a failure, never a truncated 200", HANG_GUARD, async () => {
   const page = 'HTTP/2.0 200 OK\\r\\n\\r\\n[{"id":1}]';
   await withFakeGh(`printf '${page}'\nexec sleep 20`, async () => {

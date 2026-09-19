@@ -22,7 +22,7 @@ cd "$(dirname "$0")"
 # guard-reports-pass-over-nothing failure this repo keeps re-learning. Only the
 # `agent_*.ts` glob is allowed to expand to whatever is there.
 files=""
-for f in review_post_lib.ts findings_review_post.ts finding_lib.ts child_termination_lib.ts; do
+for f in review_post_lib.ts findings_review_post.ts finding_lib.ts child_termination_lib.ts bounded_spawn_lib.ts; do
   if [ ! -f "$f" ]; then
     echo "check-rest-only: required file $f is missing — update this script's list" >&2
     exit 1

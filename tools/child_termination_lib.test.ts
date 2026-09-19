@@ -103,10 +103,11 @@ describe("resolveGhTimeoutMs", () => {
 });
 
 // The env var is not the only way a bound arrives: `ghJsonOnce` takes
-// `opts.timeoutMs` and `runCapturing` takes it positionally. Unvalidated, the
-// two spawn paths read the SAME bad value in opposite directions — `spawnSync`
-// treats `timeout: 0` as "no bound" (measured: a 2 s child ran its full 2 s),
-// while `setTimeout` fires 0 / NaN / anything past 2^31-1 after ~1 ms.
+// `opts.timeoutMs`, `runCapturing` takes it positionally, and `spawnBounded`
+// (which both now reach) is exported. Unvalidated, `setTimeout` fires 0 / NaN /
+// anything past 2^31-1 after ~1 ms and kills the call. Until STARK-6131
+// `runCapturing` ran on `spawnSync`, which read the SAME `timeout: 0` the other
+// way — "no bound" (measured: a 2 s child ran its full 2 s).
 describe("assertGhTimeoutMs", () => {
   for (const bad of [0, -5, NaN, Infinity, 12.5, GH_TIMEOUT_MS_MAX + 1]) {
     test(`a bound no spawn path can honour is refused: ${String(bad)}`, () => {

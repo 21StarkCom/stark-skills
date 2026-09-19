@@ -63,10 +63,11 @@ export function resolveGhTimeoutMs(env: NodeJS.ProcessEnv = process.env): number
 /**
  * Refuse a bound no spawn path can honour, whichever way it arrived. The env
  * var is not the only door: `ghJsonOnce` takes `opts.timeoutMs` and
- * `runCapturing` takes it positionally, and unvalidated the two paths read the
- * SAME bad value in opposite directions — `spawnSync` treats `timeout: 0` as
- * "no bound" (the hang, back), while `setTimeout` fires 0, NaN and anything
- * past 2^31-1 ms after ~1 ms ("effectively unbounded" becomes "kill at once").
+ * `runCapturing` takes it positionally. Both now reach `setTimeout` through
+ * `bounded_spawn_lib.ts`, which fires 0, NaN and anything past 2^31-1 ms after
+ * ~1 ms ("effectively unbounded" becomes "kill at once"). Before STARK-6131
+ * `runCapturing` ran on `spawnSync`, which read the SAME `timeout: 0` the
+ * opposite way — "no bound", the hang, back — so neither reading is safe.
  * `shown` is what the error quotes, so the env path can show the raw string.
  */
 export function assertGhTimeoutMs(ms: number, source: string, shown: string = String(ms)): number {
@@ -100,8 +101,8 @@ export interface TerminationInfo {
  * child's stderr is swallowed by the truncation — the same defect, relocated.
  * A non-terminated child's stderr is returned untouched.
  *
- * `maxBuffer` is only meaningful to a caller that set one (`spawnSync`); an
- * async `spawn` has no such cap and omits it. `timeoutMs` is the bound the
+ * `maxBuffer` is only meaningful to a caller that set one (`runCapturing`);
+ * `ghJsonOnce` sets no cap and omits it. `timeoutMs` is the bound the
  * caller enforced: a timeout kill (`ETIMEDOUT`) names it and the env var that
  * moves it, because "killed by signal SIGTERM" sends an operator hunting for
  * whoever sent the signal when the sender was this tool.
