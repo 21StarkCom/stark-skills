@@ -21,8 +21,8 @@ hermod ticket STARK-n --repo <repo> --agent claude|codex --agnes
 ```
 
 `--agnes` makes the first message just `$agnes STARK-n` (`/agnes` on Claude
-Code). It is on hermod main (STARK-6974) and in no release up to v0.19.0;
-without it the same launch is `--prompt-file <brief>` with that one line as the
+Code). It needs hermod v0.20.0 or later (STARK-6974); on v0.19.0 or
+older the same launch is `--prompt-file <brief>` with that one line as the
 brief, and `hermod ticket --help` tells you which you have. Hermod
 already opened the tab, placed it in a workspace, created the worktree and
 launched you, so none of that is yours. What is yours is everything after: the
@@ -67,6 +67,14 @@ no stand down. Launch her and stop.
    was [measured](../../standards/stand-down.md#four-rules-about-when) refused on
    its quoted form only — too fine a line to rest a launch on, and the literal
    works on either runtime.
+   **The ticket's id must be free in that repo**: no `worktree` line of that
+   list (with `--repo`, of `git -C <path> worktree list --porcelain`, `<path>`
+   from `frigg repos get <name> --json`) may end in `/<the ticket id>`. One that
+   does is somebody's already — yours, when this session was itself launched on
+   the ticket, which is the likely case if you let the id default to your bound
+   ticket. Codex refuses the path; Claude would attach Agnes to it behind a
+   normal-looking ack, and her stand-down would then remove the worktree you
+   are standing in. Stop and say so.
 2. Launch, once:
 
    ```

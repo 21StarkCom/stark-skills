@@ -85,8 +85,8 @@ in that worktree; it is only where the session stands.
 
    never `--message`, which hands the line's quotes and `$` to the shell.
    `--gru` excludes `--prompt-file` (and `--agnes`, `--minion`, `--prompt`,
-   `--message`), so it is one form or the other. `--gru` ships in the hermod
-   release after v0.19.0 (STARK-7537); on v0.19.0 or older the `--prompt-file`
+   `--message`), so it is one form or the other. `--gru` needs hermod v0.20.0 or later
+   (STARK-7537); on v0.19.0 or older the `--prompt-file`
    form is the only one, and `hermod ticket --help` tells you which you have.
    Your `--agent` argument keeps its meaning — the Minions' agent — so it belongs
    in the brief; `--agent` on the launch line is the agent **Gru** runs on, which
@@ -194,8 +194,8 @@ standing is the operator's to sweep, not yours.
    (`hermod msg send --to <the ack's peerId> -- "STARK-n: report your status to
    me."`; its `hermod msg reply` reaches the sender, whatever the brief said)
    and count the ticket blocked, not owned, until it answers.
-   `--minion` and `--leader` are on hermod main (STARK-6974) and in no release
-   up to v0.19.0; `hermod ticket --help` tells you which you have. Without them,
+   `--minion` and `--leader` need hermod v0.20.0 or later (STARK-6974);
+   `hermod ticket --help` tells you which you have. On v0.19.0 or older,
    write those same four things to a file and launch with
    `--prompt-file <brief>` instead — never `--message`, which hands the brief's
    quotes and `$` to the shell.

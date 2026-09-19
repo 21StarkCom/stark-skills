@@ -2,7 +2,10 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fixture="$(mktemp -d /private/tmp/cmux-autoname.XXXXXX)"
+# Not a hardcoded /private/tmp: CI runs this harness on ubuntu, where that
+# directory does not exist. Nothing below compares an absolute path, so the
+# macOS /var -> /private/var realpath difference cannot bite.
+fixture="$(mktemp -d "${TMPDIR:-/tmp}/cmux-autoname.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
 repo="$fixture/sample-repo"
@@ -57,7 +60,13 @@ for src in compact clear; do
     CMUX_CAPTURE="$fixture/calls" HOME="$fixture/home" XDG_STATE_HOME="$state" \
     bash "$script_dir/cmux-autoname.sh"
 done
-! grep -q 'rename-tab' "$fixture/calls"
+# Not `! grep -q …`: a negated command never trips `set -e`, so that spelling
+# could not fail on its own (measured) — only the exact count below caught a
+# regression, and only incidentally.
+if grep -q 'rename-tab' "$fixture/calls"; then
+  printf 'FAIL: a compact/clear re-fire renamed the tab\n' >&2
+  exit 1
+fi
 for src in startup resume; do
   printf '{"session_id":"s","source":"%s"}' "$src" | \
   CMUX_WORKSPACE_ID=ws-worktree CMUX_SURFACE_ID=surface-worktree \
