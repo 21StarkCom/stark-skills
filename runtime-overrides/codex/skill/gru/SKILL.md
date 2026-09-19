@@ -110,4 +110,9 @@ tells you to stop; there is no other verb.
   `follow-up … stopping` leaves all three in place for you and the operator.
   You never remove a Minion's worktree yourself — including the one a stand-down
   left behind because its teardown came back partial. Report that path; sweeping
-  it is the operator's.
+  it is the operator's. A dead Minion's tab is reaped with
+  `hermod close-session <surface>`, never `poison-pill` (which targets only the
+  caller's own surface, as `close-session` refuses it) — and that is the
+  operator's call, not yours: its dirty/unpushed gate is live for a reason when
+  the tab it is aimed at never said it was finished. Report the surface; do not
+  run it.
