@@ -149,6 +149,47 @@ export function releaseGroup(pgid: number): void {
   if (liveGroups.size === 0) untrack();
 }
 
+/**
+ * The ONE latched group-killer (STARK-6377). Every detached spawn path that
+ * signals `-pgid` takes its killer from here — `spawnBounded` below,
+ * `agent_dispatch_lib.ts::run`, and that file's Codex mirror — for the reason
+ * `isSignallableGroup` is exported: a safety rule kept in three copies drifts,
+ * and this one did. STARK-6245 taught the `spawnBounded` copy to release the
+ * group on ESRCH while both `run()` copies kept a bare latch, so a Ctrl-C could
+ * still reach a recycled id through `forward` on the path that spawns agents.
+ *
+ * A group id is ours only while the group has members: once it empties the
+ * kernel is free to reuse it, and `process.kill(-pgid)` signals whoever holds it
+ * NOW. A call can outlive its own child — `close` needs the stdio pipes closed,
+ * so a descendant that inherited them AND left the group (`setsid`) keeps the
+ * call open with the group already empty. So ESRCH latches: nothing follows the
+ * kernel saying the group is gone.
+ *
+ * The forwarding set has to learn it too, or the latch protects only half the
+ * file: `forward` signals every id in `liveGroups` through the module-level
+ * `killGroup`, which knows nothing about a per-call latch and does not settle
+ * with the call. Untracking is also the honest state — with the group gone there
+ * is nothing left to forward to, so Node's default exit is the right disposition
+ * again.
+ *
+ * Signal `0` delivers nothing, which makes it the probe: call it from the
+ * leader's `exit`, the first moment the group can have emptied with the call
+ * still open and the last at which the id cannot yet have been reused.
+ */
+export function makeGroupKiller(pgid: number | undefined): (signal: NodeJS.Signals | 0) => void {
+  let groupGone = false;
+  return (signal) => {
+    if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
+    try {
+      process.kill(-pgid, signal);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ESRCH") return;
+      groupGone = true;
+      releaseGroup(pgid);
+    }
+  };
+}
+
 export async function spawnBounded(
   cmd: string,
   args: string[],
@@ -164,37 +205,9 @@ export async function spawnBounded(
     });
     const pgid = child.pid;
     if (pgid !== undefined) trackGroup(pgid);
-    /**
-     * A group id is ours only while the group has members: once it empties the
-     * kernel is free to reuse it, and `process.kill(-pgid)` signals whoever
-     * holds it NOW. That matters here precisely because this call can outlive
-     * its own child — `close` needs the stdio pipes closed, so a descendant
-     * that inherited them AND left the group (`setsid`) keeps the call open
-     * with the group already empty, and `terminate`'s SIGKILL then lands at the
-     * timeout on a stranger. So ESRCH latches: nothing follows the kernel
-     * saying the group is gone. Same guard `agent_dispatch_lib.ts::run` carries
-     * (STARK-6147); it belongs in the shared primitive too.
-     */
-    let groupGone = false;
-    const killOwnGroup = (signal: NodeJS.Signals | 0): void => {
-      if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
-      try {
-        process.kill(-pgid, signal);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ESRCH") return;
-        groupGone = true;
-        // The forwarding set has to learn it too, or the latch protects only
-        // half the file: `forward` signals every id in `liveGroups` through the
-        // module-level `killGroup`, which knows nothing about this latch and
-        // does not settle with the call. A Ctrl-C arriving after the group
-        // emptied — the window this whole guard exists for, a `setsid`
-        // descendant holding the pipes open — would then deliver the recycled-id
-        // signal by the other door. Untracking is also the honest state: with
-        // the group gone there is nothing left to forward to, so Node's default
-        // exit is the right disposition again.
-        releaseGroup(pgid);
-      }
-    };
+    // Without the latch `terminate`'s SIGKILL can land at the timeout on a
+    // stranger holding a recycled id — see `makeGroupKiller`.
+    const killOwnGroup = makeGroupKiller(pgid);
     // The leader's exit is the first moment the group can have emptied with
     // this call still open. Probe with signal 0 — which delivers nothing —
     // while the id cannot yet have been reused.

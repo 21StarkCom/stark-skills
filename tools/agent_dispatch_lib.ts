@@ -30,7 +30,7 @@ import * as path from "node:path";
 
 import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import { assetConfigPath } from "./asset_root_lib.ts";
-import { isSignallableGroup, releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
+import { makeGroupKiller, releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 import { geminiAuthSettings, resolveGeminiAuthMode } from "./gemini_auth_lib.ts";
 import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
@@ -228,13 +228,9 @@ export async function run(
     // `child.kill()` had that guard for free — it is a no-op once the child has
     // exited — while `process.kill(-pgid)` signals whoever holds the id NOW. So
     // ESRCH, the kernel saying the group is gone, latches: nothing follows it.
-    let groupGone = false;
-    const killTree = (signal: NodeJS.Signals | 0): void => {
-      if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
-      try { process.kill(-pgid, signal); } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ESRCH") groupGone = true;
-      }
-    };
+    // The latch is the shared one (STARK-6377) — it also drops the group from
+    // the forwarding set, which this file's private copy never did.
+    const killTree = makeGroupKiller(pgid);
     const ladder: NodeJS.Timeout[] = [];
 
     let settled = false;
