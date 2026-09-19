@@ -587,6 +587,49 @@ for (const dir of SHARED_DOC_DIRS) {
   });
 }
 
+// The worker family's launch lines (STARK-7122, STARK-7540). Two rules a tidy-up
+// can drop without anything else going red:
+//
+// - A Codex override passes `--agent` on EVERY `hermod ticket` line. Hermod's
+//   own default is claude, so a Codex launcher that leaves it off launches the
+//   other runtime — with a `$skill` first message Claude does not read as a
+//   skill invocation, behind a normal exit 0.
+// - Gru is never launched on the id of a ticket it will work. The id names
+//   Gru's own worktree, and Gru's step 2 reads a live peer whose cwd ends in a
+//   ticket id as the Minion that owns it — so it would read ITSELF as that
+//   ticket's Minion and never launch it.
+const hermodTicketLines = (file: string): string[] =>
+  fencedLines(fs.readFileSync(file, "utf8")).filter((line) => /^\s*hermod ticket\b/.test(line));
+
+for (const name of WORKER_SKILLS) {
+  test(`skill smoke: codex ${name} — every fenced hermod ticket launch passes --agent`, () => {
+    const lines = hermodTicketLines(path.join(CODEX_SKILL_ROOT, name, "SKILL.md"));
+    assert.ok(lines.length > 0, "no fenced `hermod ticket` launch line found");
+    for (const line of lines) {
+      assert.match(line, / --agent /, `launch line without --agent: ${line.trim()}`);
+      assert.doesNotMatch(line, /\[--agent\b/, `--agent is optional on: ${line.trim()}`);
+    }
+  });
+}
+
+for (const file of [
+  path.join(SKILLS_ROOT, "gru", "SKILL.md"),
+  path.join(CODEX_SKILL_ROOT, "gru", "SKILL.md"),
+]) {
+  test(`skill smoke: ${path.relative(REPO_ROOT, file)} — Gru is never launched on a ticket it works`, () => {
+    const lines = hermodTicketLines(file);
+    assert.equal(lines.length, 2, "expected the --gru form and the --prompt-file form");
+    for (const line of lines) {
+      assert.match(
+        line,
+        /^\s*hermod ticket (STARK-<epic>|<STARK-epic, or GRU-n>) /,
+        `Gru launched on something other than the epic or GRU-n: ${line.trim()}`,
+      );
+    }
+    assert.match(fs.readFileSync(file, "utf8"), /Never the id of a ticket Gru will work/);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // 5. Every distinct in-repo `tools/*.ts` CLI mentioned by any skill exits
 //    cleanly on --help. Run in parallel (~13 spawns total, ~600ms each
