@@ -13,7 +13,8 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+
+import { isMainModule } from "./main_module_lib.ts";
 
 export type CategoryName = "added" | "fixed" | "changed" | "removed";
 
@@ -365,10 +366,6 @@ function main(): void {
   }
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined &&
-  import.meta.url ===
-    pathToFileURL(fs.realpathSync(path.resolve(process.argv[1]))).href;
-if (invokedDirectly) {
+if (isMainModule(import.meta.url)) {
   main();
 }

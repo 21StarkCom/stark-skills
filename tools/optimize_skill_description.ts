@@ -34,6 +34,7 @@ import path from "node:path";
 
 import { AGENT_ENV_ALLOWLIST } from "./agent_env_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -437,19 +438,7 @@ function main(argv: string[]): number {
 // Run only when invoked directly (not when imported by tests). Resolve real
 // paths so a symlinked install (e.g. `~/.claude/code-review/tools/...`)
 // still triggers main — `tools/stark_session.ts` had this exact bug.
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    const realArgv = fs.realpathSync(argv1);
-    const realModule = fs.realpathSync(new URL(import.meta.url).pathname);
-    return realArgv === realModule;
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   try {
     process.exit(main(process.argv.slice(2)));
   } catch (err) {

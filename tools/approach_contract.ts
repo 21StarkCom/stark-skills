@@ -7,7 +7,6 @@
  *   node approach_contract.ts --plan-file PATH [--force-confirm] [--json]
  */
 
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as readline from "node:readline/promises";
@@ -18,6 +17,7 @@ import {
   formatContract,
   logContract,
 } from "./approach_contract_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Approach contract confirmation gate.
 
@@ -132,17 +132,7 @@ async function main(argv: string[]): Promise<number> {
   return 0;
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    return fs.realpathSync(argv1) === fs.realpathSync(new URL(import.meta.url).pathname);
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err) => {

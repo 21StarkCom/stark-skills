@@ -9,7 +9,6 @@
  *   node validation_gate.ts [--json] [--repo-root PATH] [--timeout SECONDS]
  */
 
-import fs from "node:fs";
 import path from "node:path";
 
 import {
@@ -17,6 +16,7 @@ import {
   getConfiguredTimeout,
   runValidationGate,
 } from "./validation_gate_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Validation gate: lint/typecheck/test runner.
 
@@ -71,16 +71,6 @@ function main(argv: string[]): number {
   return 0;
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    return fs.realpathSync(argv1) === fs.realpathSync(new URL(import.meta.url).pathname);
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

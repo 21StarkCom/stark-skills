@@ -15,10 +15,9 @@
  * `config.self_heal.*` from Codex's state overlay on the packaged config.
  */
 
-import fs from "node:fs";
-
 import { loadConfig } from "./healer_canary_lib.ts";
 import { runHeal, type HealMode } from "./self_healer_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Tiny argv parser
@@ -146,19 +145,7 @@ function main(argv: string[]): number {
   return exit;
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    const realArgv = fs.realpathSync(argv1);
-    const realModule = fs.realpathSync(new URL(import.meta.url).pathname);
-    return realArgv === realModule;
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   try {
     process.exit(main(process.argv.slice(2)));
   } catch (err) {

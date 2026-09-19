@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 import {
   collectSharedRefs,
@@ -30,6 +29,7 @@ import {
   type RewriteProposal,
 } from "./skill_validate.ts";
 import { getModelLimit } from "./stark_config_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 type Mode = "api" | "plan";
 type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
@@ -1572,8 +1572,7 @@ function writeUtf8(filePath: string, content: string): void {
 
 // Run the CLI only when this file is the entry point. Tests import planning
 // and commit helpers without triggering main() and its process.argv parsing.
-const entryUrl = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
-if (entryUrl === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   try {
     await main();
   } catch (error) {
