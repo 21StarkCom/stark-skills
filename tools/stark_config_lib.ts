@@ -233,18 +233,23 @@ export const DEFAULT_IAC_REVIEW = {
  * `enabled: false` turns the split off globally, exactly like
  * `--no-generated-split` per run.
  */
-export interface GeneratedPathsRepoEntry {
+// Declared as `type`, not `interface`, on purpose: an interface has no implicit
+// index signature, so it does not satisfy `getSection`'s
+// `T extends Record<string, unknown>` constraint and the accessor below had to
+// launder it through a double `as unknown as` cast — which silences exactly the
+// mismatch the required `typecheck` gate exists to catch.
+export type GeneratedPathsRepoEntry = {
   /** Replace the resolved list for this repo. */
   paths?: string[];
   /** Extend the resolved list for this repo. */
   add?: string[];
-}
+};
 
-export interface GeneratedPathsConfig {
+export type GeneratedPathsConfig = {
   enabled: boolean;
   default: string[];
   repos: Record<string, GeneratedPathsRepoEntry>;
-}
+};
 
 export const DEFAULT_GENERATED_PATHS_CONFIG: GeneratedPathsConfig = {
   enabled: true,
@@ -404,10 +409,7 @@ export function getIacReviewConfig(): typeof DEFAULT_IAC_REVIEW {
   return getSection(DEFAULT_IAC_REVIEW, "iac_review");
 }
 export function getGeneratedPathsConfig(): GeneratedPathsConfig {
-  return getSection(
-    DEFAULT_GENERATED_PATHS_CONFIG as unknown as Record<string, unknown>,
-    "generated_paths",
-  ) as unknown as GeneratedPathsConfig;
+  return getSection(DEFAULT_GENERATED_PATHS_CONFIG, "generated_paths");
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
+import * as nodeFs from "node:fs";
+import * as nodePathMod from "node:path";
 
 import {
   DEFAULT_GENERATED_PATHS,
@@ -905,6 +907,17 @@ describe("parseGeneratedGlobs", () => {
     assert.deepEqual(parseGeneratedGlobs("gen/** linguist-generated"), ["gen/**"]);
   });
 
+  test("a double-quoted pattern with a space survives intact", () => {
+    // Splitting the whole line on whitespace tore `"my dir/*"` into the glob
+    // `"my` — a garbage pattern that matches nothing and joins the list
+    // silently, which is a fail-narrow wearing a parse bug's hat.
+    assert.deepEqual(
+      parseGeneratedGlobs('"my dir/*" linguist-generated=true'),
+      ["my dir/*"],
+    );
+    assert.deepEqual(parseGeneratedGlobs('"my dir/*" text eol=lf'), []);
+  });
+
   test("unset, negated and false rows are skipped, never inverted", () => {
     const text = [
       "a/** -linguist-generated",
@@ -1011,6 +1024,12 @@ describe("resolveGeneratedPaths against a real repo", () => {
     ]);
     assert.deepEqual(r.added, ["catalog/**"]);
     assert.deepEqual(r.warnings, []);
+    // bifrost's declared `index.json` is slash-less: git would match it by
+    // basename at any depth, this tool anchors it at the repo root on purpose
+    // (STARK-5637). Disclosed in the summary, never as a stderr warning — a
+    // warning here would fire on EVERY bifrost run and advise `**/index.json`,
+    // which is precisely what STARK-5637 refused.
+    assert.deepEqual(r.rootAnchored, ["index.json"]);
   });
 
   test("a repo declaring a glob the built-in default lacks honors it with no flag", () => {
@@ -1037,12 +1056,79 @@ describe("resolveGeneratedPaths against a real repo", () => {
 });
 
 describe("resolveGeneratedPaths fails open, never narrow", () => {
-  test("an absent or unfetchable .gitattributes falls back and warns", () => {
+  test("an absent .gitattributes falls back and warns", () => {
     const r = resolveGeneratedPaths({ repo: "o/other", gitattributes: null, config: BARE_CONFIG });
     assert.equal(r.source, "default");
     assert.deepEqual(r.patterns, BARE_CONFIG.default);
     assert.equal(r.warnings.length, 1);
-    assert.match(r.warnings[0], /absent or could not be read/);
+    assert.match(r.warnings[0], /\.gitattributes is absent/);
+  });
+
+  test("an UNREADABLE .gitattributes says so, and says the fallback may be wrong", () => {
+    // A 404 and a 403/rate-limit are both "no text", but only the second means
+    // the repo may well declare paths this run never saw — so the bifrost-shaped
+    // fallback may be the wrong list for it, which is the exact defect
+    // STARK-6095 exists to kill. Degrading both the same way silently hides it.
+    const r = resolveGeneratedPaths({
+      repo: "o/other",
+      gitattributes: null,
+      gitattributesFailure: "gh api ... failed (exit 1): HTTP 403: API rate limit exceeded",
+      config: BARE_CONFIG,
+    });
+    assert.equal(r.source, "default");
+    assert.deepEqual(r.patterns, BARE_CONFIG.default);
+    assert.equal(r.warnings.length, 1);
+    assert.match(r.warnings[0], /could not be read/);
+    assert.match(r.warnings[0], /rate limit exceeded/);
+    assert.match(r.warnings[0], /may not describe this repo/);
+  });
+
+  test("a non-array glob list in config is refused, never spread into char globs", () => {
+    // `"default": "vendor/**"` passes a `.length` truthiness test and spreads
+    // into ["v","e","n",...] — one-character globs that match nothing. That is a
+    // silent disable of the split wearing a config typo's hat, which is the one
+    // outcome this whole path exists to prevent.
+    const r = resolveGeneratedPaths({
+      repo: "o/r",
+      gitattributes: null,
+      config: {
+        enabled: true,
+        default: "vendor/**" as unknown as string[],
+        repos: { "o/r": { paths: "catalog/**" as unknown as string[] } },
+      },
+    });
+    assert.ok(!r.patterns.includes("v"), "a string default must not become char globs");
+    assert.deepEqual(r.patterns, [...DEFAULT_GENERATED_PATHS]);
+    assert.ok(r.warnings.some((w) => /generated_paths\.default must be an array/.test(w)));
+    assert.ok(r.warnings.some((w) => /\.paths must be an array/.test(w)));
+  });
+
+  test("an explicit --generated-paths outranks a global enabled:false", () => {
+    // enabled:false is a GLOBAL default; the CLI is documented as the highest
+    // layer. Letting config silently win hands the operator an empty list —
+    // every finding back on a gating thread — after they named globs by hand.
+    const r = resolveGeneratedPaths({
+      repo: "o/r",
+      cliPaths: ["vendor/**"],
+      config: { enabled: false, default: ["dist/**"], repos: {} },
+    });
+    assert.equal(r.source, "cli");
+    assert.deepEqual(r.patterns, ["vendor/**"]);
+    assert.ok(r.warnings.some((w) => /outranks it/.test(w)));
+    // Without a flag, enabled:false still disables.
+    const off = resolveGeneratedPaths({
+      repo: "o/r",
+      config: { enabled: false, default: ["dist/**"], repos: {} },
+    });
+    assert.equal(off.source, "disabled");
+    assert.deepEqual(off.patterns, []);
+  });
+
+  test("--no-generated-split swallowing --add-generated-paths is never silent", () => {
+    const r = resolveGeneratedPaths({ repo: "o/r", cliPaths: [], cliAdd: ["gen/**"] });
+    assert.equal(r.source, "disabled");
+    assert.deepEqual(r.patterns, []);
+    assert.ok(r.warnings.some((w) => /--add-generated-paths \(gen\/\*\*\) was ignored/.test(w)));
   });
 
   test("a .gitattributes with no generated rows falls back and warns", () => {
@@ -1192,5 +1278,38 @@ describe("parseArgs --add-generated-paths", () => {
       () => parseArgs([...base, "--add-generated-paths", "--dry-run"]),
       /requires a value, got the flag --dry-run/,
     );
+  });
+});
+
+// --- shipped-config drift ----------------------------------------------------
+// The default glob list used to exist three times: as a frozen constant in
+// `findings_review_post.ts`, as `DEFAULT_GENERATED_PATHS_CONFIG.default`, and in
+// `global/config.json`. The first two are now one (the constant is derived), but
+// `global/config.json` is JSON and cannot import — so it is pinned instead. It
+// is the list a FRESH plugin install reads, and a glob added to the TS default
+// but not to it means that install silently re-opens a gating thread on that
+// path, which is the one failure this whole split exists to prevent. Same
+// pattern as `subagent_env_allowlist.test.ts`.
+describe("global/config.json generated_paths stays in step with the TS default", () => {
+  const shipped = (): { enabled?: unknown; default?: unknown; repos?: unknown } => {
+    const raw = nodeFs.readFileSync(
+      nodePathMod.join(import.meta.dirname, "..", "global", "config.json"),
+      "utf8",
+    );
+    const cfg = JSON.parse(raw) as { generated_paths?: Record<string, unknown> };
+    assert.ok(cfg.generated_paths, "global/config.json has no generated_paths section");
+    return cfg.generated_paths as { enabled?: unknown; default?: unknown; repos?: unknown };
+  };
+
+  test("the shipped default list matches the TS default exactly", () => {
+    assert.deepEqual(shipped().default, [...DEFAULT_GENERATED_PATHS_CONFIG.default]);
+  });
+
+  test("the shipped repo entries match the TS repo entries exactly", () => {
+    assert.deepEqual(shipped().repos, DEFAULT_GENERATED_PATHS_CONFIG.repos);
+  });
+
+  test("the shipped section is enabled, like the TS default", () => {
+    assert.equal(shipped().enabled, DEFAULT_GENERATED_PATHS_CONFIG.enabled);
   });
 });
