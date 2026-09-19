@@ -36,7 +36,8 @@ sequences you, and nobody checks your work but you.
   tab and stop. See [New tab](#new-tab). Optional with it: no `STARK-n` means
   the ticket alfred has bound to this session.
 - `--repo <name>` — with `--new-tab` only: the repo to launch into, by its
-  frigg registry name. Default: the repo you are standing in.
+  frigg registry name. Default: the repo the ticket names, else the repo you
+  are standing in.
 - `--agent claude|codex` — with `--new-tab` only: the agent that runs her.
   Default codex.
 
@@ -46,37 +47,46 @@ sequences you, and nobody checks your work but you.
 Agnes.** Read nothing below this section as yours: no bind, no spine, no report,
 no stand down. Launch her and stop.
 
-1. Pick the repo. With `--repo <name>`, pass it through. Without it, **read the
-   ticket first** (`alfred task show STARK-n`): a ticket that belongs to another
-   repo than the one you are standing in is launched with `--repo <that repo>`,
-   never into this one — hermod would exit 0 and Agnes would work it, unattended,
-   in the wrong codebase. Only when the ticket is this repo's, find the
-   **main checkout** of the repo you are in — the first `worktree` line of
+1. Name the ticket, then pick the repo. With no `STARK-n`, read the one alfred
+   has bound to this session — the `ticket` field of `alfred repo info --json`,
+   the same read hermod makes when the id is omitted — and stop and ask when it
+   has none. Pass the id on the launch line either way; you need it for the
+   next check, and an explicit id launches the same on every hermod. With
+   `--repo <name>`, pass it through. Without it, **read the ticket first**
+   (`alfred task show STARK-n`): a ticket that belongs to another repo than the
+   one you are standing in is launched with `--repo <that repo>`, never into
+   this one — hermod would exit 0 and Agnes would work it, unattended, in the
+   wrong codebase. A ticket that names no repo is this one's, the default the
+   Arguments state. Only when the ticket is this repo's, find the **main
+   checkout** of the repo you are in — the first `worktree` line of
    `git worktree list --porcelain`, not `git rev-parse --show-toplevel`, which
    names your own worktree when you are inside one — and pass it as `--cwd`.
-   Run that as its own command and paste the path in literally; a `$(...)` in
-   the launch line can be refused by Claude Code's worktree guard
-   ([measured](../../standards/stand-down.md#four-rules-about-when) on the quoted
-   form only, which is too fine a line to rest a launch on).
+   Run that as its own command and paste the path in literally: on Claude, a
+   worktree session's guard refuses a `hermod` line carrying a variable
+   ([measured](../../standards/worker-spine.md#title-your-tab)), and a `$(...)`
+   was [measured](../../standards/stand-down.md#four-rules-about-when) refused on
+   its quoted form only — too fine a line to rest a launch on, and the literal
+   works on either runtime.
 2. Launch, once:
 
    ```
-   hermod ticket [STARK-n] --agnes (--repo <name> | --cwd <main checkout>) --agent <agent> --json
+   hermod ticket STARK-n --agnes (--repo <name> | --cwd <main checkout>) --agent <agent> --json
    ```
 
    **Always pass `--agent`** — hermod's own default is claude, so leaving it off
    would not launch your runtime. `--repo` and `--cwd` are mutually exclusive.
    Leave the tab focused; the operator asked to see it.
 
-   `--agnes`, and reading the bound ticket when you pass no `STARK-n`, are both
-   newer than hermod v0.19.0. Check `hermod ticket --help` first: if it lists no
-   `--agnes`, the ticket id is required — with none given, stop and ask for it —
-   and the launch is the same line with `--prompt-file <brief>` in place of
-   `--agnes`, where `<brief>` is a file holding the one hand-off line from step
-   3. That is the same launch on an older hermod, not a workaround.
+   `--agnes` is newer than hermod v0.19.0, and so is hermod reading the bound
+   ticket itself, which is why step 1 passes the id. Check
+   `hermod ticket --help` first: if it lists no `--agnes`, the launch is the
+   same line with `--prompt-file <brief>` in place of `--agnes`, where `<brief>`
+   is a file holding the one hand-off line from step 3, written with the sigil
+   of the `--agent` you pass, not of your own runtime. That is the same launch
+   on an older hermod, not a workaround.
 3. Print the ack's `surface`, `workspace`, `name` and `prompt`, and stop. The
-   `prompt` must read `$agnes STARK-n` (`/agnes STARK-n` on Claude) — that line is
-   the whole hand-off.
+   `prompt` must read `$agnes STARK-n` (`/agnes STARK-n` for `--agent claude`) —
+   that line is the whole hand-off.
 
 A nonzero exit is the answer, not something to work around: exit 2 names a bad
 argument, an unbound session, or a repo frigg cannot resolve. A failed start
