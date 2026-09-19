@@ -18,6 +18,25 @@ on Codex, so a brief or a launch naming one names the other.
 names, and the repo's agent instructions file. Read a linked dependency ticket
 too — what it is landing is context you need before you touch the same files.
 
+### Title your tab
+
+Only if you are in cmux. The `cmux-autoname` SessionStart hook named your tab
+after its worktree folder — the bare ticket id — which does not say what is
+running in it. `echo "$CMUX_SURFACE_ID"` as its own command; empty means you
+are not in cmux, so skip this. Otherwise paste the UUID in literally — on
+Claude, a worktree session's guard refuses a `hermod` line carrying a variable
+— and quote the title, since its parentheses are shell syntax:
+
+```
+hermod rename <surface UUID> "<ROLE> (<n>)"
+```
+
+`<ROLE>` is your skill's name in capitals and `<n>` is the ticket number without
+its `STARK-` prefix: `MINION (1234)`, `AGNES (1234)`. Pass the bare UUID — cmux
+refuses `surface:<UUID>`. Your own tab only, never another's. The title is
+cosmetic: a rename that fails costs one line saying so and never holds the
+ticket.
+
 ## 2. Implement
 
 In the worktree Hermod placed you in. Do not `cd` out of it.

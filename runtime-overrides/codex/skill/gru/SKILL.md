@@ -31,6 +31,12 @@ tells you to stop; there is no other verb.
 
 ## Protocol
 
+0. **Title your tab**, if you are in cmux — the mechanics are
+   [the worker spine's](../../standards/worker-spine.md#title-your-tab), and
+   the rule is the same: own tab only, cosmetic, never a blocker. Your title is
+   `GRU (<n>)`, where `<n>` is the epic's number without its `STARK-` prefix,
+   or the first ticket's when you were given `--tickets`: `GRU (1234)`. A rerun
+   `start` sets it again; that is harmless.
 1. **Expand.** Resolve the epic to its children with alfred's `list_children`
    tool (`alfred task show` prints one ticket, never its children). Read every
    ticket and its comments, and note each ticket's repo. A ticket that names

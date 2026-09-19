@@ -91,8 +91,9 @@ Run [the worker spine](../../standards/worker-spine.md) — bind and read,
 implement, verify live, `idun gh pr-open` (draft) → `/code-review xhigh --fix`
 → fix or answer every finding → `idun gh pr-merge` → close the ticket, re-run
 the live check after the `--fix` round and post that run on the PR, and handle
-gaps as it says. Three things are yours on top of it, and each of them exists
-because there is no leader:
+gaps as it says. Your tab title, which its step 1 sets, is `AGNES (<n>)`. Three
+things are yours on top of it, and each of them exists because there is no
+leader:
 
 - **Nobody sequences your merge.** Gru holds one `idun gh pr-merge` per repo at
   a time; two Agneses in one repo have no such referee. So a refusal is yours

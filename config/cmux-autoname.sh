@@ -29,13 +29,32 @@ root="$(git -C "$proj" rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
 upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
 
+# --- lifecycle source: Claude's SessionStart payload carries
+# {"source":"startup|resume|clear|compact"} on stdin. compact and clear re-fire
+# this hook INSIDE a live session whose tab a skill may have retitled (the
+# worker spine's "Title your tab": MINION (n) / AGNES (n) / GRU (n)); renaming
+# there would silently revert that title, so those two keep the tab as it is.
+# No payload (Codex, a hand run), startup and resume name the tab as before.
+source=""
+if [ ! -t 0 ]; then
+  payload="$(cat 2>/dev/null || true)"
+  if [[ "$payload" =~ \"source\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+    source="${BASH_REMATCH[1]}"
+  fi
+fi
+
 # --- tab (every session): worktree folder name, ROOT for the main worktree ---
-gitdir="$(git -C "$proj" rev-parse --git-dir 2>/dev/null || true)"
-case "$gitdir" in
-  */worktrees/*) tab="$(basename "$root")" ;;
-  *)             tab="ROOT" ;;
+case "$source" in
+  compact|clear) ;;
+  *)
+    gitdir="$(git -C "$proj" rev-parse --git-dir 2>/dev/null || true)"
+    case "$gitdir" in
+      */worktrees/*) tab="$(basename "$root")" ;;
+      *)             tab="ROOT" ;;
+    esac
+    "$cmux_bin" rename-tab --surface "${CMUX_SURFACE_ID:-}" "$(upper "$tab")" >/dev/null 2>&1 || true
+    ;;
 esac
-"$cmux_bin" rename-tab --surface "${CMUX_SURFACE_ID:-}" "$(upper "$tab")" >/dev/null 2>&1 || true
 
 # --- workspace (first session only): name after the repo + color ---
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/cmux-autoname"
