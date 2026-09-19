@@ -29,6 +29,7 @@ import * as path from "node:path";
 
 import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import { assetConfigPath, stateRoot } from "./asset_root_lib.ts";
+import { isSignallableGroup, releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 import { geminiAuthSettings, resolveGeminiAuthMode } from "./gemini_auth_lib.ts";
 import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
@@ -169,6 +170,14 @@ interface RunOptions {
 
 const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024; // 32 MiB
 
+// STARK-6147: the child runs `detached` — leader of its OWN process group — and
+// every kill goes to the group. `child.kill()` reaches the direct child only, so
+// whatever a headless claude/codex/gemini had spawned was reparented to init and
+// ran on (and billed) past the bound. `detached` also takes the child out of the
+// terminal's foreground group, so Ctrl-C is paid back through bounded_spawn_lib's
+// forwarding half (`trackGroup`/`releaseGroup`); the SIGTERM → SIGKILL ladder
+// stays this function's own.
+
 export async function run(
   cmd: string,
   args: string[],
@@ -187,6 +196,7 @@ export async function run(
         cwd: opts.cwd,
         env: opts.env,
         stdio: [opts.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
+        detached: true,
       });
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
@@ -201,6 +211,22 @@ export async function run(
       return;
     }
 
+    const pgid = child.pid;
+    if (pgid !== undefined) trackGroup(pgid);
+    // The group id is ours only while the group has members: once it empties
+    // the id is free for reuse, and a signal sent there lands on a stranger.
+    // `child.kill()` had that guard for free — it is a no-op once the child has
+    // exited — while `process.kill(-pgid)` signals whoever holds the id NOW. So
+    // ESRCH, the kernel saying the group is gone, latches: nothing follows it.
+    let groupGone = false;
+    const killTree = (signal: NodeJS.Signals | 0): void => {
+      if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
+      try { process.kill(-pgid, signal); } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ESRCH") groupGone = true;
+      }
+    };
+    const ladder: NodeJS.Timeout[] = [];
+
     let settled = false;
     let stdoutEnded = false;
     let stderrEnded = false;
@@ -212,6 +238,14 @@ export async function run(
       if (closedResult === null) return;
       if (!stdoutEnded || !stderrEnded || !processClosed) return;
       settled = true;
+      // The ladder dies with the call: a later rung would signal a group id
+      // that is free for reuse once the group is empty. On a timeout the group
+      // gets its SIGKILL now instead — the leader can exit on SIGTERM and close
+      // our pipes while a descendant that ignores SIGTERM lives on. Never after
+      // a normal close: nothing was killed, so nothing there is ours to signal.
+      for (const t of ladder) clearTimeout(t);
+      if (timedOutFlag) killTree("SIGKILL");
+      if (pgid !== undefined) releaseGroup(pgid);
       resolve(closedResult);
     };
 
@@ -222,9 +256,9 @@ export async function run(
       // stdio-end alone is unsafe — a child can close its FDs while
       // the process keeps running.
       timedOutFlag = true;
-      try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      setTimeout(() => {
-        try { child.kill("SIGKILL"); } catch { /* ignore */ }
+      killTree("SIGTERM");
+      ladder.push(setTimeout(() => {
+        killTree("SIGKILL");
         // Last resort: "close" needs BOTH the process to exit and every stdio
         // pipe to end, so a descendant that inherited stdout and outlived the
         // kill holds this promise open forever. After SIGKILL + a grace, tear
@@ -232,7 +266,7 @@ export async function run(
         // never "end", so the tryFinish gate must be released by hand or this
         // does nothing. Same hang class fixed in jury_dispatch's realRunner;
         // this copy had it too.
-        setTimeout(() => {
+        ladder.push(setTimeout(() => {
           if (settled) return;
           child.stdout?.destroy();
           child.stderr?.destroy();
@@ -248,8 +282,8 @@ export async function run(
             notFound: false,
           };
           tryFinish();
-        }, 2_000);
-      }, 5_000);
+        }, 2_000));
+      }, 5_000));
     }, opts.timeoutSec * 1000);
 
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -287,6 +321,15 @@ export async function run(
       };
       tryFinish();
     });
+
+    // The leader's exit is the first moment the group can have emptied with
+    // this call still open: a descendant that LEFT the group holds our pipes,
+    // "close" never comes, and the timeout — minutes away for a real agent —
+    // would signal an id freed long before (measured: SIGTERM + 2x SIGKILL).
+    // Probe now, while the id cannot have been reused; signal 0 delivers
+    // nothing. Not caught: a group an in-group descendant keeps alive past
+    // this probe and that empties later — there the latch stops at one signal.
+    child.once("exit", () => killTree(0));
 
     child.on("close", (code, signal) => {
       clearTimeout(timer);
