@@ -158,6 +158,52 @@ function reapPids(file: string): void {
   }
 }
 
+/** One `process.kill(-pgid, …)`: `errno` is null when the kernel accepted it. */
+type GroupSignal = { signal: string | number | undefined; errno: string | null };
+
+/**
+ * Every GROUP signal (negative pid) sent while `fn` runs, in order. A composed
+ * tree reaches `process.kill` through the same global, and the tests in this
+ * file run one at a time, so everything recorded belongs to `fn`'s `run()`. The
+ * helpers above signal positive pids only and are never recorded.
+ */
+async function recordGroupSignals<T>(fn: () => Promise<T>): Promise<{ res: T; sent: GroupSignal[] }> {
+  const sent: GroupSignal[] = [];
+  const real = process.kill;
+  process.kill = ((pid: number, signal?: string | number): true => {
+    let errno: string | null = null;
+    try {
+      return real.call(process, pid, signal);
+    } catch (err) {
+      errno = (err as NodeJS.ErrnoException).code ?? "unknown";
+      throw err;
+    } finally {
+      if (pid < 0) sent.push({ signal, errno });
+    }
+  }) as typeof process.kill;
+  try {
+    return { res: await fn(), sent };
+  } finally {
+    process.kill = real;
+  }
+}
+
+/** Signals that DELIVER something — a signal-0 probe only asks if the group exists. */
+function delivered(sent: GroupSignal[]): GroupSignal[] {
+  return sent.filter((s) => s.signal !== 0);
+}
+
+/** ESRCH means the group is gone and its id free for reuse: nothing may follow. */
+function assertNothingAfterEsrch(sent: GroupSignal[]): void {
+  const gone = sent.findIndex((s) => s.errno === "ESRCH");
+  if (gone === -1) return;
+  assert.deepEqual(sent.slice(gone + 1), [], `signalled a group id after the kernel reported it gone: ${JSON.stringify(sent)}`);
+}
+
+function activeTimeouts(): number {
+  return process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+}
+
 for (const runtime of ["claude", "codex"] as const) {
   describe(`run() process-tree bound [${runtime}]`, () => {
     let tree: { root: string; url: string };
@@ -166,7 +212,9 @@ for (const runtime of ["claude", "codex"] as const) {
       tree = composeTree(runtime);
       runFn = ((await import(tree.url)) as { run: RunFn }).run;
     });
-    after(() => fs.rmSync(tree.root, { recursive: true, force: true }));
+    // Guarded: a `before` that threw leaves `tree` unset, and a TypeError here
+    // would be reported in place of the failure that actually happened.
+    after(() => { if (tree) fs.rmSync(tree.root, { recursive: true, force: true }); });
 
     // Three descendants, each a different way to outlive a direct-child kill:
     // a backgrounded sleeper holding stdout, a foreground grandchild, and one
@@ -206,12 +254,64 @@ for (const runtime of ["claude", "codex"] as const) {
         `echo up; sleep 30`;
       try {
         const started = Date.now();
-        const res = await runFn("sh", ["-c", sh], { timeoutSec: 1 });
+        const { res, sent } = await recordGroupSignals(() => runFn("sh", ["-c", sh], { timeoutSec: 1 }));
         const elapsed = Date.now() - started;
         assert.equal(res.timedOut, true);
         assert.match(res.stdout, /up/);
         assert.ok(elapsed < 25_000, `run() took ${elapsed}ms — the last-resort settle did not fire`);
         assert.ok(elapsed > 6_000, `settled in ${elapsed}ms — the escaped descendant never held stdout, so the last resort went untested`);
+        // The group emptied when SIGTERM landed, ~7 s before this call settled.
+        // Without the latch the 5 s rung AND the settle-time SIGKILL both went
+        // to that freed id — the second one after an ESRCH had already said so.
+        assert.ok(sent.some((s) => s.signal === "SIGTERM" && s.errno === null), `the timeout never reached the group: ${JSON.stringify(sent)}`);
+        assertNothingAfterEsrch(sent);
+      } finally {
+        reapPids(pidFile);
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // `child.kill()` was a no-op once the child had exited; `process.kill(-pgid)`
+    // signals whoever holds the id NOW. A leader that exits while an ESCAPED
+    // descendant holds stdout leaves an empty group and a call still open, and
+    // the timeout used to send SIGTERM + 2x SIGKILL at that freed id — minutes
+    // stale for a real agent. The leader waits for the pid file, which perl
+    // writes AFTER `setsid`, so the group is provably empty when it exits. The
+    // descendant lets go on its own, so this settles on "close", not the ladder.
+    test("a group that emptied before the timeout is never signalled", { timeout: 30_000 }, async () => {
+      const dir = tmpDir("early-exit");
+      const pidFile = path.join(dir, "pid");
+      const sh = `perl -MPOSIX -e 'POSIX::setsid(); open(F, ">", $ARGV[0]); print F $$; close F; sleep 2' '${pidFile}' & ` +
+        `while [ ! -s '${pidFile}' ]; do sleep 0.05; done; echo up`;
+      try {
+        const { res, sent } = await recordGroupSignals(() => runFn("sh", ["-c", sh], { timeoutSec: 1 }));
+        assert.equal(res.timedOut, true, "the escaped descendant let go before the timeout — nothing was tested");
+        assert.equal(res.code, 0);
+        assert.match(res.stdout, /up/);
+        assert.ok(sent.some((s) => s.signal === 0 && s.errno === "ESRCH"), `the leader's exit never found the group empty: ${JSON.stringify(sent)}`);
+        assert.deepEqual(delivered(sent), [], `signalled a group that had already emptied: ${JSON.stringify(sent)}`);
+      } finally {
+        reapPids(pidFile);
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // The mirror image: a group that is NOT empty at a normal close is not ours
+    // to signal either — nothing was killed, so nothing there was condemned.
+    // The leftover keeps the group alive past the exit probe, so the latch
+    // cannot hide a settle-time SIGKILL that lost its `timedOutFlag` guard.
+    test("a normal close delivers nothing and spares what the child left behind", { timeout: 30_000 }, async () => {
+      const dir = tmpDir("normal-close");
+      const pidFile = path.join(dir, "pid");
+      const sh = `sleep 30 >/dev/null 2>&1 & echo $! > '${pidFile}'; echo up`;
+      try {
+        const { res, sent } = await recordGroupSignals(() => runFn("sh", ["-c", sh], { timeoutSec: 20 }));
+        assert.equal(res.timedOut, false);
+        assert.equal(res.code, 0);
+        const pids = readPids(pidFile);
+        assert.equal(pids.length, 1, `expected 1 pid, got: ${pids}`);
+        assert.deepEqual(delivered(sent), [], `a normal close signalled the group: ${JSON.stringify(sent)}`);
+        assert.ok(isAlive(pids[0]!), "a normal close killed what the child left behind");
       } finally {
         reapPids(pidFile);
         fs.rmSync(dir, { recursive: true, force: true });
@@ -279,9 +379,15 @@ for (const runtime of ["claude", "codex"] as const) {
         assert.equal((await running).timedOut, false);
         assert.equal(process.listenerCount("SIGINT"), base, "the handler outlived the last child");
 
+        // A timed-out call that settled at once still owns two ladder rungs. Left
+        // armed they hold the process open for 5 s past its last call and fire
+        // at a group nobody holds any more — and no signal count can show it,
+        // since the latch swallows what they send. Count the timers themselves.
+        const timers = activeTimeouts();
         const hung = await runFn("/bin/sh", ["-c", "exec sleep 30"], { timeoutSec: 1 });
         assert.equal(hung.timedOut, true);
         assert.equal(process.listenerCount("SIGINT"), base, "the kill ladder left a handler behind");
+        assert.equal(activeTimeouts(), timers, "the kill ladder outlived the call it belonged to");
 
         const missing = await runFn(path.join(dir, "no-such-binary"), [], { timeoutSec: 5 });
         assert.equal(missing.notFound, true);

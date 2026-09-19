@@ -223,9 +223,17 @@ export async function run(
 
     const pgid = child.pid;
     if (pgid !== undefined) trackGroup(pgid);
-    const killTree = (signal: NodeJS.Signals): void => {
-      if (pgid === undefined || !isSignallableGroup(pgid)) return;
-      try { process.kill(-pgid, signal); } catch { /* group already gone */ }
+    // The group id is ours only while the group has members: once it empties
+    // the id is free for reuse, and a signal sent there lands on a stranger.
+    // `child.kill()` had that guard for free — it is a no-op once the child has
+    // exited — while `process.kill(-pgid)` signals whoever holds the id NOW. So
+    // ESRCH, the kernel saying the group is gone, latches: nothing follows it.
+    let groupGone = false;
+    const killTree = (signal: NodeJS.Signals | 0): void => {
+      if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
+      try { process.kill(-pgid, signal); } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ESRCH") groupGone = true;
+      }
     };
     const ladder: NodeJS.Timeout[] = [];
 
@@ -323,6 +331,15 @@ export async function run(
       };
       tryFinish();
     });
+
+    // The leader's exit is the first moment the group can have emptied with
+    // this call still open: a descendant that LEFT the group holds our pipes,
+    // "close" never comes, and the timeout — minutes away for a real agent —
+    // would signal an id freed long before (measured: SIGTERM + 2x SIGKILL).
+    // Probe now, while the id cannot have been reused; signal 0 delivers
+    // nothing. Not caught: a group an in-group descendant keeps alive past
+    // this probe and that empties later — there the latch stops at one signal.
+    child.once("exit", () => killTree(0));
 
     child.on("close", (code, signal) => {
       clearTimeout(timer);
