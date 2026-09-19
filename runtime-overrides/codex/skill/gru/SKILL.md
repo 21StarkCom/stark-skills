@@ -36,7 +36,9 @@ tells you to stop; there is no other verb.
    ticket and its comments, and note each ticket's repo. A ticket that names
    another in-scope ticket as a dependency waits for it; otherwise tickets are
    independent. Do not add tickets the operator did not name.
-2. **Read the board.** Ticket `done`/`Closed` → finished, skip. Ticket with a
+2. **Read the board.** Ticket `done`/`Closed` → run step 5's confirm on it, then
+   skip; a Minion can die between closing its ticket and sending its report, so a
+   `done` status on its own is a closed ticket, not a confirmed one. Ticket with a
    live Hermod peer (`hermod msg peers`, `liveness` live) whose `cwd`'s last
    path segment is exactly the ticket id → a Minion owns it, do not relaunch.
    Ticket whose Minion reported `blocked` or `follow-up … stopping` → blocked
@@ -50,7 +52,8 @@ tells you to stop; there is no other verb.
    id (the `hermod msg peers` row whose `sessionId` is your own
    `$CODEX_THREAD_ID`, or `$CLAUDE_CODE_SESSION_ID` on Claude), and one line:
    Report done, blocked, or follow-up to that peer over Hermod.
-4. **Wait.** Minions report `done <PR> merged <sha>`, `blocked <reason>`, or
+4. **Wait.** Minions report `done <PR> merged <sha> verified <check>`,
+   `blocked <reason>`, or
    `follow-up STARK-m filed, stopping`. Codex receives them through its native
    queue; yield while waiting rather than polling in a loop. Between reports
    check `hermod msg peers`. A peer is dead only when Hermod reports its
@@ -59,9 +62,11 @@ tells you to stop; there is no other verb.
    would attach a second session to the same worktree). Read the board before
    you read a corpse: a Minion that reported `done` goes dead on purpose moments
    later — it stands down with `hermod poison-pill`, which exits it, removes its
-   worktree and closes its tab — and Phase 2 skips its now-`done` ticket. A dead
-   peer is a death only while its ticket is still open. A dead Claude Minion
-   with its ticket open is relaunched once with the same brief. A dead Codex
+   worktree and closes its tab — and step 2 confirms and skips its now-`done`
+   ticket. A dead peer is a death only while its ticket is still open **and** no
+   merged PR for it exists; check both, because a Minion can die between closing
+   its ticket and reporting. A dead Claude Minion that is a real death is
+   relaunched once with the same brief. A dead Codex
    Minion is a blocker: `hermod ticket` refuses its existing worktree; report
    the path. A second death is a blocker. `follow-up … stopping` means the
    ticket is blocked on STARK-m; report it so, and the operator decides whether
@@ -71,11 +76,15 @@ tells you to stop; there is no other verb.
    `done` or `Closed` (in a repo whose `AGENTS.md` defines done as released, the
    Minion closes at the end of the release chain, so wait for that). Only then
    count it finished and release the tickets that depended on it. The report
-   also names the live verification the Minion ran; a `done` that names none is
-   not confirmed. If a check fails, tell the Minion what is missing if it is
-   live; if it has ended, treat the report as a death — a Minion that stood
-   down has already removed its worktree, so that relaunch gets a clean one and
-   is not blocked even on Codex.
+   names the live verification the Minion ran and the PR carries that run's
+   command and output as a comment — read the comment, not just the claim. A
+   `done` that names no verification, or names one with nothing on the PR behind
+   it, is not confirmed. If a check fails, tell the Minion what is missing if it
+   is live; if it has ended, treat the report as a death — but do not assume its
+   worktree is gone. The reaper removes it only *after* the agent exits, and
+   refuses outright while claude's worktree lock owner is still alive, so a dead
+   Codex Minion can still be step 4's `hermod ticket` blocker. Check the path
+   before you relaunch.
 6. **Loop** steps 2–5 until every ticket is finished or blocked. Then report:
    finished tickets with PR links, blocked tickets with the reason, and
    follow-up tickets the Minions filed.
@@ -99,4 +108,6 @@ tells you to stop; there is no other verb.
   that reported `done` stands down with `hermod poison-pill`, taking its session,
   worktree and tab with it. A Minion that reported `blocked` or
   `follow-up … stopping` leaves all three in place for you and the operator.
-  You never remove a Minion's worktree yourself.
+  You never remove a Minion's worktree yourself — including the one a stand-down
+  left behind because its teardown came back partial. Report that path; sweeping
+  it is the operator's.
