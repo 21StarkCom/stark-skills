@@ -339,7 +339,12 @@ export function planReview(
     // `**Location:**` line, and stacking the two reads as two different
     // reasons for the same demotion.
     const note = generatedFindingNote(file, declaredLine, pattern, f.line === null && declaredLine !== null);
-    findings.push({ ...f, body: `${note}\n\n${bodyFor(raw)}` });
+    // `body_reason` is how the body render learns WHY this finding has no
+    // thread. Without it `buildReviewBody` files an in-diff, file-and-line
+    // finding under "Cross-cutting / out-of-diff findings" — which reads as
+    // "outside this PR's scope", the exact downgrade the split promises never
+    // happens (STARK-6096).
+    findings.push({ ...f, body_reason: "generated_path", body: `${note}\n\n${bodyFor(raw)}` });
   }
   const generated: GeneratedSplit = { enabled: patterns.length > 0, patterns, entries };
   return {

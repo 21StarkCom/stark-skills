@@ -36,6 +36,7 @@ import {
   findingId,
   severityMeetsThreshold,
   type AgentName,
+  type BodyReason,
   type Finding,
   type Severity,
 } from "./finding_lib.ts";
@@ -419,6 +420,84 @@ export function selectPostingAgent(findings: Finding[]): AgentName | null {
   return best;
 }
 
+/**
+ * The heading for body findings that carry no {@link BodyReason} — the classic
+ * class: unanchored findings, and findings whose file is not in the PR's diff.
+ * This string is the canonical wording for that class and is pinned by its own
+ * test; it must keep describing ONLY that class.
+ *
+ * It doubles as the fallback for a `body_reason` this build does not recognise
+ * — see {@link groupByBodyReason}, where an unknown label must not cost a
+ * finding its place in the body.
+ */
+export const OUT_OF_DIFF_HEADING = "## Cross-cutting / out-of-diff findings";
+
+/**
+ * Per-reason headings for body findings that DO carry a {@link BodyReason}.
+ * Each must be accurate for its own class. Two ways to get that wrong, both
+ * already paid for: a heading may not claim the finding was **out of** diff
+ * (the falsehood STARK-6096 fixed), and it may not claim the finding was **in**
+ * the diff either — a reviewer can report a finding on a generated file the PR
+ * never touched, so `generated_path` spans both. Which one a given entry is, is
+ * stated per finding by `generatedFindingNote` (`findings_review_post.ts`), the
+ * only place that knows.
+ */
+export const BODY_REASON_HEADINGS: Record<BodyReason, string> = {
+  generated_path: "## Findings on generated paths — withheld from inline threads",
+};
+
+/** Labelled groups in a fixed order, so the same findings always render the
+ * same bytes. Hoisted out of the render: `postReview` rebuilds the body up to
+ * twice more on the 422 fallback path. */
+const ORDERED_BODY_REASONS: readonly BodyReason[] =
+  (Object.keys(BODY_REASON_HEADINGS) as BodyReason[]).sort();
+
+function isKnownBodyReason(reason: unknown): reason is BodyReason {
+  return typeof reason === "string" && Object.hasOwn(BODY_REASON_HEADINGS, reason);
+}
+
+function bodyReasonHeading(reason: BodyReason | null): string {
+  return reason === null ? OUT_OF_DIFF_HEADING : BODY_REASON_HEADINGS[reason];
+}
+
+/**
+ * Split body findings into one group per reason, preserving the incoming order
+ * (already severity-sorted by {@link partitionInlineVsBody}) inside each group.
+ *
+ * Labelled groups render FIRST. The generated-path preamble sits in
+ * `humanSummary`, above every group, and promises "each is listed below" — with
+ * the unlabelled group first that sentence pointed at the out-of-diff findings
+ * rather than the ones it introduces. Byte-identity for the no-reason case does
+ * NOT depend on the order: with zero labelled groups there is exactly one
+ * group, one heading and one pass over the findings, whichever end it is
+ * emitted from.
+ *
+ * A `body_reason` this build does not recognise degrades to the unlabelled
+ * group. Grouping on the raw value instead would build a group with no heading
+ * in {@link BODY_REASON_HEADINGS}, which the ordering loop then never emits —
+ * silently deleting every finding in it from the review. Nothing in this file
+ * may cost a finding its place in the body.
+ */
+function groupByBodyReason(
+  bodyFindings: Finding[],
+): Array<[BodyReason | null, Finding[]]> {
+  const groups = new Map<BodyReason | null, Finding[]>();
+  for (const f of bodyFindings) {
+    const reason = isKnownBodyReason(f.body_reason) ? f.body_reason : null;
+    const existing = groups.get(reason);
+    if (existing) existing.push(f);
+    else groups.set(reason, [f]);
+  }
+  const ordered: Array<[BodyReason | null, Finding[]]> = [];
+  for (const reason of ORDERED_BODY_REASONS) {
+    const group = groups.get(reason);
+    if (group) ordered.push([reason, group]);
+  }
+  const unlabelled = groups.get(null);
+  if (unlabelled) ordered.push([null, unlabelled]);
+  return ordered;
+}
+
 export function buildReviewBody(
   marker: string,
   humanSummary: string,
@@ -433,13 +512,15 @@ export function buildReviewBody(
     lines.push("", opts.postingAgentNote);
   }
   if (bodyFindings.length > 0) {
-    lines.push("", "## Cross-cutting / out-of-diff findings", "");
-    for (const f of bodyFindings) {
-      const anchor = f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "(no anchor)";
-      lines.push(`- **${f.severity}** [${f.domain}] (${anchor}) — ${f.title}`);
-      if (f.body) {
-        const indented = f.body.split("\n").map((l) => `  ${l}`).join("\n");
-        lines.push(indented);
+    for (const [reason, group] of groupByBodyReason(bodyFindings)) {
+      lines.push("", bodyReasonHeading(reason), "");
+      for (const f of group) {
+        const anchor = f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "(no anchor)";
+        lines.push(`- **${f.severity}** [${f.domain}] (${anchor}) — ${f.title}`);
+        if (f.body) {
+          const indented = f.body.split("\n").map((l) => `  ${l}`).join("\n");
+          lines.push(indented);
+        }
       }
     }
   }
@@ -551,7 +632,13 @@ export interface PostReviewResult {
  * carried only as routing metadata via file/line. */
 function demoteInlineToFinding(c: InlineComment, agent: AgentName): Finding {
   if (c.origin) {
-    return { ...c.origin, file: c.path, line: c.line };
+    // Drop `body_reason` on the way down. It records why a finding was routed
+    // to the body BEFORE posting; this one is in the body because GitHub
+    // rejected its anchor, which is the unlabelled class. Carrying the label
+    // over would file it under a heading describing a different reason.
+    const { body_reason: _routedBefore, ...origin } = c.origin;
+    void _routedBefore;
+    return { ...origin, file: c.path, line: c.line };
   }
   // Fallback when origin missing (defensive — partitionInlineVsBody now always
   // attaches origin, but keep this branch for older callers).

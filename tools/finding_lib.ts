@@ -22,6 +22,33 @@ export type Severity = "critical" | "high" | "medium" | "low";
 
 export type Classification = "fix" | "false_positive" | "noise" | "ignored";
 
+/**
+ * Why a finding is rendered in the review body instead of as an inline thread.
+ *
+ * Absent is the classic case and stays unlabelled: the finding has no anchor at
+ * all, or its file/line is outside the PR's diff. Those are what the body's
+ * long-standing "Cross-cutting / out-of-diff findings" heading describes.
+ *
+ * `generated_path` is the case STARK-5637 introduced and STARK-6096 named: the
+ * finding was deliberately held out of a thread because its path is generated
+ * output (see `findings_review_post.ts`). Typically it IS in the diff, on a real
+ * file and line — filing those under the out-of-diff heading told a reader they
+ * were outside the PR's scope, the exact "downgraded away" reading the split
+ * exists to prevent. `buildReviewBody` cannot infer this from file/line, because
+ * a withheld in-diff finding and an out-of-diff one look identical by the time
+ * they reach it; the caller must state it.
+ *
+ * The label says only "generated path", never "in diff": a reviewer can report a
+ * finding on a generated file the PR never touched, and that one is BOTH. Which
+ * it is, is stated per finding by `generatedFindingNote`, so the heading asserts
+ * neither.
+ *
+ * It records the routing decision made BEFORE posting. A finding that reaches
+ * the body later, because GitHub rejected its anchor with a 422, is the
+ * unlabelled class and `demoteInlineToFinding` strips any label on the way down.
+ */
+export type BodyReason = "generated_path";
+
 export type Finding = {
   id: string;
   domain: string;
@@ -32,6 +59,9 @@ export type Finding = {
   title: string;
   body: string;
   classification?: Classification;
+  /** Why this finding belongs in the review body rather than on a thread.
+   * Only meaningful for findings routed to the body; see {@link BodyReason}. */
+  body_reason?: BodyReason;
   classification_reason?: string;
   extra?: Record<string, unknown>;
 };
