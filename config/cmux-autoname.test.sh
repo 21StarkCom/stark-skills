@@ -46,4 +46,31 @@ CMUX_WORKSPACE_ID=ws-worktree CMUX_SURFACE_ID=surface-worktree \
 grep -Fqx 'rename-tab --surface surface-worktree FEATURE-LANE' "$fixture/calls"
 grep -Fqx 'workspace rename --workspace ws-worktree --title SAMPLE-REPO' "$fixture/calls"
 
-printf 'PASS cmux autoname: Codex precedence, Claude compatibility, title, color, idempotency\n'
+# A compact or clear re-fire happens inside a live session whose tab a skill may
+# have retitled (MINION (n) etc.); it must leave the tab alone. startup and
+# resume (a fresh process, possibly a fresh tab) still name it.
+: > "$fixture/calls"
+for src in compact clear; do
+  printf '{"session_id":"s","source":"%s"}' "$src" | \
+  CMUX_WORKSPACE_ID=ws-worktree CMUX_SURFACE_ID=surface-worktree \
+    CLAUDE_PROJECT_DIR="$fixture/feature-lane" CMUX_AUTONAME_CMUX_BIN="$fake_cmux" \
+    CMUX_CAPTURE="$fixture/calls" HOME="$fixture/home" XDG_STATE_HOME="$state" \
+    bash "$script_dir/cmux-autoname.sh"
+done
+! grep -q 'rename-tab' "$fixture/calls"
+for src in startup resume; do
+  printf '{"session_id":"s","source":"%s"}' "$src" | \
+  CMUX_WORKSPACE_ID=ws-worktree CMUX_SURFACE_ID=surface-worktree \
+    CLAUDE_PROJECT_DIR="$fixture/feature-lane" CMUX_AUTONAME_CMUX_BIN="$fake_cmux" \
+    CMUX_CAPTURE="$fixture/calls" HOME="$fixture/home" XDG_STATE_HOME="$state" \
+    bash "$script_dir/cmux-autoname.sh"
+done
+[[ "$(grep -Fxc 'rename-tab --surface surface-worktree FEATURE-LANE' "$fixture/calls")" == 2 ]]
+# No payload at all (Codex, a hand run) keeps the old behaviour.
+CMUX_WORKSPACE_ID=ws-worktree CMUX_SURFACE_ID=surface-worktree \
+  CLAUDE_PROJECT_DIR="$fixture/feature-lane" CMUX_AUTONAME_CMUX_BIN="$fake_cmux" \
+  CMUX_CAPTURE="$fixture/calls" HOME="$fixture/home" XDG_STATE_HOME="$state" \
+  bash "$script_dir/cmux-autoname.sh" </dev/null
+[[ "$(grep -Fxc 'rename-tab --surface surface-worktree FEATURE-LANE' "$fixture/calls")" == 3 ]]
+
+printf 'PASS cmux autoname: Codex precedence, Claude compatibility, title, color, idempotency, compact/clear keep the title\n'

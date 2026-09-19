@@ -32,7 +32,7 @@ tells you to stop; there is no other verb.
 ## Protocol
 
 0. **Title your tab**, if you are in cmux — the mechanics are
-   [the worker spine's](../../standards/worker-spine.md#1-bind-and-read), and
+   [the worker spine's](../../standards/worker-spine.md#title-your-tab), and
    the rule is the same: own tab only, cosmetic, never a blocker. Your title is
    `GRU (<n>)`, where `<n>` is the epic's number without its `STARK-` prefix,
    or the first ticket's when you were given `--tickets`: `GRU (1234)`. A rerun
