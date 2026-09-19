@@ -55,8 +55,12 @@ in that worktree; it is only where the session stands.
    **main checkout** of the repo you are in — the first `worktree` line of
    `git worktree list --porcelain`, not `git rev-parse --show-toplevel`, which
    names your own worktree when you are inside one — and pass it as `--cwd`.
-   Run that as its own command and paste the path in literally; a `$(...)` in
-   the launch line is refused by the worktree guard.
+   Run that as its own command and paste the path in literally: on Claude, a
+   worktree session's guard refuses a `hermod` line carrying a variable
+   ([measured](../../standards/worker-spine.md#title-your-tab)), and a `$(...)`
+   was [measured](../../standards/stand-down.md#four-rules-about-when) refused on
+   its quoted form only — too fine a line to rest a launch on, and the literal
+   works on either runtime.
    **The launch id must be free in that repo**: no `worktree` line of that list
    (with `--repo`, of `git -C <path> worktree list --porcelain`, `<path>` from
    `frigg repos get <name> --json`) may end in `/<launch id>`. One that does is

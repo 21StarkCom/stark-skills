@@ -159,9 +159,9 @@ hermod recorded in its session store, not the directory you happen to be
 standing in — and it resolves that cwd up to the git toplevel, so a subdirectory
 is never what gets *removed* and there is no `cd` ritual to perform.
 
-**But the path it PRINTS is not that toplevel** — it is the raw recorded cwd,
-which drifts into a subdirectory the moment anything in your session runs there
-(`hermod v0.19.0`, measured: a session that had been in `<worktree>/tools`
+**But on `hermod v0.19.0` the path it PRINTS is not that toplevel** — it is the
+raw recorded cwd, which drifts into a subdirectory the moment anything in your
+session runs there (measured: a session that had been in `<worktree>/tools`
 reported `"worktree":"<worktree>/tools"` and
 `"detail":"…remove worktree <worktree>/tools…"`, while the removal would still
 have correctly targeted `<worktree>`). That was STARK-6168, a hermod bug, fixed
