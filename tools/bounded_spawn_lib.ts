@@ -21,6 +21,10 @@
  * process group no longer reaches `gh`, and nobody can forward a SIGKILL. A
  * `gh` hung at that moment outlives its bound, which died with this process.
  *
+ * The forwarding half is exported on its own (`trackGroup`/`releaseGroup`,
+ * STARK-6135): `jury_dispatch.ts::realRunner` detaches its seats too, and keeps
+ * its own SIGTERM → grace → SIGKILL ladder, so it shares the tracking only.
+ *
  * It is async-only on purpose. `spawnSync` blocks the event loop, so it can
  * neither group-kill (its `killSignal` goes to one pid) nor run a forwarding
  * handler — a `detached` `spawnSync` child is simply abandoned on Ctrl-C.
@@ -68,8 +72,19 @@ const FORWARDED: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
 /** Group ids (== the detached child's pid) of every child still in flight. */
 const liveGroups = new Set<number>();
 
+/**
+ * A group id this file may signal. `process.kill(-pgid)` with 0 is THIS
+ * process's own group and with 1 is `kill(-1)` — every process the user owns —
+ * so neither may ever be tracked or signalled (the guard jury's
+ * `killProcessGroup` always had, carried here by STARK-6135).
+ */
+function isSignallableGroup(pgid: number): boolean {
+  return Number.isInteger(pgid) && pgid > 1;
+}
+
 /** Signal a whole group; one that is already gone (ESRCH) is not an error. */
 function killGroup(pgid: number, signal: NodeJS.Signals): void {
+  if (!isSignallableGroup(pgid)) return;
   try {
     process.kill(-pgid, signal);
   } catch {
@@ -101,10 +116,17 @@ function untrack(): void {
 }
 
 /**
+ * Forward the operator's SIGINT/SIGTERM/SIGHUP to this detached group until
+ * `releaseGroup`. Exported as the forwarding HALF on its own (STARK-6135):
+ * `jury_dispatch.ts::realRunner` spawns detached seats too but keeps its own
+ * SIGTERM → grace → SIGKILL kill ladder, so it shares the tracking and nothing
+ * else. Every caller MUST pair it with `releaseGroup` on every settle path.
+ *
  * Handlers live only while a child does: a listener on SIGINT replaces Node's
  * default exit, so one left installed would make an idle tool ignore Ctrl-C.
  */
-function trackGroup(pgid: number): void {
+export function trackGroup(pgid: number): void {
+  if (!isSignallableGroup(pgid)) return;
   // Keyed on the flag, not on an empty set: `forward` uninstalls with groups
   // still live, so a process that somehow outlives its re-raise must be able
   // to re-arm on the next spawn.
@@ -115,7 +137,8 @@ function trackGroup(pgid: number): void {
   liveGroups.add(pgid);
 }
 
-function releaseGroup(pgid: number): void {
+/** Idempotent: a second release of the same group is a no-op. */
+export function releaseGroup(pgid: number): void {
   if (!liveGroups.delete(pgid)) return;
   if (liveGroups.size === 0) untrack();
 }

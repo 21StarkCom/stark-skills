@@ -13,7 +13,7 @@ import * as nodePath from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { spawnBounded } from "./bounded_spawn_lib.ts";
+import { releaseGroup, spawnBounded, trackGroup } from "./bounded_spawn_lib.ts";
 
 /** A never-settling call must FAIL the suite, not stall the required check. */
 const HANG_GUARD = { timeout: 30_000 };
@@ -168,6 +168,29 @@ for (const bad of [0, NaN, 3_000_000_000]) {
     assert.equal(process.listenerCount("SIGINT"), before, "a refused call must not have spawned or tracked anything");
   });
 }
+
+// STARK-6135: `trackGroup` is exported for jury's seats. `process.kill(-0)` is
+// this process's OWN group and `-1` is every process the user owns, so a bad id
+// must never be tracked — a forwarded Ctrl-C would land on strangers.
+for (const bad of [0, 1, -5, 1.5, NaN]) {
+  test(`trackGroup refuses an unsignallable group id: ${String(bad)}`, () => {
+    const before = process.listenerCount("SIGINT");
+    trackGroup(bad);
+    assert.equal(process.listenerCount("SIGINT"), before, "a refused id must install nothing");
+    releaseGroup(bad);
+    assert.equal(process.listenerCount("SIGINT"), before);
+  });
+}
+
+test("trackGroup/releaseGroup pair installs and removes the handlers, release is idempotent", () => {
+  const before = process.listenerCount("SIGINT");
+  // Never signalled here, so any id above 1 will do.
+  trackGroup(2_000_000_001);
+  assert.equal(process.listenerCount("SIGINT"), before + 1);
+  releaseGroup(2_000_000_001);
+  releaseGroup(2_000_000_001);
+  assert.equal(process.listenerCount("SIGINT"), before);
+});
 
 test("a timeout leaves no handler behind either", HANG_GUARD, async () => {
   const before = process.listenerCount("SIGTERM");

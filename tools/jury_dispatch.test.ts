@@ -12,6 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   DEFAULT_TIMEOUT_SEC,
@@ -65,6 +66,21 @@ function panelOf(...seats: PanelSeat[]): Panel {
 
 function tmpDir(tag: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `jury-dispatch-${tag}-`));
+}
+
+const DISPATCH_URL = pathToFileURL(path.join(import.meta.dirname, "jury_dispatch.ts")).href;
+
+async function waitFor(cond: () => boolean, ms = 5_000): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (cond()) return true;
+    await new Promise((res) => setTimeout(res, 50));
+  }
+  return cond();
+}
+
+function isAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 /** A runner that answers from a per-seat script. Records every request. */
@@ -573,6 +589,78 @@ test("realRunner: a missing binary is a spawn failure, never a hang", async () =
     });
     assert.equal(outcome.notFound, true);
     assert.equal(outcome.timedOut, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// STARK-6135. A terminal's Ctrl-C goes to the FOREGROUND process group, which a
+// detached seat has left — so the faithful simulation signals the dispatcher's
+// pid ALONE (signalling its group would prove nothing; the seat is by design
+// not in it). The grandchild runs in the FOREGROUND of its shell: a
+// non-interactive shell starts `&` jobs with SIGINT ignored, so a backgrounded
+// one would survive a real Ctrl-C too.
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  test(`realRunner: ${sig} to the dispatcher alone terminates an in-flight seat and its descendants`, { timeout: 30_000 }, async () => {
+    const dir = tmpDir(`fwd-${sig}`);
+    const pidFile = path.join(dir, "pids");
+    const sh = `printf '%s ' $$ > '${pidFile}'; sh -c 'echo $$ >> "$0"; exec sleep 30' '${pidFile}'`;
+    const req: RunRequest = {
+      seat: "claude",
+      cmd: "/bin/sh",
+      args: ["-c", sh],
+      env: { PATH: process.env.PATH ?? "" },
+      cwd: dir,
+      stdin: "prompt",
+      timeoutMs: 25_000,
+    };
+    const driver = spawn(process.execPath, [
+      "--no-warnings",
+      "-e",
+      `import(${JSON.stringify(DISPATCH_URL)}).then((m) => m.realRunner(${JSON.stringify(req)}))`,
+    ], { stdio: "ignore" });
+    const exited = new Promise<NodeJS.Signals | null>((res) => driver.once("exit", (_c, s) => res(s)));
+    let pids: number[] = [];
+    try {
+      const readPids = (): number[] =>
+        fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf8").trim().split(/\s+/).map(Number) : [];
+      assert.ok(await waitFor(() => readPids().length === 2), "the seat never reported its pids");
+      pids = readPids();
+      assert.ok(pids.every((p) => Number.isInteger(p) && p > 1), `bad pids: ${pids}`);
+      assert.ok(pids.every(isAlive), "seat/grandchild died before the signal — the test would pass vacuously");
+
+      process.kill(driver.pid!, sig);
+
+      assert.equal(await exited, sig, "the dispatcher did not die by the forwarded signal");
+      assert.ok(await waitFor(() => !pids.some(isAlive)), `${sig} did not reach the detached seat: ${pids.filter(isAlive)} alive`);
+    } finally {
+      driver.kill("SIGKILL");
+      for (const p of pids) if (isAlive(p)) process.kill(p, "SIGKILL");
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+// A SIGINT listener replaces Node's default exit, so one left behind after the
+// last seat settles would make an idle dispatcher ignore Ctrl-C.
+test("realRunner: forwarding handlers exist only while a seat is in flight", { timeout: 30_000 }, async () => {
+  const dir = tmpDir("fwd-life");
+  const base = { env: { PATH: process.env.PATH ?? "" }, cwd: dir, stdin: "prompt" };
+  const before = process.listenerCount("SIGINT");
+  try {
+    const hung = realRunner({ ...base, seat: "codex", cmd: "/bin/sh", args: ["-c", "exec sleep 30"], timeoutMs: 600 });
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while a seat is live");
+    const quick = realRunner({ ...base, seat: "claude", cmd: process.execPath, args: ["-e", ""], timeoutMs: 20_000 });
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "a second seat must share the one handler");
+    await quick;
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "the handler was dropped with a seat still live");
+    // The timeout path settles through the kill ladder — it must release too.
+    assert.equal((await hung).timedOut, true);
+    assert.equal(process.listenerCount("SIGINT"), before, "the handler outlived the last seat");
+
+    const missing = await realRunner({ ...base, seat: "gemini", cmd: path.join(dir, "no-such-binary"), args: [], timeoutMs: 5_000 });
+    assert.equal(missing.notFound, true);
+    assert.equal(process.listenerCount("SIGINT"), before, "a spawn failure left a handler behind");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
