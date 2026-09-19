@@ -62,6 +62,23 @@ jobs:
           path: bifrost
           token: ${{ steps.app-token.outputs.token }}
 
+      # Every skill in THIS repo must be claimed by some bifrost bundle.yaml, or
+      # deliberately excluded. `stark sync` below pulls ONLY declared members, so an
+      # unclaimed skill is silently dropped: it lands in no catalog copy and neither
+      # dist tree, while its prose ships. That is exactly how `agnes` shipped
+      # un-membered at bifrost v0.31.2 (STARK-6249) — the release published
+      # standards/worker-spine.md naming "/agnes" while the skill itself went nowhere,
+      # and every gate below reported clean, because all of them only compare bifrost's
+      # catalog against bifrost's dist. None of them looks back at this tree.
+      #
+      # Runs BEFORE the regen so an unclaimed skill fails the sync rather than opening a
+      # PR that looks publishable. The script is bifrost's (it reads bifrost's catalog
+      # membership) and is the SAME file publish.sh calls — do not inline a copy here,
+      # two copies of a gate is how it ends up enforced in one place and not the other,
+      # which is the bug this step exists to close (STARK-6468).
+      - name: Coverage gate — every skill is claimed by a bundle
+        run: bifrost/docs/scripts/coverage-gate.sh "$GITHUB_WORKSPACE/stark-skills"
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
