@@ -30,7 +30,7 @@
  */
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
 
-import { explainTermination, resolveGhTimeoutMs } from "./child_termination_lib.ts";
+import { assertGhTimeoutMs, explainTermination, resolveGhTimeoutMs } from "./child_termination_lib.ts";
 import {
   buildMarker,
   compareSeverityDesc,
@@ -118,14 +118,16 @@ async function spawnCollect(
     let closed: SpawnResult | null = null;
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
-    const settle = (r: SpawnResult) => {
-      if (settled) return;
+    /** Claim the one settlement; false when an earlier outcome already won. */
+    const claim = (): boolean => {
+      if (settled) return false;
       settled = true;
-      // Cleared on EVERY settle: a live 120 s timer would hold the process open
-      // long after the `gh` call it bounded had returned.
+      // Cleared on EVERY settle, resolve and reject alike: a live 120 s timer
+      // would hold the process open long after the `gh` call it bounded returned.
       clearTimeout(timer);
-      resolve(r);
+      return true;
     };
+    const settle = (r: SpawnResult) => { if (claim()) resolve(r); };
     const tryFinish = () => {
       if (closed === null) return;
       if (!stdoutEnded || !stderrEnded) return;
@@ -135,12 +137,7 @@ async function spawnCollect(
     child.stderr.on("data", (b) => err.push(b as Buffer));
     child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
     child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
-    child.on("error", (e) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(e);
-    });
+    child.on("error", (e) => { if (claim()) reject(e); });
     if (opts.timeoutMs !== undefined) {
       const ms = opts.timeoutMs;
       timer = setTimeout(() => {
@@ -197,9 +194,13 @@ export async function ghJsonOnce(p: string, opts: GhJsonOpts = {}): Promise<GhJs
   args.push(p);
   const input = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
   if (input !== undefined) args.push("--input", "-");
-  // Resolved before the spawn, so an unusable STARK_GH_TIMEOUT_MS is refused
-  // outright instead of running `gh` unbounded.
-  const timeoutMs = opts.timeoutMs ?? resolveGhTimeoutMs();
+  // Resolved before the spawn, so an unusable bound is refused outright instead
+  // of running `gh` unbounded. `opts.timeoutMs` is held to the env var's rule:
+  // `setTimeout` fires 0, NaN and anything past 2^31-1 ms after ~1 ms, so an
+  // unvalidated `timeoutMs: 0` ("no timeout", by convention) kills every call.
+  const timeoutMs = opts.timeoutMs === undefined
+    ? resolveGhTimeoutMs()
+    : assertGhTimeoutMs(opts.timeoutMs, "opts.timeoutMs");
   const res = await spawnCollect("gh", args, { input, env: { ...process.env }, timeoutMs });
   if (res.status === null) {
     // Checked BEFORE stdout is parsed: a `--paginate` killed between pages

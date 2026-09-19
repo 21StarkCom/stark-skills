@@ -7,6 +7,7 @@ import { describe, test } from "node:test";
 import * as assert from "node:assert/strict";
 
 import {
+  assertGhTimeoutMs,
   explainTermination,
   GH_TIMEOUT_ENV,
   GH_TIMEOUT_MS_DEFAULT,
@@ -98,5 +99,23 @@ describe("resolveGhTimeoutMs", () => {
 
   test("the ceiling itself is accepted (a Node timer still honours it)", () => {
     assert.equal(resolveGhTimeoutMs({ [GH_TIMEOUT_ENV]: String(GH_TIMEOUT_MS_MAX) }), GH_TIMEOUT_MS_MAX);
+  });
+});
+
+// The env var is not the only way a bound arrives: `ghJsonOnce` takes
+// `opts.timeoutMs` and `runCapturing` takes it positionally. Unvalidated, the
+// two spawn paths read the SAME bad value in opposite directions — `spawnSync`
+// treats `timeout: 0` as "no bound" (measured: a 2 s child ran its full 2 s),
+// while `setTimeout` fires 0 / NaN / anything past 2^31-1 after ~1 ms.
+describe("assertGhTimeoutMs", () => {
+  for (const bad of [0, -5, NaN, Infinity, 12.5, GH_TIMEOUT_MS_MAX + 1]) {
+    test(`a bound no spawn path can honour is refused: ${String(bad)}`, () => {
+      assert.throws(() => assertGhTimeoutMs(bad, "opts.timeoutMs"), /opts\.timeoutMs must be/);
+    });
+  }
+
+  test("a usable bound is returned unchanged, floor and ceiling included", () => {
+    assert.equal(assertGhTimeoutMs(1, "x"), 1);
+    assert.equal(assertGhTimeoutMs(GH_TIMEOUT_MS_MAX, "x"), GH_TIMEOUT_MS_MAX);
   });
 });

@@ -629,6 +629,19 @@ test("ghJsonOnce: STARK_GH_TIMEOUT_MS overrides the default bound; an unusable v
   }
 });
 
+// `opts.timeoutMs` bypasses `resolveGhTimeoutMs`, and `setTimeout` fires 0,
+// NaN and anything past 2^31-1 after ~1 ms — so an unvalidated `timeoutMs: 0`
+// (the usual spelling of "no timeout", and what `spawnSync` takes it to mean)
+// kills every call at once. `true` never sleeps: if the bound is not refused
+// the fake gh exits 0 and the rejection is the wrong one, failing the match.
+for (const bad of [0, NaN, 3_000_000_000]) {
+  test(`ghJsonOnce: an unusable opts.timeoutMs is refused before spawning: ${String(bad)}`, HANG_GUARD, async () => {
+    await withFakeGh("true", async () => {
+      await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/files", { timeoutMs: bad }), /opts\.timeoutMs must be/);
+    });
+  });
+}
+
 test("ghJsonOnce: a gh that finishes inside the bound leaves no timer holding the process open", async () => {
   const page = 'HTTP/2.0 200 OK\\r\\n\\r\\n[{"id":1}]';
   await withFakeGh(`printf '${page}'`, async () => {

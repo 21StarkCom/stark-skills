@@ -1,5 +1,7 @@
 /**
- * child_termination_lib.ts — name WHY a child process was terminated.
+ * child_termination_lib.ts — name WHY a child process was terminated, and own
+ * the one termination this tool causes itself: the time bound on every `gh`
+ * subprocess (STARK-6113 — `resolveGhTimeoutMs` / `assertGhTimeoutMs`).
  *
  * Hoisted out of `findings_review_post.ts` (STARK-371) when the same defect
  * turned up in `review_post_lib.ts`'s posting path (STARK-6112): that file is
@@ -52,14 +54,26 @@ export const GH_TIMEOUT_ENV = "STARK_GH_TIMEOUT_MS";
 export function resolveGhTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env[GH_TIMEOUT_ENV];
   if (raw === undefined || raw === "") return GH_TIMEOUT_MS_DEFAULT;
-  // The ceiling is Node's timer limit: `setTimeout` past 2^31-1 ms fires after
-  // 1 ms instead, which would turn "effectively unbounded" into "kill at once".
-  if (!/^\d+$/.test(raw.trim()) || Number(raw) <= 0 || Number(raw) > GH_TIMEOUT_MS_MAX) {
-    throw new Error(
-      `${GH_TIMEOUT_ENV} must be an integer of milliseconds in 1..${GH_TIMEOUT_MS_MAX}, got ${JSON.stringify(raw)}`,
-    );
+  // Digits only, checked on the STRING: `Number("1e3")` and `Number("0x10")`
+  // are perfectly good integers, so the numeric check alone would let them in.
+  const n = /^\d+$/.test(raw.trim()) ? Number(raw) : NaN;
+  return assertGhTimeoutMs(n, GH_TIMEOUT_ENV, JSON.stringify(raw));
+}
+
+/**
+ * Refuse a bound no spawn path can honour, whichever way it arrived. The env
+ * var is not the only door: `ghJsonOnce` takes `opts.timeoutMs` and
+ * `runCapturing` takes it positionally, and unvalidated the two paths read the
+ * SAME bad value in opposite directions — `spawnSync` treats `timeout: 0` as
+ * "no bound" (the hang, back), while `setTimeout` fires 0, NaN and anything
+ * past 2^31-1 ms after ~1 ms ("effectively unbounded" becomes "kill at once").
+ * `shown` is what the error quotes, so the env path can show the raw string.
+ */
+export function assertGhTimeoutMs(ms: number, source: string, shown: string = String(ms)): number {
+  if (!Number.isInteger(ms) || ms <= 0 || ms > GH_TIMEOUT_MS_MAX) {
+    throw new Error(`${source} must be an integer of milliseconds in 1..${GH_TIMEOUT_MS_MAX}, got ${shown}`);
   }
-  return Number(raw);
+  return ms;
 }
 
 /** The spawn-result fields the explanation needs — nothing more, so it is testable. */
@@ -104,7 +118,7 @@ export function explainTermination(
   const why = err?.code === "ENOBUFS"
     ? `output exceeded maxBuffer${maxBuffer === undefined ? "" : ` (${maxBuffer} bytes)`}`
     : err?.code === "ETIMEDOUT"
-    ? `timed out${timeoutMs === undefined ? "" : ` after ${timeoutMs} ms`} (raise ${GH_TIMEOUT_ENV} to allow longer)`
+    ? `timed out${timeoutMs === undefined ? "" : ` after ${timeoutMs} ms`} (the bound is ${GH_TIMEOUT_ENV} unless the caller passed its own)`
     : err?.message ?? `killed by signal ${sp.signal ?? "unknown"}`;
   const own = ownStderr.trim();
   return own

@@ -27,7 +27,7 @@ import {
   type Finding,
   type Severity,
 } from "./finding_lib.ts";
-import { explainTermination, resolveGhTimeoutMs } from "./child_termination_lib.ts";
+import { assertGhTimeoutMs, explainTermination, resolveGhTimeoutMs } from "./child_termination_lib.ts";
 import { isMainModule } from "./main_module_lib.ts";
 import {
   DEFAULT_GENERATED_PATHS_CONFIG,
@@ -273,7 +273,11 @@ export function fetchGitattributesResult(
   const r = run("gh", ["api", path, "-H", "Accept: application/vnd.github.raw"]);
   if (r.status === 0) return { text: r.stdout, failure: null };
   const stderr = (r.stderr ?? "").trim();
-  const notFound = /\b404\b|Not Found/i.test(stderr);
+  // A TERMINATED child (`status: null` — timeout, maxBuffer, signal) is never a
+  // 404, whatever its stderr reads. Its text is now partly ours: a bound of 404
+  // renders "timed out after 404 ms", which would otherwise match, null the
+  // failure and drop the one warning that says the fallback list may be wrong.
+  const notFound = r.status !== null && /\b404\b|Not Found/i.test(stderr);
   return {
     text: null,
     failure: notFound ? null : `gh api ${path} failed (exit ${r.status}): ${stderr.slice(0, 200)}`,
@@ -739,6 +743,9 @@ export function runCapturing(
   maxBuffer: number,
   timeoutMs: number,
 ): { status: number | null; stdout: string; stderr: string } {
+  // `spawnSync` reads `timeout: 0` as NO bound, so an unvalidated 0 is the hang
+  // this exists to stop, arriving by the argument instead of the env var.
+  assertGhTimeoutMs(timeoutMs, "runCapturing timeoutMs");
   const sp = spawnSync(cmd, args, { encoding: "utf8", maxBuffer, timeout: timeoutMs, killSignal: "SIGKILL" });
   return {
     status: sp.status,

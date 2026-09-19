@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import * as assert from "node:assert/strict";
 import * as nodeFs from "node:fs";
+import * as nodeOs from "node:os";
 import * as nodePathMod from "node:path";
 
 import {
@@ -21,6 +22,7 @@ import {
   planReview,
   resolveGeneratedPaths,
   fetchGitattributes,
+  fetchGitattributesResult,
   severityFromVerdict,
   titleFor,
   toFindings,
@@ -467,6 +469,23 @@ describe("defaultRun", () => {
     assert.equal(r.status, 0);
     assert.equal(r.stdout, "ok");
     assert.equal(r.stderr, "");
+  });
+
+  // `spawnSync` reads `timeout: 0` as NO bound (measured: a 2 s child ran its
+  // full 2 s), so an unvalidated 0 is the hang this exists to stop, arriving by
+  // the argument instead of the env var. Refused BEFORE the spawn: the marker
+  // file proves the child never ran, rather than ran and was cleaned up after.
+  test("a bound of 0 is refused before spawning, never read as 'unbounded'", () => {
+    const marker = nodePathMod.join(nodeOs.tmpdir(), `run-capturing-zero-${process.pid}-${Date.now()}`);
+    try {
+      assert.throws(
+        () => runCapturing(process.execPath, ["-e", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran")`], 64 * 1024, 0),
+        /timeoutMs must be/,
+      );
+      assert.equal(nodeFs.existsSync(marker), false, "the child was spawned despite the unusable bound");
+    } finally {
+      nodeFs.rmSync(marker, { force: true });
+    }
   });
 });
 
@@ -1232,6 +1251,24 @@ describe("fetchGitattributes", () => {
   test("a 404 (no .gitattributes) returns null rather than throwing", () => {
     const text = fetchGitattributes("o/none", () => ({ status: 1, stdout: "", stderr: "HTTP 404" }));
     assert.equal(text, null);
+  });
+
+  // A terminated child's stderr is partly OUR text since STARK-6113, and a
+  // bound of 404 renders "timed out after 404 ms". Read as a 404 it nulls the
+  // failure, dropping the one warning that says the fallback list may be wrong.
+  test("a TERMINATED gh is a failure, never a 404, whatever its stderr reads", () => {
+    const r = fetchGitattributesResult("o/r", () => ({
+      status: null,
+      stdout: "",
+      stderr: "gh produced no stderr and was terminated: timed out after 404 ms (the bound is STARK_GH_TIMEOUT_MS unless the caller passed its own)",
+    }));
+    assert.equal(r.text, null);
+    assert.match(r.failure ?? "", /timed out after 404 ms/, "a timeout was classified as a missing file");
+  });
+
+  test("a real 404 is still not a failure (the guard did not over-reach)", () => {
+    const r = fetchGitattributesResult("o/none", () => ({ status: 1, stdout: "", stderr: "gh: Not Found (HTTP 404)" }));
+    assert.deepEqual(r, { text: null, failure: null });
   });
 });
 
