@@ -56,7 +56,12 @@ export interface BoundedSpawnResult {
    * no exit code, and inventing one (-1) throws the cause away. */
   status: number | null;
   signal: NodeJS.Signals | null;
-  /** Set when WE killed it: code `ETIMEDOUT` or `ENOBUFS`, as `spawnSync` does. */
+  /**
+   * Why `status` is null. Our own kills carry a code, as `spawnSync` does:
+   * `ETIMEDOUT` or `ENOBUFS`. A read pipe that failed mid-stream carries only a
+   * message — it is a termination we did not cause, and borrowing either code
+   * would report a bound this file never enforced.
+   */
   error?: Error;
 }
 
@@ -159,6 +164,41 @@ export async function spawnBounded(
     });
     const pgid = child.pid;
     if (pgid !== undefined) trackGroup(pgid);
+    /**
+     * A group id is ours only while the group has members: once it empties the
+     * kernel is free to reuse it, and `process.kill(-pgid)` signals whoever
+     * holds it NOW. That matters here precisely because this call can outlive
+     * its own child — `close` needs the stdio pipes closed, so a descendant
+     * that inherited them AND left the group (`setsid`) keeps the call open
+     * with the group already empty, and `terminate`'s SIGKILL then lands at the
+     * timeout on a stranger. So ESRCH latches: nothing follows the kernel
+     * saying the group is gone. Same guard `agent_dispatch_lib.ts::run` carries
+     * (STARK-6147); it belongs in the shared primitive too.
+     */
+    let groupGone = false;
+    const killOwnGroup = (signal: NodeJS.Signals | 0): void => {
+      if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
+      try {
+        process.kill(-pgid, signal);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ESRCH") return;
+        groupGone = true;
+        // The forwarding set has to learn it too, or the latch protects only
+        // half the file: `forward` signals every id in `liveGroups` through the
+        // module-level `killGroup`, which knows nothing about this latch and
+        // does not settle with the call. A Ctrl-C arriving after the group
+        // emptied — the window this whole guard exists for, a `setsid`
+        // descendant holding the pipes open — would then deliver the recycled-id
+        // signal by the other door. Untracking is also the honest state: with
+        // the group gone there is nothing left to forward to, so Node's default
+        // exit is the right disposition again.
+        releaseGroup(pgid);
+      }
+    };
+    // The leader's exit is the first moment the group can have emptied with
+    // this call still open. Probe with signal 0 — which delivers nothing —
+    // while the id cannot yet have been reused.
+    child.once("exit", () => killOwnGroup(0));
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let outBytes = 0;
@@ -199,7 +239,7 @@ export async function spawnBounded(
       if (settled || killing) return;
       killing = true;
       clearTimeout(timer);
-      if (pgid !== undefined) killGroup(pgid, "SIGKILL");
+      if (pgid !== undefined) killOwnGroup("SIGKILL");
       else child.kill("SIGKILL");
       child.stdout.destroy();
       child.stderr.destroy();
@@ -231,6 +271,36 @@ export async function spawnBounded(
     });
     child.stdout.once("end", () => { stdoutEnded = true; tryFinish(); });
     child.stderr.once("end", () => { stderrEnded = true; tryFinish(); });
+    /**
+     * An unlistened stream 'error' is an uncaught exception — the same class the
+     * `child.stdin` listener below exists for, and on the same object graph. It
+     * is worse on a READ pipe: a stream that errors never emits 'end', so the
+     * settle gate would be held shut anyway. So release that stream's gate —
+     * but NOT silently. A failed read pipe means bytes were lost, and `close`
+     * still carries the child's own exit code: settling on it alone hands the
+     * caller a truncated stdout wearing a clean `status: 0`. That is exactly the
+     * shape every caller here is built to refuse — `ghJsonOnce` checks
+     * `status === null` BEFORE parsing precisely because a `gh api --paginate`
+     * cut short leaves complete HTTP blocks that parse as a 200 silently missing
+     * every later page. So the first failure is remembered and reported as a
+     * termination (`status: null` + a cause `explainTermination` can name);
+     * whatever was read is still returned, as partial output always is.
+     */
+    let pipeError: Error | null = null;
+    const onPipeError = (which: "stdout" | "stderr") => (e: Error) => {
+      // No `code` is copied onto it: ENOBUFS and ETIMEDOUT are how
+      // `explainTermination` recognises OUR OWN kills, and a pipe failure
+      // borrowing one would be reported as a bound this file never enforced.
+      pipeError ??= new Error(
+        `${cmd} ${which} pipe failed before the stream ended ` +
+          `(${(e as NodeJS.ErrnoException).code ?? e.message}); its output is incomplete`,
+      );
+      if (which === "stdout") stdoutEnded = true;
+      else stderrEnded = true;
+      tryFinish();
+    };
+    child.stdout.on("error", onPipeError("stdout"));
+    child.stderr.on("error", onPipeError("stderr"));
     child.on("error", (e) => { if (claim()) reject(e); });
     if (opts.timeoutMs !== undefined) {
       const ms = opts.timeoutMs;
@@ -242,8 +312,12 @@ export async function spawnBounded(
       closed = {
         stdout: Buffer.concat(out).toString("utf8"),
         stderr: Buffer.concat(err).toString("utf8"),
-        status: code,
+        // A read pipe that failed lost bytes, so the child's exit code is not
+        // the outcome: `status: null` is the one signal every caller reads as
+        // "this output is a terminated child's, never a result".
+        status: pipeError === null ? code : null,
         signal: signal ?? null,
+        ...(pipeError === null ? {} : { error: pipeError }),
       };
       tryFinish();
     });

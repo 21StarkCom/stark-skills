@@ -241,3 +241,46 @@ test("maxBuffer kills the whole group, not only the writer", HANG_GUARD, async (
     fs.rmSync(pidFile, { force: true });
   }
 });
+
+// STARK-6245. The per-call ESRCH latch only guards `terminate`'s own kill.
+// `forward` signals every id in `liveGroups` through the module-level
+// `killGroup`, which knows nothing about the latch and does not settle with the
+// call — so a group the kernel has already reclaimed has to leave the
+// forwarding set the moment the latch trips, or the recycled-id signal the
+// latch exists to stop is simply delivered by the other door.
+test("a group the kernel has reclaimed is untracked while the call is still open", HANG_GUARD, async () => {
+  const pidFile = nodePath.join(os.tmpdir(), `bounded-spawn-reclaimed-${process.pid}-${Date.now()}`);
+  const before = process.listenerCount("SIGINT");
+  // The descendant `setsid`s OUT of the group and keeps stdout, so `close`
+  // never comes: the call stays open with the group provably empty — the exact
+  // window the latch exists for. The leader waits for the pid file, which perl
+  // writes only AFTER setsid, so "the group is empty when the leader exits" is
+  // an ordering guarantee here rather than a race.
+  const sh =
+    `perl -MPOSIX -e 'POSIX::setsid(); open(F, ">", $ARGV[0]); print F $$; close F; sleep 20' '${pidFile}' & ` +
+    `while [ ! -s '${pidFile}' ]; do sleep 0.05; done; exit 0`;
+  // The bound is a safety net, not the mechanism: the descendant is killed by
+  // hand below so the call closes in milliseconds instead of at the timeout.
+  let settled = false;
+  const running = spawnBounded("/bin/sh", ["-c", sh], { timeoutMs: 20_000 })
+    .then((r) => { settled = true; return r; });
+  assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while the child is live");
+  try {
+    const escaped = await pidFrom(pidFile);
+    assert.ok(escaped !== null, "the escaped descendant never reported its pid");
+    assert.ok(
+      await waitFor(() => process.listenerCount("SIGINT") === before),
+      "a group the kernel reported gone stayed in the forwarding set",
+    );
+    // What makes that drop mean the latch and not the settle: `claim()` releases
+    // the group on EVERY settle path, so a drop observed after the call finished
+    // would pin nothing at all.
+    assert.equal(settled, false, "the call settled first — the drop proves nothing about the latch");
+    // Let go of stdout so `close` can finally come.
+    process.kill(escaped, "SIGKILL");
+    await running;
+    assert.equal(process.listenerCount("SIGINT"), before);
+  } finally {
+    reap(pidFile);
+  }
+});

@@ -715,7 +715,7 @@ function renderSegmentHeader(marker: string, part: number, seg: NonNullable<Over
     return [
       marker,
       "",
-      `${OVERFLOW_PART_PREFIX}${part}: review summary,${position}.** The review summary did not fit ` +
+      `${OVERFLOW_PART_PREFIX}${part}: review summary, ${position}.** The review summary did not fit ` +
         "under the review body's character limit, so it is reproduced here in full" +
         (seg.total > 1 ? " across consecutive comments — read the segments in order" : "") +
         ". Nothing was dropped or truncated.",
@@ -728,7 +728,7 @@ function renderSegmentHeader(marker: string, part: number, seg: NonNullable<Over
   return [
     marker,
     "",
-    `${OVERFLOW_PART_PREFIX}${part}: one finding,${position}.** This finding is larger than GitHub's ` +
+    `${OVERFLOW_PART_PREFIX}${part}: one finding, ${position}.** This finding is larger than GitHub's ` +
       "comment limit, so its text continues across consecutive comments — read the segments in order. " +
       "Nothing was dropped or truncated.",
     "",
@@ -1198,11 +1198,30 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     const first = planBodySplit((kept) => renderBody(full, kept), findings, marker);
     if (!first.unfittable) return { ...first, ...full, summaryRelocated: false };
     const head = { summary: relocatedSummaryStub(opts.humanSummary) };
+    // Relocation is a degrade, not a reflex: it only helps when the stub is
+    // SHORTER than the summary it stands in for. A summary at or under
+    // RELOCATED_SUMMARY_HEAD_MAX comes back whole, plus the pointer — so the
+    // "degraded" body is bigger than the one that did not fit, an overflow
+    // comment duplicates a summary that was never the problem, and the pointer
+    // says "only its head is shown above" over the entire text. When the floor
+    // is blown by `postingAgentNote` / `agents_resolved` instead, refuse on the
+    // FIRST plan, whose `floorChars` is the real one.
+    if (head.summary.length >= opts.humanSummary.length) {
+      return { ...first, ...full, summaryRelocated: false };
+    }
     const leading = segmentChunks({ of: "summary" }, opts.humanSummary, marker, GITHUB_ISSUE_COMMENT_MAX);
     const second = planBodySplit(
       (kept) => renderBody(head, kept), findings, marker,
       GITHUB_REVIEW_BODY_MAX, GITHUB_ISSUE_COMMENT_MAX, leading,
     );
+    // A relocation that STILL does not fit is not a degrade either, for the same
+    // reason spelled the other way: the leading summary chunks cost
+    // OVERFLOW_PREAMBLE_RESERVE + OVERFLOW_LINK_RESERVE of footer, so a stub
+    // saving less than that leaves `second.floorChars` LARGER than the first
+    // plan's — and the refusal would then tell the operator to shorten by more
+    // than is actually needed while asserting a relocation that never happened.
+    // Nothing is posted either way, so report the plan that describes reality.
+    if (second.unfittable) return { ...first, ...full, summaryRelocated: false };
     return { ...second, ...head, summaryRelocated: true };
   };
   const summarizeSplit = (s: ReviewPlan) => ({
@@ -1242,12 +1261,15 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     // Name the number that was actually over the cap. The floor is the body's
     // non-finding parts PLUS the cross-link footer; reporting the first alone
     // reads as "310 chars against a 65536-char cap" when the footer is what
-    // does not fit.
+    // does not fit. The summary is always part of that floor and is named: a
+    // refused plan is never a relocated one (`plan` falls back to the
+    // un-relocated plan when relocation does not make the body fit), so this
+    // number is the one the caller can act on.
     result.unpostedReason =
-      `body_over_cap_without_findings: with every finding and the summary already moved out the review ` +
+      `body_over_cap_without_findings: with every finding already moved out the review ` +
       `body still needs ${s.floorChars} chars against a ${GITHUB_REVIEW_BODY_MAX}-char cap — ` +
-      `${renderBody(s, []).length} of non-finding parts (postingAgentNote, agents_resolved) plus the ` +
-      `cross-link footer for ${s.chunks.length} overflow comment(s); ` +
+      `${renderBody(s, []).length} of non-finding parts (the summary, postingAgentNote, ` +
+      `agents_resolved) plus the cross-link footer for ${s.chunks.length} overflow comment(s); ` +
       "shorten what the caller passes — nothing was posted";
     return true;
   };
