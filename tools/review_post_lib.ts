@@ -30,6 +30,7 @@
  */
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
 
+import { explainTermination } from "./child_termination_lib.ts";
 import {
   buildMarker,
   compareSeverityDesc,
@@ -79,12 +80,13 @@ function rejectGraphqlPath(p: string): void {
 interface SpawnResult {
   stdout: string;
   stderr: string;
-  status: number;
-  /** Signal that killed the child, if any. `status` is -1 in that case;
-   * callers should consult `signal` before formatting "exit N" messages,
-   * since signal-killed processes have no real exit code. Optional so
-   * tests can construct SpawnResult literals without spelling it out. */
-  signal?: NodeJS.Signals | null;
+  /** Exit code, or `null` when the child was killed by a signal — a killed
+   * process has no exit code, and inventing one (-1) is what let the caller
+   * format a bare "failed:" with the cause thrown away. Same shape as
+   * `spawnSync`, so `explainTermination` reads it directly. */
+  status: number | null;
+  /** Signal that killed the child, if any. */
+  signal: NodeJS.Signals | null;
 }
 
 async function spawnCollect(
@@ -124,7 +126,7 @@ async function spawnCollect(
       closed = {
         stdout: Buffer.concat(out).toString("utf8"),
         stderr: Buffer.concat(err).toString("utf8"),
-        status: code ?? -1,
+        status: code,
         signal: signal ?? null,
       };
       tryFinish();
@@ -150,9 +152,21 @@ export async function ghJsonOnce(p: string, opts: GhJsonOpts = {}): Promise<GhJs
   const input = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
   if (input !== undefined) args.push("--input", "-");
   const res = await spawnCollect("gh", args, { input, env: { ...process.env } });
+  if (res.status === null) {
+    // Checked BEFORE stdout is parsed: a `--paginate` killed between pages
+    // leaves complete HTTP blocks behind, which parse as a clean 200 silently
+    // missing every later page. A terminated child's output is never a result.
+    const why = explainTermination("gh", res, res.stderr);
+    throw new GhError(-1, why, {}, `gh api ${p} failed: ${why.slice(0, 400)}`);
+  }
   const { headers, body, status } = parseHttpStream(res.stdout);
   if (status === 0) {
-    throw new GhError(-1, res.stderr || res.stdout, {}, `gh api ${p} failed: ${res.stderr.slice(0, 400)}`);
+    throw new GhError(
+      -1,
+      res.stderr || res.stdout,
+      {},
+      `gh api ${p} failed (exit ${res.status}): ${res.stderr.slice(0, 400)}`,
+    );
   }
   let data: unknown = null;
   if (body.length > 0) data = parseConcatenatedJson(body);

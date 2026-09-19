@@ -472,6 +472,16 @@ describe("explainTermination", () => {
     );
     assert.match(msg, /produced no stderr and was terminated: spawnSync gh ENOENT/);
   });
+
+  // review_post_lib's async `spawn` has no maxBuffer to report (STARK-6112).
+  test("a caller with no buffer cap omits maxBuffer and gets no 'undefined bytes'", () => {
+    const msg = explainTermination("gh", { status: null, signal: "SIGTERM" }, "");
+    assert.equal(msg, "gh produced no stderr and was terminated: killed by signal SIGTERM");
+    assert.doesNotMatch(
+      explainTermination("gh", { status: null, error: Object.assign(new Error("x"), { code: "ENOBUFS" }) }, ""),
+      /undefined/,
+    );
+  });
 });
 
 const BIFROST = "21StarkCom/bifrost";

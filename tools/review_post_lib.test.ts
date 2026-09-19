@@ -14,6 +14,9 @@
 //     short-circuits instead of posting twice.
 
 import { strict as assert } from "node:assert";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as nodePath from "node:path";
 import test from "node:test";
 
 import { buildMarker, type Finding } from "./finding_lib.ts";
@@ -22,6 +25,7 @@ import {
   buildReviewBody,
   findExistingMarker,
   GhError,
+  ghJsonOnce,
   OUT_OF_DIFF_HEADING,
   partitionInlineVsBody,
   postReview,
@@ -441,4 +445,80 @@ test("findExistingMarker: a review merely CONTAINING the marker does not match",
     ghJsonFn: ghMock as Parameters<typeof findExistingMarker>[0]["ghJsonFn"],
   });
   assert.equal(found, false);
+});
+
+// ─── ghJsonOnce: a terminated `gh` names its cause (STARK-6112) ─────────────
+//
+// Driven through a REAL fake `gh` on PATH rather than an injected spawn seam:
+// the defect lived in how a signal kill crosses `spawnCollect` → `ghJsonOnce`,
+// and a seam would let that mapping rot while the test stayed green.
+
+/** Run `fn` with a throwaway `gh` shell script first on PATH. */
+async function withFakeGh(script: string, fn: () => Promise<void>): Promise<void> {
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "fake-gh-"));
+  fs.writeFileSync(nodePath.join(dir, "gh"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  const prevPath = process.env.PATH;
+  process.env.PATH = `${dir}${nodePath.delimiter}${prevPath ?? ""}`;
+  try {
+    await fn();
+  } finally {
+    process.env.PATH = prevPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("ghJsonOnce: a gh killed before writing stderr names the signal, not a bare 'failed:'", async () => {
+  await withFakeGh("kill -TERM $$", async () => {
+    await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/reviews"), (err: unknown) => {
+      assert.ok(err instanceof GhError);
+      assert.equal(err.status, -1);
+      assert.doesNotMatch(err.message, /failed:\s*$/);
+      assert.match(err.message, /terminated: killed by signal SIGTERM/);
+      return true;
+    });
+  });
+});
+
+test("ghJsonOnce: the termination cause precedes a chatty child's stderr and survives the 400-char slice", async () => {
+  // 600 chars of noise: a cause appended AFTER it would be sliced away.
+  const noise = "w".repeat(600);
+  await withFakeGh(`printf '%s' '${noise}' >&2\nkill -KILL $$`, async () => {
+    await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/reviews"), (err: unknown) => {
+      assert.ok(err instanceof GhError);
+      const cause = err.message.indexOf("killed by signal SIGKILL");
+      const own = err.message.indexOf("www");
+      assert.ok(cause >= 0, `cause missing from: ${err.message}`);
+      assert.ok(own > cause, "child stderr must FOLLOW the cause");
+      return true;
+    });
+  });
+});
+
+test("ghJsonOnce: a gh killed mid-paginate is a failure, never a truncated 200", async () => {
+  // One complete page reached stdout before the kill. Parsed alone it is a
+  // valid 200 with one review — silently missing every later page.
+  const page = 'HTTP/2.0 200 OK\\r\\ncontent-type: application/json\\r\\n\\r\\n[{"id":1}]';
+  await withFakeGh(`printf '${page}'\nkill -KILL $$`, async () => {
+    await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/reviews"), /killed by signal SIGKILL/);
+  });
+});
+
+test("ghJsonOnce: a normal non-zero exit keeps the child's own stderr and names the exit code", async () => {
+  await withFakeGh("echo 'gh: connection refused' >&2\nexit 7", async () => {
+    await assert.rejects(ghJsonOnce("/repos/o/r/pulls/1/reviews"), (err: unknown) => {
+      assert.ok(err instanceof GhError);
+      assert.match(err.message, /failed \(exit 7\): gh: connection refused/);
+      assert.doesNotMatch(err.message, /terminated/);
+      return true;
+    });
+  });
+});
+
+test("ghJsonOnce: a healthy gh still parses (the fake-gh harness itself works)", async () => {
+  const page = 'HTTP/2.0 200 OK\\r\\n\\r\\n[{"id":1}]';
+  await withFakeGh(`printf '${page}'`, async () => {
+    const r = await ghJsonOnce("/repos/o/r/pulls/1/reviews");
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.data, [{ id: 1 }]);
+  });
 });
