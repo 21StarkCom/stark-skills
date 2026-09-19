@@ -136,13 +136,20 @@ function forward(signal: NodeJS.Signals): void {
   // the exit probe, and that emptied later, was re-signalled on EVERY Ctrl-C an
   // embedding tool's own handler survived. Copied first — a latch that trips
   // mid-loop deletes from the set being walked.
+  //
+  // Read BEFORE the loop, never after it. A latch that trips on the LAST claim
+  // untracks, which removes this very listener mid-delivery: counted afterwards,
+  // an embedding tool's handler is the only one left, reads as "sole", and gets
+  // the re-raise below — one Ctrl-C delivered twice, the exact failure this
+  // guard exists to prevent, reintroduced by giving `forward` the latch.
+  const others = process.listenerCount(signal) > 1;
   for (const h of [...liveGroups]) signalHandle(h, signal);
   // Another listener means the embedding tool handles this signal itself. It
   // has already received THIS delivery, and our listener displaced no default
   // disposition — so re-raising would hand it one Ctrl-C twice (measured: its
   // handler fired 2x), and uninstalling would leave a still-live group deaf to
   // the next one.
-  if (process.listenerCount(signal) > 1) return;
+  if (others) return;
   // We alone stood between the signal and Node's default exit: re-raise with
   // our handlers gone, so this process dies BY the signal as it did when the
   // terminal delivered it to parent and child alike.
@@ -295,8 +302,8 @@ export async function spawnBounded(
       // would hold the process open long after the `gh` call it bounded returned.
       clearTimeout(timer);
       clearTimeout(reapTimer);
-      // Through the killer, never a bare `releaseGroup(pgid)`: if the latch has
-      // already let the id go, it may be another call's by now.
+      // The claim ends here, by identity — never by id: if the latch has already
+      // let the id go, that number may be another call's by now.
       killOwnGroup.release();
       return true;
     };
@@ -318,15 +325,22 @@ export async function spawnBounded(
       if (settled || killing) return;
       killing = true;
       clearTimeout(timer);
-      if (pgid !== undefined) killOwnGroup("SIGKILL");
-      else child.kill("SIGKILL");
+      // Whether the kernel ACCEPTED it (STARK-6735). Over a group the latch
+      // already holds gone — a leader that exited by itself, an escaped
+      // descendant holding stdout so `close` never came — this sends nothing.
+      const sent = pgid !== undefined ? killOwnGroup("SIGKILL") : child.kill("SIGKILL");
       child.stdout.destroy();
       child.stderr.destroy();
       const done = () => settle({
         stdout: Buffer.concat(out).toString("utf8"),
         stderr: Buffer.concat(err).toString("utf8"),
         status: null,
-        signal: "SIGKILL",
+        // Never an invented SIGKILL, the defect `run()` lost in the same change:
+        // one we delivered, else however the leader really ended (read here, at
+        // settle, since it may exit between the kill and its reaping). `status:
+        // null` and `error` are what say the bound fired — callers name the
+        // cause from `error`, so this field only has to be TRUE.
+        signal: sent ? "SIGKILL" : child.signalCode,
         error,
       });
       if (child.exitCode !== null || child.signalCode !== null) return done();

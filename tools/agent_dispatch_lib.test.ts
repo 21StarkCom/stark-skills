@@ -396,11 +396,11 @@ for (const runtime of ["claude", "codex"] as const) {
     // The grandchild runs in the FOREGROUND of its shell: a non-interactive
     // shell starts `&` jobs with SIGINT ignored. The signal waits for the ARMED
     // marker, not only the pids: the child writes its pids concurrently from
-    // the fork, possibly before `trackGroup` ran, and a signal landing there
+    // the fork, possibly before `makeGroupKiller` ran, and a signal landing there
     // kills the tool by DEFAULT disposition — "died by the signal" would pass
     // vacuously while the child is orphaned (the race STARK-6135's review
     // found). The marker is written after `run()` has returned its promise —
-    // the executor, `trackGroup` included, runs synchronously — and carries the
+    // the executor, `makeGroupKiller` included, runs synchronously — and carries the
     // listener count, so armed + died-by-signal can only be a real re-raise.
     for (const sig of ["SIGINT", "SIGTERM"] as const) {
       test(`${sig} to the tool alone terminates an in-flight child and its descendants`, { timeout: 30_000 }, async () => {

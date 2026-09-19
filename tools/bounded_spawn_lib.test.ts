@@ -56,12 +56,12 @@ function reap(file: string): void {
  * (STARK-6135). "The child reported its pids" does NOT mean forwarding is
  * armed: the child runs concurrently from the fork, so under load it writes
  * both pids while the tool is still descheduled between `spawn()` returning and
- * `trackGroup`. A signal landing there kills the tool by DEFAULT disposition —
+ * `makeGroupKiller`. A signal landing there kills the tool by DEFAULT disposition —
  * it still "dies by the signal", so that assertion passed vacuously — and
  * orphans the child, failing the test against correct code. Measured under a
  * parallel suite: 2 of 40 runs orphaned the child, both with the handler not
  * yet armed. The marker is written only after `spawnBounded` has returned (its
- * executor, `trackGroup` included, runs synchronously) and carries the listener
+ * executor, `makeGroupKiller` included, runs synchronously) and carries the listener
  * count, so "armed" + "died by the signal" can only be a genuine re-raise.
  */
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -255,17 +255,28 @@ test("a killer that never latched still releases exactly once at settle", () => 
 // swallowed ESRCH and untracked nothing — so a group that emptied AFTER the
 // leader's exit probe (an in-group descendant outliving it) was re-signalled on
 // every Ctrl-C an embedding tool's own handler survived, at an id free for
-// reuse. It now shares the per-call latch. The extra listener is what makes this
-// safe to run: with another handler present `forward` neither re-raises nor
-// uninstalls, so the signal is delivered to the test process's handlers only.
+// reuse. It now shares the per-call latch. The extra listener stands in for the
+// embedding tool's own handler: with one present `forward` must not re-raise.
+//
+// That is ASSERTED, not assumed. The latch is what put it at risk: a latch that
+// trips on the LAST claim untracks, which removes `forward`'s own listener
+// mid-delivery — so a sole-listener check read AFTER the loop counts the tool's
+// handler alone, mistakes it for nobody, and re-raises the signal at a tool that
+// has already handled it (the 2x delivery STARK-6131 measured). Self-directed
+// kills are therefore recorded and NOT delivered, and the tool's handler is
+// counted: an earlier cut of this test let the re-raise through to the real
+// `process.kill` and could not see it.
 test("a forwarded signal latches a reclaimed group: it is signalled once, not once per Ctrl-C", () => {
   const id = 2_000_000_004; // above any pid_max: every signal draws ESRCH
-  const own = (): void => { /* the embedding tool's own handler */ };
+  let ownFired = 0;
+  const own = (): void => { ownFired += 1; /* the embedding tool's own handler */ };
   process.on("SIGHUP", own);
   const real = process.kill;
   let attempts = 0;
+  const reRaised: Array<string | number | undefined> = [];
   process.kill = ((pid: number, signal?: string | number): true => {
     if (pid === -id) attempts += 1;
+    if (pid === process.pid) { reRaised.push(signal); return true; }
     return real.call(process, pid, signal);
   }) as typeof process.kill;
   const killer = makeGroupKiller(id);
@@ -273,6 +284,8 @@ test("a forwarded signal latches a reclaimed group: it is signalled once, not on
     process.emit("SIGHUP", "SIGHUP"); // Node passes the name, as a real delivery does
     assert.equal(attempts, 1, "the forwarded signal never reached the claimed group");
     assert.equal(killer.gone, true, "forward heard ESRCH and did not latch the call's killer");
+    assert.deepEqual(reRaised, [], "re-raised at a tool that has its own handler — the latch untracked mid-delivery and the sole-listener check was read after it");
+    assert.equal(ownFired, 1, "the tool's own handler did not see exactly one delivery");
     process.emit("SIGHUP", "SIGHUP"); // Node passes the name, as a real delivery does
     assert.equal(attempts, 1, "a second Ctrl-C re-signalled an id the kernel had reported gone");
     assert.equal(killer("SIGKILL"), false, "the call's own ladder signalled after forward had latched");
@@ -356,6 +369,37 @@ test("a group the kernel has reclaimed is untracked while the call is still open
     await running;
     assert.equal(process.listenerCount("SIGINT"), before);
   } finally {
+    reap(pidFile);
+  }
+});
+
+// STARK-6735 — the sibling of `run()`'s phantom SIGKILL, on this file's own
+// path. `terminate` reported `signal: "SIGKILL"` outright. Over a group the
+// latch already holds gone — a leader that exited by itself, with an escaped
+// descendant holding stdout so `close` never comes — the timeout's SIGKILL is
+// swallowed and NOTHING is sent. `status: null` + ETIMEDOUT are what say the
+// bound fired; `signal` must not invent how the child died. Same shape as the
+// test above, except the bound IS the mechanism here.
+test("a timeout over a group already gone reports no SIGKILL, because none was sent", HANG_GUARD, async () => {
+  const pidFile = nodePath.join(os.tmpdir(), `bounded-spawn-phantom-${process.pid}-${Date.now()}`);
+  const sh =
+    `perl -MPOSIX -e 'POSIX::setsid(); open(F, ">", $ARGV[0]); print F $$; close F; sleep 20' '${pidFile}' & ` +
+    `while [ ! -s '${pidFile}' ]; do sleep 0.05; done; exit 0`;
+  const real = process.kill;
+  const delivered: Array<string | number | undefined> = [];
+  process.kill = ((pid: number, signal?: string | number): true => {
+    if (pid < 0 && signal !== 0) delivered.push(signal); // a signal-0 probe delivers nothing
+    return real.call(process, pid, signal);
+  }) as typeof process.kill;
+  try {
+    const r = await spawnBounded("/bin/sh", ["-c", sh], { timeoutMs: 1_500 });
+    assert.equal((r.error as NodeJS.ErrnoException | undefined)?.code, "ETIMEDOUT", "settled some other way — the timeout path went untested");
+    assert.deepEqual(delivered, [], `the premise failed — something WAS sent: ${JSON.stringify(delivered)}`);
+    assert.equal(r.status, null, "a terminated call's output must never read as a result");
+    assert.equal(r.signal, null, "reported a SIGKILL for a child that was never signalled");
+  } finally {
+    process.kill = real; // before `reap`, which signals through it
+    await waitFor(() => fs.existsSync(pidFile), 2_000);
     reap(pidFile);
   }
 });

@@ -625,12 +625,12 @@ test("realRunner: a missing binary is a spawn failure, never a hang", async () =
 // pids. "The seat reported its pids" does NOT mean forwarding is armed: the
 // seat runs concurrently from the fork, so under load it writes both pids while
 // the dispatcher is still descheduled between `spawn()` returning and
-// `trackGroup`. A signal landing there kills the dispatcher by DEFAULT
+// `makeGroupKiller`. A signal landing there kills the dispatcher by DEFAULT
 // disposition — it still "dies by the signal", so that assertion passed
 // vacuously — and orphans the seat, failing the test against correct code.
 // Measured under a parallel suite: 4 of 40 runs orphaned the seat, and in all 4
 // the handler was not yet armed (0 orphans with it armed). The marker is
-// written only after `realRunner` has returned — its executor, `trackGroup`
+// written only after `realRunner` has returned — its executor, `makeGroupKiller`
 // included, runs synchronously — and carries the listener count, so "armed" +
 // "died by the signal" can only be a genuine re-raise.
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -745,7 +745,11 @@ test("realRunner: a seat whose group emptied leaves the forwarding set before em
     const outcome = await running;
     assert.ok(Date.now() - started >= EXIT_CLOSE_GRACE_MS, "settled before the grace — the descendant never held stdout, so nothing here was tested");
     assert.equal(outcome.timedOut, true);
-    assert.equal(outcome.kill, null, `the ladder climbed a group the kernel had reported gone: ${JSON.stringify(outcome.kill)}`);
+    // Nothing sent — and the report SAYS so: a bare `null` renders as "no kill
+    // report", the same words a seat with no pid gets, and names nothing.
+    assert.deepEqual(outcome.kill?.signals, [], `the ladder climbed a group the kernel had reported gone: ${JSON.stringify(outcome.kill)}`);
+    assert.equal(outcome.kill?.attempted, false);
+    assert.match(outcome.kill?.detail ?? "", /already gone/, "a timeout over an emptied group must still name why nothing was killed");
     assert.equal(outcome.code, 0, "the leader's own exit was thrown away");
     assert.equal(process.listenerCount("SIGINT"), before);
   } finally {

@@ -734,6 +734,19 @@ export async function killProcessGroup(pgid: number, deps: KillDeps = {}): Promi
   };
 }
 
+/**
+ * The report for a timeout that fired over a group the leader's exit probe had
+ * already found empty (STARK-6735). `attempted: false` is that field's
+ * documented meaning — no live process group to signal — and `signals` stays
+ * empty because nothing was sent: the id is free for reuse.
+ */
+const GROUP_GONE_AT_EXIT_PROBE: KillReport = {
+  attempted: false,
+  signals: [],
+  survivors: false,
+  detail: "group already gone at the leader's exit probe; nothing signalled",
+};
+
 // ---------------------------------------------------------------------------
 // The real runner
 // ---------------------------------------------------------------------------
@@ -827,7 +840,14 @@ export const realRunner: SeatRunner = (req) =>
       // A group the kernel already reported gone has no ladder to climb: its id
       // is free for reuse, and SIGTERM there lands on whoever holds it NOW
       // (STARK-6735 — the guard `run()` has carried since STARK-6147).
-      killing = pgid === undefined || group.gone ? Promise.resolve(null) : killProcessGroup(pgid);
+      // It still gets a REPORT, never `null`: the kill report is the one piece
+      // of evidence a timeout exists to produce, and `null` renders as "no kill
+      // report" — the same words a seat with no pid at all gets. The ladder this
+      // replaced said "group already gone at SIGTERM"; skipping the SIGTERM must
+      // not also skip saying so. A fresh copy per seat: `signals` is an array.
+      if (pgid === undefined) killing = Promise.resolve(null);
+      else if (group.gone) killing = Promise.resolve({ ...GROUP_GONE_AT_EXIT_PROBE, signals: [] });
+      else killing = killProcessGroup(pgid);
       void killing.catch(() => null);
     }, req.timeoutMs);
 
