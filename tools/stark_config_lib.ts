@@ -225,10 +225,10 @@ export const DEFAULT_IAC_REVIEW = {
  *
  * `repos` is keyed by `owner/name`, so a repo-specific list is expressible
  * without a flag: `{ paths: [...] }` REPLACES the layer below it,
- * `{ add: [...] }` EXTENDS it. `catalog/**` lives here rather than in
- * `default` because it is true of bifrost alone — a sync PR machine-rewrites
- * that tree without declaring it generated — and baking it into the built-in
- * default would demote a hand-written `catalog/` in every other repo.
+ * `{ add: [...] }` EXTENDS it. It ships EMPTY since STARK-7536 — the comment
+ * on `repos` below says which entry it used to carry and why that entry went.
+ * A catalog glob must never migrate up into `default` either: it would demote
+ * a hand-written `catalog/` in every other repo.
  *
  * `enabled: false` turns the split off globally, exactly like
  * `--no-generated-split` per run.
@@ -263,20 +263,30 @@ export const DEFAULT_GENERATED_PATHS_CONFIG: GeneratedPathsConfig = {
   // Empty on purpose since STARK-7536. It carried
   // `"21StarkCom/bifrost": { add: ["catalog/**"] }` while bifrost machine-rewrote that
   // tree WITHOUT declaring it generated — the condition the comment above names. bifrost
-  // now marks `catalog/*/skills/**` and `catalog/*/commands/**` `linguist-generated=true`
-  // itself (STARK-7363), so the entry became redundant on every normal run AND actively
-  // wrong: `catalog/**` is broader than what is generated, so it also demoted bifrost's
-  // CURATED `catalog/*/bundle.yaml` and `catalog/*/mcp/**` — a finding on either is
-  // fixable exactly where it is posted and should hold a merge, and mcp/ is a
-  // code-execution surface on a developer's machine.
+  // now marks `catalog/standards/**`, `catalog/*/skills/**` and `catalog/*/commands/**`
+  // `linguist-generated=true` itself (STARK-7363), so the entry became redundant on every
+  // normal run AND broader than what is generated: it also demoted the hand-authored
+  // parts of that tree — `catalog/*/bundle.yaml`'s membership block, `catalog/*/mcp/**`
+  // and `catalog/*/agents/**` — whose findings are fixable exactly where they are posted
+  // and should hold a merge.
+  //
+  // THE TRADE, stated rather than implied: `catalog/*/bundle.yaml` is not purely curated
+  // in a SYNC PR. `marketplace-sync.yml` patch-bumps its `version:` line, so all seven
+  // bundle.yaml files appear in every sync diff carrying that machine-written hunk and
+  // nothing else (verified on bifrost@d23f84a7). A finding anchored there now opens a
+  // gating thread on the SHARED `auto/marketplace-sync` branch — the STARK-5637 failure
+  // mode, at one file per bundle. Judged worth it because the curated membership block is
+  // what a review actually lands findings on, and because the cover is per-run and
+  // explicit rather than baked in: `--add-generated-paths 'catalog/*/bundle.yaml'`.
   //
   // Not re-added in narrowed form on purpose: mirroring another repo's globs here is the
   // drift this file's own comment argues against, and STARK-6095's stated direction is
-  // that the target repo's rows are the source of truth. Accepted consequence: if
-  // bifrost's `.gitattributes` is ever unfetchable, the resolver fails OPEN to `default`
-  // above, which carries no catalog glob — so generated catalog findings would open
-  // inline threads that run. That path warns on stderr; it is a rare, announced state,
-  // not a silent one.
+  // that the target repo's rows are the source of truth. Accepted consequence: the split
+  // now rests entirely on bifrost's rows being readable AT THE PR HEAD. Two states resolve
+  // with no catalog glob at all — an unfetchable `.gitattributes`, which fails OPEN to
+  // `default` above and warns on stderr, and a bifrost branch cut before the declaring
+  // commit (`a23e6a26`), which does NOT warn because the read succeeded and the older
+  // declaration is simply narrower. Both are rare; only the first announces itself.
   repos: {},
 };
 

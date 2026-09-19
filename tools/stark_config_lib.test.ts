@@ -387,16 +387,20 @@ test("generated_paths: no catalog glob ships in the defaults, globally or per re
   assert.deepEqual(DEFAULT_GENERATED_PATHS_CONFIG.repos, {});
 });
 
-test("generated_paths: a repo entry is expressible per repo and merges in", async () => {
+test("generated_paths: a repo entry is expressible per repo, from the user layer", async () => {
   await withScratchHome((home) => {
     writeGlobalConfig(home, {
       generated_paths: { repos: { "o/other": { paths: ["gen/**"] } } },
     });
     const cfg = getGeneratedPathsConfig();
     assert.deepEqual(cfg.repos["o/other"], { paths: ["gen/**"] });
-    // No repo entry ships by default since STARK-7536, so the user's is the whole map —
-    // which is what proves the user layer is read at all, rather than merely merged into
-    // something that was already there.
+    // No repo entry ships by default since STARK-7536, so the user's is the whole map.
+    // That is why this no longer says "merges in": with an empty base there is nothing to
+    // merge WITH, so it proves only that the user layer is read. `deepMerge`'s actual
+    // map-merge semantics — a user key added without clobbering its siblings — are pinned
+    // on the sections that still ship defaults (`getModelRates`, `getModelLimits`,
+    // `getRuntimeConfig`), and the resolver's own per-repo layering is pinned in
+    // `findings_review_post.test.ts` against an explicit `config`.
     assert.deepEqual(cfg.repos, { "o/other": { paths: ["gen/**"] } });
   });
 });

@@ -528,36 +528,65 @@ describe("defaultRun", () => {
 const BIFROST = "21StarkCom/bifrost";
 
 /**
- * Verbatim from `21StarkCom/bifrost`'s `.gitattributes`: its
- * `linguist-generated=true` rows plus `text eol=lf` rows that must NOT be read as
- * generated. Note `catalog/**` carries ONLY `text eol=lf` — the generated catalog
- * trees are declared narrowly, per bundle, as standards, skills and commands
- * (STARK-7363). That narrowness is the point: a bundle's own `bundle.yaml` and its
- * `mcp` dir are CURATED and must keep their inline threads, which is why no
- * `catalog` wildcard is shipped for this repo any more (STARK-7536).
+ * `21StarkCom/bifrost`'s `.gitattributes`, byte for byte as of `a23e6a26`
+ * (2026-09-19) — every line, in file order, including the rows this reader must
+ * NOT take (`text eol=lf`) and the comment block interleaved between the taken
+ * ones. Verbatim rather than a tidied extract on purpose: the last time this
+ * fixture was a reformatted subset it drifted from the file it names and nothing
+ * caught it, which is the same class of bug STARK-6095 removed from the RUNTIME
+ * path by reading the repo's own rows instead of a hand-copied mirror. There is
+ * no cross-repo gate on this copy from this side; bifrost pins its own rows in
+ * `engine/cmd/stark/gitattributes_test.go`. Re-copy it whole, never patch it.
  *
- * (Paths are spelled out in the array below rather than in this prose: a glob
+ * Note the catalog wildcard carries ONLY `text eol=lf` — the generated catalog
+ * trees are declared narrowly, as standards, skills and commands (STARK-7363),
+ * which is why no catalog wildcard is shipped for this repo any more
+ * (STARK-7536). See the routing test below for what that narrowness does and
+ * does not buy.
+ *
+ * (Paths are spelled out in the array rather than in this prose: a glob
  * containing a star-slash would close this block comment.)
  */
 const BIFROST_GITATTRIBUTES = [
-  "* text=auto eol=lf",
-  "",
-  "dist/**                 linguist-generated=true",
-  "catalog/standards/**    linguist-generated=true",
-  "catalog/*/skills/**     linguist-generated=true",
-  "catalog/*/commands/**   linguist-generated=true",
-  "vendor/**               linguist-generated=true",
-  "index.json              linguist-generated=true",
-  "bundles/**              linguist-generated=true",
-  ".claude-plugin/**       linguist-generated=true",
-  "catalog/**              text eol=lf",
+  "catalog/** text eol=lf",
+  "schema/** text eol=lf",
+  "*.go text eol=lf",
+  "dist/** linguist-generated=true",
+  "catalog/standards/** linguist-generated=true",
+  "# The catalog's artifact trees: `stark sync` writes them from a stark-skills checkout and",
+  "# the next sync overwrites a hand-edit. No in-repo gate names one AS a hand-edit —",
+  "# `build --check` and `check-bumps` both fail on it, like any other content change; only",
+  "# `sync --check` (stark-skills' marketplace-sync runs it, right after regenerating)",
+  "# compares the catalog back to its source. Marking them collapses them in a sync PR's diff.",
+  "# Deliberately NOT here: catalog/*/bundle.yaml, catalog/*/mcp/** and catalog/*/agents/** —",
+  "# curated (`runSync` manages only skills/ and commands/); note stark-skills' own",
+  "# `generated_paths` add-list (`catalog/**`) demotes those anyway until narrowed THERE",
+  "# — STARK-7536 / stark-skills#1029 does exactly that, and lands after this PR.",
+  "# What these rows do and do NOT do: CLAUDE.md's `catalog/<bundle>/` Layout entry.",
+  "# Pinned by engine/cmd/stark/gitattributes_test.go (cross-repo contract, no CI step reads",
+  "# this file otherwise).",
+  "catalog/*/skills/** linguist-generated=true",
+  "catalog/*/commands/** linguist-generated=true",
+  "vendor/** linguist-generated=true",
+  "index.json linguist-generated=true",
+  "bundles/** linguist-generated=true",
+  ".claude-plugin/** linguist-generated=true",
   "",
 ].join("\n");
 
-/** A config with no repo entries at all, so a layer under test stands alone. */
+/**
+ * A config with no repo entries at all, so a layer under test stands alone.
+ *
+ * `default` is DERIVED, never restated: that list existing in more than one
+ * place is what let `.claude-plugin/**` go missing from one copy (see the
+ * shipped-config drift suite at the bottom of this file). `repos` stays an
+ * explicit literal — the whole point of this constant is to be empty of repo
+ * entries no matter what the shipped default grows, which spreading would not
+ * guarantee.
+ */
 const BARE_CONFIG: GeneratedPathsConfig = {
   enabled: true,
-  default: ["vendor/**", "dist/**", "bundles/**", ".claude-plugin/**", "index.json"],
+  default: [...DEFAULT_GENERATED_PATHS_CONFIG.default],
   repos: {},
 };
 
@@ -746,15 +775,13 @@ describe("generated-path routing", () => {
     assert.equal(matchGeneratedPath("engine/internal/install/testdata/index.json", DEFAULT_GENERATED_PATHS), null);
   });
 
-  test("the resolved bifrost list covers every path a sync PR machine-rewrites", () => {
+  test("the resolved bifrost list covers the generated trees a sync PR rewrites", () => {
     // Taken from `git show --stat` on a real sync commit plus bifrost's
     // `.gitattributes` `linguist-generated=true` rows. `.claude-plugin/**` was
     // missing from the first cut of the hand-copied list, so the one file every
     // sync touches kept opening a gating thread — the exact failure the split
     // exists to prevent. That is why the rows are now READ from the repo:
-    // resolving them here, not restating them. `CHANGELOG.md` is the
-    // counter-case: a sync writes it, but it is hand-reviewable, so it must
-    // keep its inline thread.
+    // resolving them here, not restating them.
     const { patterns } = resolveGeneratedPaths({
       repo: BIFROST,
       gitattributes: BIFROST_GITATTRIBUTES,
@@ -766,19 +793,31 @@ describe("generated-path routing", () => {
       "bundles/stark-ops.json",
       "catalog/stark-ops/skills/agnes.md",
       "catalog/stark-analyze/commands/stark-fresh-eyes.md",
+      "catalog/standards/stand-down.md",
       ".claude-plugin/marketplace.json",
       "index.json",
     ]) {
       assert.notEqual(matchGeneratedPath(f, patterns), null, `${f} must demote`);
     }
-    // CURATED, and the reason `catalog/**` is no longer shipped for bifrost
-    // (STARK-7536): a finding on the hand-authored membership manifest or on an MCP
-    // server definition is fixable exactly where it is posted and must keep the inline
-    // thread that holds a merge. mcp/ is a code-execution surface on a developer's
-    // machine, so demoting it to a non-gating body entry is the worst case of all.
+    // The deliberate NOT-demoted set, and the reason the catalog wildcard is no longer
+    // shipped for bifrost (STARK-7536): `bundle.yaml`'s membership block, an MCP server
+    // definition and `agents/` are all authored by hand, and a finding on one is fixable
+    // exactly where it is posted, so it must keep the inline thread that holds a merge.
+    //
+    // This is a TRADE, not a free win, and the test name says "generated trees" rather
+    // than "every path" because of it: `catalog/*/bundle.yaml` is ALSO machine-written in
+    // a sync PR — `marketplace-sync.yml` patch-bumps its `version:` line, so all seven
+    // appear in every sync diff carrying that hunk and nothing else (bifrost@d23f84a7).
+    // A finding anchored on that hunk is now a gating thread on the SHARED
+    // `auto/marketplace-sync` branch, which is the STARK-5637 failure mode; the per-run
+    // escape hatch is `--add-generated-paths 'catalog/*/bundle.yaml'`.
+    //
+    // `CHANGELOG.md` is the older counter-case in the same family: a sync writes it, but
+    // it is hand-reviewable, so it keeps its thread on purpose.
     for (const f of [
       "catalog/stark-ops/bundle.yaml",
       "catalog/stark-ops/mcp/example.yaml",
+      "catalog/stark-ops/agents/x.md",
       "CHANGELOG.md",
     ]) {
       assert.equal(matchGeneratedPath(f, patterns), null, `${f} must stay inline`);
@@ -1071,9 +1110,11 @@ describe("resolveGeneratedPaths against a real repo", () => {
     // The acceptance case: sourced ENTIRELY from the repo's `.gitattributes`, with no
     // hand-copied mirror and — since STARK-7536 — no repo-keyed addition either. The
     // empty `added` is the assertion that matters: while a wildcard covering the whole
-    // catalog was bolted on here, it also demoted bifrost's CURATED bundle.yaml and mcp
-    // entries, whose findings are fixable where they are posted and must keep an inline
-    // thread. Anything reappearing in `added` for this repo is that bug returning.
+    // catalog was bolted on here, it also demoted the hand-authored parts of the catalog
+    // (`bundle.yaml`'s membership block, `mcp/`, `agents/`), whose findings are fixable
+    // where they are posted and must keep an inline thread. Anything reappearing in
+    // `added` for this repo is a decision, not a default — re-adding a catalog glob here
+    // (rather than per run, with `--add-generated-paths`) is the bug returning.
     const r = resolveGeneratedPaths({
       repo: BIFROST,
       gitattributes: BIFROST_GITATTRIBUTES,
