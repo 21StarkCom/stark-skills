@@ -70,7 +70,9 @@ const SUPPORT_FILES = [
   "standards/help.md",
   "standards/index.md",
   "standards/preflight.md",
+  "standards/stand-down.md",
   "standards/stage-completion-line.md",
+  "standards/worker-spine.md",
   "standards/templates/docs-index.md",
   "tools/alert_delivery_lib.ts",
   "tools/approach_contract_lib.ts",
@@ -125,13 +127,17 @@ test("Codex runtime override inventory is exact", () => {
   // make it a tautology.
   assert.equal(
     expected.length,
-    53,
+    56,
     `runtime-overrides/codex inventory size changed (computed ${expected.length}) — if the tree is right, bump this literal`,
   );
 });
 
 test("required Codex parity skills remain model-discoverable", () => {
-  for (const name of ["stark-bury", "gru", "minion"]) {
+  // agnes belongs here for the same reason gru and minion do, and one step
+  // harder: the operator launches her with `hermod ticket … --prompt-file`
+  // whose entire body is `$agnes STARK-n`, so a `disable-model-invocation:
+  // true` here does not degrade her — it makes the launch a no-op.
+  for (const name of ["stark-bury", "agnes", "gru", "minion"]) {
     const body = fs.readFileSync(
       path.join(CODEX_ROOT, "skill", name, "SKILL.md"),
       "utf8",
