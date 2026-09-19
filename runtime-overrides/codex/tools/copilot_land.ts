@@ -60,7 +60,11 @@ import {
   type LandDeps,
   type OpenPr,
 } from "./copilot_land_lib.ts";
-import { ticketFromBranch, writePrOpenFields, type FieldRunResult } from "./ticket_fields_lib.ts";
+import {
+  resolveTicketForFields,
+  writePrOpenFields,
+  type FieldRunResult,
+} from "./ticket_fields_lib.ts";
 
 // ── git shell helpers (the CLI owns the side-effect surface) ───────────────
 
@@ -88,7 +92,15 @@ function gh(args: string[], cwd: string = process.cwd()): Shell {
 // ordinary non-zero result rather than an exception that would take the whole
 // landing down after the PR is already open.
 function alfred(args: string[], cwd: string = process.cwd()): FieldRunResult {
-  const r = spawnSync("alfred", args, { cwd, encoding: "utf8", timeout: 60_000 });
+  // maxBuffer matched to `gh` above rather than left at Node's 1 MiB default:
+  // an ENOBUFS arrives as a spawn-shaped failure with the real answer thrown
+  // away, which would read as "alfred could not run" on a call that ran fine.
+  const r = spawnSync("alfred", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: 60_000,
+    maxBuffer: 32 * 1024 * 1024,
+  });
   const stderr = [(r.stderr ?? "").trim(), r.error?.message ?? ""].filter(Boolean).join("; ");
   return { code: r.status ?? -1, stdout: (r.stdout ?? "").trim(), stderr };
 }
@@ -489,10 +501,18 @@ async function cmdLand(argv: string[]): Promise<number> {
       title,
       known_prs: knownPrs,
       // The ticket the real run would stamp, as far as it can be known WITHOUT
-      // a subprocess: `--ticket`, else the branch name. A dry run deliberately
-      // does not reach alfred for the third rung (its bound ticket), so `null`
-      // here means "not decidable offline", never "no ticket exists".
-      ticket: ticket ?? ticketFromBranch(branch),
+      // a subprocess. It walks the SAME ladder the real run walks, with the
+      // third rung (alfred's bound ticket) answered "unavailable" by an
+      // injected run that never spawns — so `null` here means "not decidable
+      // offline", never "no ticket exists". Re-deriving it as
+      // `ticket ?? ticketFromBranch(branch)` looked equivalent and was not: it
+      // echoed `--ticket stark-77` raw while the real run writes `STARK-77`,
+      // so the plan named a ticket the act did not.
+      ticket: resolveTicketForFields({
+        explicit: ticket,
+        branch,
+        run: () => ({ code: -1, stdout: "", stderr: "dry run: no subprocess" }),
+      }).ticket,
     };
     process.stdout.write(JSON.stringify(plan, null, 2) + "\n");
     return 0;

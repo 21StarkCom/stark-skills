@@ -302,6 +302,15 @@ test("copilot_land land: --dry-run names the ticket it could resolve offline", (
   );
   assert.equal(explicit.ticket, "STARK-9");
 
+  // The plan must name the ticket the ACT would stamp, so it walks the same
+  // ladder rather than re-deriving one. Echoing `--ticket` raw printed
+  // `stark-77` for a run that writes `STARK-77` — a dry run that names a
+  // different ticket than the real one is worse than no dry run.
+  const cased = JSON.parse(
+    runIn(h, [...LAND_REAL, h.dir, "--branch", "copilot/x", "--ticket", "stark-77", "--dry-run"]).out,
+  );
+  assert.equal(cased.ticket, "STARK-77");
+
   const unknown = JSON.parse(runIn(h, [...LAND_REAL, h.dir, "--branch", "copilot/x", "--dry-run"]).out);
   assert.equal(unknown.ticket, null);
 
