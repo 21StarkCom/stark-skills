@@ -27,7 +27,6 @@ import {
   partitionInlineVsBody,
   planBodySplit,
   postReview,
-  renderOverflowComment,
 } from "./review_post_lib.ts";
 
 function makeFinding(over: Partial<Finding> = {}): Finding {
@@ -434,14 +433,11 @@ test("planBodySplit: severity order decides what stays in the body", () => {
   // keeps the longest prefix that fits, so the lowest severities overflow.
   const plan = planBodySplit((kept) => buildReviewBody("M", "s", kept), findings, "M");
   assert.deepEqual(plan.kept.map((f) => f.title), ["CRIT", "HIGH"]);
-  assert.deepEqual(plan.chunks.flat().map((f) => f.title), ["LOW"]);
+  assert.deepEqual(plan.chunks.flatMap((c) => c.findings).map((f) => f.title), ["LOW"]);
 });
 
-test("planBodySplit: a single over-cap finding gets its own chunk rather than truncation", () => {
-  const huge = makeFinding({ id: "huge", title: "HUGE", body: "y".repeat(80_000), file: "o/x.ts" });
-  const plan = planBodySplit((kept) => buildReviewBody("M", "s", kept), [huge], "M");
-  assert.equal(plan.kept.length, 0);
-  assert.equal(plan.chunks.length, 1);
-  assert.equal(plan.chunks[0].length, 1);
-  assert.ok(renderOverflowComment("M", 1, plan.chunks[0]).includes("y".repeat(80_000)));
-});
+// "A single over-cap finding gets its own chunk rather than truncation" lived
+// here and pinned the defect STARK-6116 fixed: that one chunk was a comment
+// GitHub 422s, which failed the whole run. The no-truncation half of the rule
+// survives, in `review_post_overcap.test.ts` — the finding is now segmented
+// across comments that each fit, reassembling byte for byte.
