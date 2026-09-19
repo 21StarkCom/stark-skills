@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<!-- idun:pr-merge pr=1017 runId=1017 sha=c8daf1ef -->
+- fix(STARK-6186): /gru falls back to a proved `--cwd` when a ticket's repo isn't registered with frigg, instead of hard-failing every multi-repo epic.
 <!-- idun:pr-merge pr=1014 runId=1014 sha=09821247 -->
 - Fixed `run()` in `agent_dispatch_lib.ts` leaking orphaned grandchild processes past its timeout by group-killing the whole process tree and forwarding Ctrl-C to it (STARK-6147).
 <!-- idun:pr-merge pr=1013 runId=1013 sha=59baea5e -->
