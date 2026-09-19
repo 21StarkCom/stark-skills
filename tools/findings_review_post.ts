@@ -18,6 +18,7 @@ import { spawnSync } from "node:child_process";
 
 import {
   GITHUB_REVIEW_BODY_MAX,
+  computeRunHash,
   postReview,
   type PostReviewResult,
 } from "./review_post_lib.ts";
@@ -995,6 +996,13 @@ export function readPayload(path: string): ReportFindingsPayload {
  */
 export { GITHUB_REVIEW_BODY_MAX };
 
+/**
+ * Re-exported from `review_post_lib.ts`, where the marker's run hash lives
+ * beside the up-front skip it protects (STARK-6125) — same reason the body cap
+ * above moved there: every caller of `postReview` inherits the failure.
+ */
+export { computeRunHash };
+
 async function main(argv: string[]): Promise<number> {
   if (argv.some((a) => a === "-h" || a === "--help" || a === "help")) {
     console.log(HELP);
@@ -1041,7 +1049,7 @@ async function main(argv: string[]): Promise<number> {
     pr: args.pr,
     round: 1,
     agent: args.agent,
-    runHash: plan.findings.map((f) => f.id).join(",").slice(0, 40) || "empty",
+    runHash: computeRunHash(plan.findings, plan.humanSummary, ctx.headSha),
     findings: plan.findings,
     changedFiles: plan.inlineEligibleFiles,
     // "low" so severity never filters a finding out of the review — the
@@ -1054,6 +1062,12 @@ async function main(argv: string[]): Promise<number> {
   // No size refusal here any more: `postReview` owns the cap and degrades over
   // it (overflow comments), so an oversize payload posts rather than exiting 2.
   const result: PostReviewResult = await postReview({ ...postOpts, dryRun: args.dryRun });
+  if (result.alreadyPosted) {
+    console.error(
+      `findings_review_post: this exact review is already on ${args.repo}#${args.pr}` +
+        `${result.reviewId !== undefined ? ` (review ${result.reviewId})` : ""} — nothing posted.`,
+    );
+  }
   console.log(JSON.stringify({
     findings: plan.findings.length,
     generatedPathSplit: {
