@@ -61,17 +61,32 @@ function oversizeBodyFindings(n: number, chars = 9_000): Finding[] {
   );
 }
 
-/** A `gh` mock that records every POST body, split by endpoint. */
+/**
+ * A `gh` mock that records every POST body, split by endpoint, and keeps the
+ * LIVE body of each issue comment — a PATCH edits a comment in place, so
+ * `comments` (what was posted) and `live` (what the PR ends up showing) are
+ * different questions and a duplication bug only shows in the first.
+ */
 function recordingGh() {
   const reviews: string[] = [];
   const comments: string[] = [];
+  const edits: Array<{ id: number; body: string }> = [];
+  const live = new Map<number, string>();
   let commentId = 500;
   const gh = async (p: string, opts?: { method?: string; body?: unknown }) => {
-    if (opts?.method !== "POST") return { status: 200, data: [], headers: {} };
-    const body = (opts.body as { body: string }).body;
+    const method = opts?.method ?? "GET";
+    if (method !== "POST" && method !== "PATCH") return { status: 200, data: [], headers: {} };
+    const body = (opts!.body as { body: string }).body;
+    if (method === "PATCH") {
+      const id = Number(p.split("/").pop());
+      edits.push({ id, body });
+      live.set(id, body);
+      return { status: 200, data: { id }, headers: {} };
+    }
     if (p.includes("/issues/")) {
       commentId++;
       comments.push(body);
+      live.set(commentId, body);
       return {
         status: 201,
         data: {
@@ -84,7 +99,7 @@ function recordingGh() {
     reviews.push(body);
     return { status: 200, data: { id: 1 }, headers: {} };
   };
-  return { gh, reviews, comments };
+  return { gh, reviews, comments, edits, live };
 }
 
 type GhFn = Parameters<typeof postReview>[0]["ghJsonFn"];
@@ -289,14 +304,75 @@ test("postReview: dry-run reports the overflow split without posting anything", 
   );
 });
 
-test("postReview: a 422-fallback rebuild reuses overflow comments, never duplicating them", async () => {
-  // The anchor fallback rebuilds the body with the demoted findings. That must
-  // not re-post the overflow chunks it already created on the PR.
+test("postReview: a 422-fallback rebuild edits its overflow comments instead of duplicating them", async () => {
+  // The anchor fallback merges the demoted findings into the body findings and
+  // re-plans, which shifts which finding lands in which chunk. Addressing the
+  // comments by CONTENT misses the cache for every shifted chunk: a SECOND
+  // comment carrying the same findings, with the first left on the PR linked
+  // from nowhere. Addressing them by SLOT edits the one comment in place.
+  //
+  // `DEMOTED` is low-severity and big, so the merge puts it at the END of the
+  // sorted list — inside the overflow, which is what changes a chunk that is
+  // already posted. Asserting only "no two comment bodies are byte-identical"
+  // passes while the duplicates are on the PR; count each finding instead.
   const findings: Finding[] = [
     ...oversizeBodyFindings(12),
-    makeFinding({ id: "anchored", file: "a.ts", line: 1, title: "ANCHORED" }),
+    makeFinding({
+      id: "anchored",
+      severity: "low",
+      file: "zz.ts",
+      line: 1,
+      title: "DEMOTED",
+      body: "d".repeat(9_000),
+    }),
   ];
-  const { gh, reviews, comments } = recordingGh();
+  const { gh, reviews, comments, edits, live } = recordingGh();
+  let reviewPosts = 0;
+  const flaky = async (p: string, opts?: { method?: string; body?: unknown }) => {
+    if (opts?.method === "POST" && !p.includes("/issues/")) {
+      reviewPosts++;
+      if (reviewPosts === 1) throw new GhError(422, "line must be part of the diff", {});
+    }
+    return await gh(p, opts);
+  };
+  const r = await postReview({
+    ...BASE,
+    findings,
+    changedFiles: new Set(["zz.ts"]),
+    dryRun: false,
+    ghJsonFn: flaky as GhFn,
+  });
+  assert.equal(r.posted, true);
+  assert.equal(reviews.length, 1, "exactly one review landed");
+  assert.ok(edits.length > 0, "the rebuild must edit the chunk it already posted");
+  assert.equal(comments.length, r.bodyOverflow!.chunks, "one comment per chunk, no second copy");
+  assert.equal(r.bodyOverflowComments!.length, comments.length);
+
+  // Every finding appears exactly ONCE across what the PR actually shows, and
+  // every comment the run created is linked from the body it posted.
+  const shown = [reviews[0], ...live.values()].join("\n");
+  for (const f of findings) {
+    // A title ends its rendered line, so match it with the newline — bare
+    // `OVERSIZE-FINDING-1` is also a substring of `-10` and `-11`.
+    const hits = shown.split(`${f.title}\n`).length - 1;
+    assert.equal(hits, 1, `${f.title} appears ${hits} times on the PR, expected exactly 1`);
+  }
+  for (const id of r.bodyOverflowComments!) {
+    assert.ok(reviews[0].includes(`#issuecomment-${id}`), `comment ${id} is linked from nowhere`);
+  }
+});
+
+test("postReview: a demoted critical finding takes the review body, not an overflow comment", async () => {
+  // `partitionInlineVsBody` sorts each list severity-desc, but concatenating
+  // two sorted lists is not sorted — and the split keeps the longest PREFIX
+  // that fits. Appending the demoted findings puts a `critical` behind every
+  // `low` body finding, so the highest-severity finding in the run is the one
+  // that gets pushed out of the body.
+  const findings: Finding[] = [
+    ...oversizeBodyFindings(12).map((f) => ({ ...f, severity: "low" as const })),
+    makeFinding({ id: "crit", severity: "critical", file: "a.ts", line: 1, title: "CRIT-DEMOTED" }),
+  ];
+  const { gh, reviews, comments, live } = recordingGh();
   let reviewPosts = 0;
   const flaky = async (p: string, opts?: { method?: string; body?: unknown }) => {
     if (opts?.method === "POST" && !p.includes("/issues/")) {
@@ -313,12 +389,17 @@ test("postReview: a 422-fallback rebuild reuses overflow comments, never duplica
     ghJsonFn: flaky as GhFn,
   });
   assert.equal(r.posted, true);
-  assert.equal(reviews.length, 1, "exactly one review landed");
-  assert.equal(new Set(comments).size, comments.length, "no duplicate overflow comment bodies");
-  assert.equal(r.bodyOverflowComments!.length, comments.length);
-  const reachable = `${reviews.join("\n")}\n${comments.join("\n")}`;
-  assert.ok(reachable.includes("ANCHORED"), "the demoted finding survived the rebuild");
-  for (const f of findings) assert.ok(reachable.includes(f.title), `${f.title} was lost`);
+  assert.ok(comments.length > 0, "expected the payload to overflow");
+  assert.ok(reviews[0].includes("CRIT-DEMOTED"), "the critical finding must keep the review body");
+  assert.ok(
+    ![...live.values()].some((c) => c.includes("CRIT-DEMOTED")),
+    "the critical finding must not be the one pushed into an overflow comment",
+  );
+  assert.equal(
+    r.bodyOverflow!.findingsInBody + r.bodyOverflow!.findingsInOverflow,
+    findings.length,
+    "reordering must not lose a finding",
+  );
 });
 
 test("postReview: a failed overflow comment reports unposted instead of losing findings", async () => {
