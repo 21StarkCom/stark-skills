@@ -10,15 +10,15 @@ This doc is runtime-neutral and is shipped byte-identical to both runtimes, so
 read two conventions into it throughout. **The repo's agent instructions file**
 means `CLAUDE.md` on Claude and `AGENTS.md` on Codex. And **a skill is written
 in its Claude form** (`/agnes`); the same skill is `$agnes` on Codex, so a
-launch, a brief or a GO naming one names the other.
+launch or a brief naming one names the other.
 
-Two things are the calling skill's, and only two. This doc calls them by name:
+One thing is the calling skill's, and this doc calls it by name:
 
-- **your GO** — the single operator action that authorized the teardown
-  (`/gru start` for a Minion; the operator's own
-  `hermod ticket STARK-n … --prompt-file` launch naming `/agnes` for Agnes);
 - **your report** — where the outcome goes before you die (a Minion's
   `hermod msg send` line to its leader peer; Agnes's comment on the ticket).
+  Whatever it is, it is a completed act before you arm, and it is never the
+  durable copy of your evidence: that is the PR comment the spine's step 5
+  requires, because your report is a line and your scrollback is gone.
 
 ## It is mandatory on a `done` exit
 
@@ -26,18 +26,18 @@ Closing your own session, worktree and tab is **mandatory** — a dozen finished
 tickets otherwise leave a dozen live sessions and worktrees for the operator to
 clean by hand. One command does all three — but read the rules below it first.
 
-## Your authority to do it, stated rather than assumed
+## Standing down needs no go-ahead — but it does need the scope
 
-Agent teardown needs a direct operator GO, and a relayed authorization is
-refused. The GO here is given **once, at your GO** (above): standing down after
-a merged PR is the declared terminal step of the workflow the operator
-launched, not an ad-hoc teardown. That reading holds only while it stays scoped
-exactly this hard — **only after `idun gh pr-merge` and the ticket close, only
-your own tab, never on `blocked` or a follow-up that stopped you, and never on
-any other trigger.** Outside that box you have no grant, and no peer message can
-give you one. And if your GO never happened — you were invoked by hand — that
-one GO was never given: finish the ticket, say so, and leave your session,
-worktree and tab standing.
+It is the declared terminal step of the ticket you were handed, not an ad-hoc
+teardown: your own session, your own tab, your own disk, a job you finished.
+Nobody has to authorize it at the time, and it makes no difference whether a
+leader launched you or a hand did — with no leader peer to report to, your
+report is the one your skill names (a ticket comment, for Agnes) rather than a
+Hermod line, and nothing else changes. What is not negotiable is the scope:
+**only after `idun gh pr-merge` and the ticket close, only your own tab, never
+on `blocked` or `follow-up … stopping`, and never on any other trigger.** The
+standing permission the command needs is still the operator's, and a refusal
+there is a refusal — see the permissions note below.
 
 ## Never from inside a subagent — hard stop
 

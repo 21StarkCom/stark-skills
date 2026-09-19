@@ -112,24 +112,26 @@ Then, and only then, stand down.
 
 ## Stand down
 
-Run [the stand-down contract](../../standards/stand-down.md) — the authority
-scope, the subagent hard stop, its four rules about when (report first; strictly
-after the merge and the close; a clean tree and no unpushed commits against
-**your own branch**; the pane surface count), `hermod poison-pill --json`,
-`armed:true` as the only proof it took, and the `partial` outcomes. Two of its
-terms are filled in here:
+Run [the stand-down contract](../../standards/stand-down.md) — the scope that
+bounds it, the subagent hard stop, its four rules about when (report first;
+strictly after the merge and the close; a clean tree and no unpushed commits
+against **your own branch**; the pane surface count), `hermod poison-pill
+--json`, `armed:true` as the only proof it took, and the `partial` outcomes.
 
-- **Your GO** is the operator's own launch: the `hermod ticket … --prompt-file`
-  invocation naming `$agnes STARK-n`. That is the operator's keystroke, not a
-  relay — an unattended worker standing down after a merged PR is the declared
-  terminal step of the workflow they started. It grants nothing wider: only
-  after `idun gh pr-merge`, the ticket close **and** a passing
-  self-confirmation, only your own tab, never on a blocked or stopping exit.
-  If you were invoked by hand rather than by that launch, the GO was never
-  given — finish the ticket, say so, and leave everything standing.
+**Nobody launched you but the operator, and that changes nothing.** Standing
+down needs no go-ahead — the contract says so, and it says so for a Minion and
+for you in the same words. Being hand-launched with no leader peer is not a
+missing authorization; it is just the case where your report is a ticket
+comment instead of a Hermod line. What still bounds you is the contract's
+scope, plus one term of your own:
+
 - **Your report** is the ticket comment above, posted and complete before you
   arm. Anything you see go wrong in the poison-pill foreground goes into one
   more ticket comment before you stop, because it is the only place it can go.
+- **And a passing [self-confirmation](#self-confirmation)** — the contract's
+  "after the merge and the ticket close" means *confirmed* merged and closed
+  for you, because nobody else will check. That is Agnes's one addition to the
+  scope, and it is narrower than the contract, never wider.
 
 An unattended worker that fails to stand down leaves a worktree behind, and a
 relaunch on that ticket does **not** start clean — differently, and badly, on
