@@ -30,6 +30,7 @@
  */
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process";
 
+import { explainTermination } from "./child_termination_lib.ts";
 import {
   buildMarker,
   compareSeverityDesc,
@@ -79,12 +80,13 @@ function rejectGraphqlPath(p: string): void {
 interface SpawnResult {
   stdout: string;
   stderr: string;
-  status: number;
-  /** Signal that killed the child, if any. `status` is -1 in that case;
-   * callers should consult `signal` before formatting "exit N" messages,
-   * since signal-killed processes have no real exit code. Optional so
-   * tests can construct SpawnResult literals without spelling it out. */
-  signal?: NodeJS.Signals | null;
+  /** Exit code, or `null` when the child was killed by a signal — a killed
+   * process has no exit code, and inventing one (-1) is what let the caller
+   * format a bare "failed:" with the cause thrown away. Same shape as
+   * `spawnSync`, so `explainTermination` reads it directly. */
+  status: number | null;
+  /** Signal that killed the child, if any. */
+  signal: NodeJS.Signals | null;
 }
 
 async function spawnCollect(
@@ -124,11 +126,18 @@ async function spawnCollect(
       closed = {
         stdout: Buffer.concat(out).toString("utf8"),
         stderr: Buffer.concat(err).toString("utf8"),
-        status: code ?? -1,
+        status: code,
         signal: signal ?? null,
       };
       tryFinish();
     });
+    // A child that dies before draining its stdin fails the queued write with
+    // EPIPE on `child.stdin`, and an unlistened stream 'error' is an uncaught
+    // exception: it kills the whole tool before `close` can say WHY the child
+    // died. Only a body larger than the pipe buffer is still queued at that
+    // point — i.e. exactly the large review POSTs. `close` is the authoritative
+    // outcome, so the write error itself is dropped.
+    child.stdin.on("error", () => {});
     if (opts.input !== undefined) child.stdin.end(opts.input);
     else child.stdin.end();
   });
@@ -150,9 +159,25 @@ export async function ghJsonOnce(p: string, opts: GhJsonOpts = {}): Promise<GhJs
   const input = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
   if (input !== undefined) args.push("--input", "-");
   const res = await spawnCollect("gh", args, { input, env: { ...process.env } });
+  if (res.status === null) {
+    // Checked BEFORE stdout is parsed: a `--paginate` killed between pages
+    // leaves complete HTTP blocks behind, which parse as a clean 200 silently
+    // missing every later page. A terminated child's output is never a result.
+    const why = explainTermination("gh", res, res.stderr);
+    throw new GhError(-1, why, {}, `gh api ${p} failed: ${why.slice(0, 400)}`);
+  }
   const { headers, body, status } = parseHttpStream(res.stdout);
-  if (status === 0) {
-    throw new GhError(-1, res.stderr || res.stdout, {}, `gh api ${p} failed: ${res.stderr.slice(0, 400)}`);
+  // `gh api` exits 0 on every 2xx, so a non-zero exit behind one is the kill
+  // above reached by a plain exit: an earlier page landed, a later one died at
+  // the transport with no HTTP block to parse. Same truncated 200, same answer.
+  const partial = res.status !== 0 && status >= 200 && status < 300;
+  if (status === 0 || partial) {
+    const own = (partial ? res.stderr : res.stderr || res.stdout).trim();
+    // The exit code goes in the BODY, not only the message: `postReview`
+    // reports `err.body`, so a silent non-zero exit would otherwise surface in
+    // `unpostedReason` as a bare `http_-1: `.
+    const why = `gh exited ${res.status}${partial ? " after a partial 2xx response" : ""}: ${own}`;
+    throw new GhError(-1, why, {}, `gh api ${p} failed: ${why.slice(0, 400)}`);
   }
   let data: unknown = null;
   if (body.length > 0) data = parseConcatenatedJson(body);
