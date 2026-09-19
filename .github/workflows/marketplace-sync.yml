@@ -82,8 +82,15 @@ jobs:
       #
       # A RED run here means publication is STOPPED, not "unpublished but fine": this
       # step precedes the regen, so no sync PR is opened or refreshed at all, and every
-      # later push to main fails here too until the membership lands in bifrost. Land a
-      # new skill's bundle membership in bifrost BEFORE merging the skill here.
+      # later push to main fails here too until the membership lands in bifrost.
+      #
+      # "Land the membership in bifrost first" is NOT a standalone instruction — followed
+      # on its own it halts publication from the other side, because bifrost's
+      # importSkills is fail-closed on a declared member with no source and the regen step
+      # below then hard-errors on every push. The two merges are ONE window: see the
+      # ordering recipe in CLAUDE.md / AGENTS.md, and change it there and here together.
+      # A red run whose membership is already in bifrost is the regen failing, not this
+      # step — read which step actually failed before acting.
       #
       # The script path is a cross-repo contract with bifrost's default branch. Check it
       # explicitly: a bare invocation of a moved, renamed or non-executable script dies
