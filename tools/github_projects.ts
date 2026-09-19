@@ -23,8 +23,6 @@
  *   github_projects.ts load-config [--repo-root DIR]
  */
 
-import fs from "node:fs";
-
 import {
   addIssueToProject,
   checkSpecCompleteness,
@@ -41,6 +39,7 @@ import {
   transitionStatus,
   type FieldValue,
 } from "./github_projects_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `usage: github_projects.ts <command> [flags...]
 
@@ -282,19 +281,7 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    const realArgv = fs.realpathSync(argv1);
-    const realModule = fs.realpathSync(new URL(import.meta.url).pathname);
-    return realArgv === realModule;
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {

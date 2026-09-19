@@ -7,21 +7,9 @@
  * substitution in SKILL.md keeps working.
  */
 
-import fs from "node:fs";
 import { resolveSessionId } from "./session_id_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    const realArgv = fs.realpathSync(argv1);
-    const realModule = fs.realpathSync(new URL(import.meta.url).pathname);
-    return realArgv === realModule;
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   process.stdout.write(`${resolveSessionId()}\n`);
 }

@@ -11,8 +11,6 @@
  * internal result is stripped before printing, like the Python.
  */
 
-import fs from "node:fs";
-
 import {
   computeSuggestions,
   humanReadable,
@@ -21,6 +19,7 @@ import {
   VALID_CONTEXTS,
   type Context,
 } from "./skill_router_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 // ---------------------------------------------------------------------------
 // Tiny argv parser
@@ -105,19 +104,7 @@ function main(argv: string[]): number {
   return 0;
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    const realArgv = fs.realpathSync(argv1);
-    const realModule = fs.realpathSync(new URL(import.meta.url).pathname);
-    return realArgv === realModule;
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   try {
     process.exit(main(process.argv.slice(2)));
   } catch (err) {

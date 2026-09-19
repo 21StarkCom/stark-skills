@@ -14,7 +14,13 @@
 // symlinked path is the common one, and the naive guard no-ops exactly it.
 //
 // This resolves BOTH sides to a canonical filesystem path (following symlinks)
-// before comparing, so a symlinked entrypoint still matches. Usage:
+// before comparing, so a symlinked entrypoint still matches.
+//
+// `fileURLToPath` is load-bearing, not a style choice. The hand-rolled guards
+// this replaced (STARK-489) used `new URL(importMetaUrl).pathname`, which is
+// percent-ENCODED: under `~/Library/Application Support/` the space arrives as
+// `%20`, `realpathSync` throws ENOENT, the catch returns false — the same
+// silent exit-0 no-op, reached through a space instead of a symlink. Usage:
 //
 //   import { isMainModule } from "./main_module_lib.ts";
 //   if (isMainModule(import.meta.url)) { main(); }

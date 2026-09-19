@@ -35,6 +35,7 @@ import {
   type GitContext,
   type TaskInfo,
 } from "./stark_handover_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 const USAGE = `Usage: stark_handover.ts <resolve|save|resume|list> [options]
 
@@ -224,19 +225,7 @@ function cmdList(root: string, ctx: GitContext, all: boolean): void {
   emit({ root, entries });
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    const realArgv = fs.realpathSync(argv1);
-    const realModule = fs.realpathSync(new URL(import.meta.url).pathname);
-    return realArgv === realModule;
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
   if (args.help || args.cmd === null) {
     process.stdout.write(`${USAGE}\n`);

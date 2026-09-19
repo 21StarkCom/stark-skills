@@ -8,13 +8,13 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 import {
   discoverSkillBundles,
   findRepoRoot,
   type SkillBundle,
 } from "./skill_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 export type DietPatternId =
   | "inline-preflight"
@@ -276,24 +276,6 @@ function main(): void {
   process.exit(0);
 }
 
-// Match against both the lexical and realpath form of argv[1]:
-//   - Node type-stripping loader (Node 25+) sets import.meta.url
-//     to the realpath, so a symlinked invocation needs the realpath comparison.
-//   - NODE_OPTIONS=--preserve-symlinks-main keeps import.meta.url at the
-//     symlink URL, so we need the lexical comparison too.
-//   - realpathSync throws if argv[1] doesn't exist on disk (embedded runners
-//     that fake argv[1]); swallow that and fall through to "not invoked".
-function isInvokedAsScript(metaUrl: string): boolean {
-  const argv1 = process.argv[1];
-  if (argv1 === undefined) return false;
-  if (metaUrl === pathToFileURL(path.resolve(argv1)).href) return true;
-  try {
-    return metaUrl === pathToFileURL(fs.realpathSync(argv1)).href;
-  } catch {
-    return false;
-  }
-}
-
-if (isInvokedAsScript(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   main();
 }

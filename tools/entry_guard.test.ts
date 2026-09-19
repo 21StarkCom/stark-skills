@@ -6,9 +6,11 @@
 // through a symlink, so `main()` silently never runs and the process exits 0
 // having done nothing — a false green that is far worse than a crash.
 //
-// Every CLI tool here must resolve both sides with `realpathSync` before
-// comparing. This test spawns each one through a symlink and asserts it still
-// produces output.
+// Every CLI tool here must guard its entrypoint with `isMainModule` from
+// `main_module_lib.ts`, which resolves both sides with `realpathSync` before
+// comparing. Do not hand-roll that comparison: `main_module_lib.test.ts` fails
+// the suite on any private guard (STARK-489). This test spawns each tool
+// through a symlink and asserts it still produces output.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

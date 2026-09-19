@@ -9,6 +9,7 @@
 
 import fs from "node:fs";
 import { classify, logResult } from "./failure_classifier_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `Classify failure stderr into canonical categories.
 
@@ -73,16 +74,6 @@ function main(argv: string[]): number {
   return 0;
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    return fs.realpathSync(argv1) === fs.realpathSync(new URL(import.meta.url).pathname);
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

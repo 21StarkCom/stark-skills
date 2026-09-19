@@ -15,13 +15,12 @@
  * Exit code: 1 when `overall == "blocked"`, otherwise 0.
  */
 
-import fs from "node:fs";
-
 import {
   logResult,
   renderTable,
   runPreflight,
 } from "./preflight_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 const HELP = `usage: preflight.ts [--workflow NAME] [--json] [--skip-check NAME]...
 
@@ -108,19 +107,7 @@ async function main(argv: string[]): Promise<number> {
   return result.overall === "blocked" ? 1 : 0;
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    const realArgv = fs.realpathSync(argv1);
-    const realModule = fs.realpathSync(new URL(import.meta.url).pathname);
-    return realArgv === realModule;
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {

@@ -11,9 +11,8 @@
  * — consumed by `tools/stark_session_lib.ts:collectAlerts`.
  */
 
-import fs from "node:fs";
-
 import { checkAlerts } from "./alert_delivery_lib.ts";
+import { isMainModule } from "./main_module_lib.ts";
 
 interface ParsedArgs {
   flags: Map<string, true>;
@@ -52,19 +51,7 @@ function main(argv: string[]): number {
   return 0;
 }
 
-function isMain(): boolean {
-  try {
-    const argv1 = process.argv[1];
-    if (!argv1) return false;
-    const realArgv = fs.realpathSync(argv1);
-    const realModule = fs.realpathSync(new URL(import.meta.url).pathname);
-    return realArgv === realModule;
-  } catch {
-    return false;
-  }
-}
-
-if (isMain()) {
+if (isMainModule(import.meta.url)) {
   try {
     process.exit(main(process.argv.slice(2)));
   } catch (err) {
