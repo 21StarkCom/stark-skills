@@ -41,7 +41,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { stripCodeFences } from "./jury_verify.ts";
+import { FENCE_RE, stripCodeFences } from "./jury_verify.ts";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const SKILLS_ROOT = path.join(REPO_ROOT, "skill");
@@ -537,10 +537,14 @@ for (const { label, file, res } of LINK_SOURCES) {
 // false red — while a bare check under the `list-panes` alias or the `--plain`
 // porcelain (the spelling hermod's own session-start block recommends) matched
 // nothing and passed. `stripCodeFences` blanks fenced lines in place, so the
-// lines it changed are exactly the fenced ones.
+// lines it changed are exactly the fenced ones — the fence markers included,
+// which are not commands, so they are dropped rather than handed to a caller
+// that counts lines.
 function fencedLines(text: string): string[] {
   const prose = stripCodeFences(text).split("\n");
-  return text.split("\n").filter((line, i) => prose[i] !== line);
+  return text
+    .split("\n")
+    .filter((line, i) => prose[i] !== line && !FENCE_RE.test(line));
 }
 
 for (const dir of SHARED_DOC_DIRS) {
@@ -601,10 +605,19 @@ for (const dir of SHARED_DOC_DIRS) {
 const hermodTicketLines = (file: string): string[] =>
   fencedLines(fs.readFileSync(file, "utf8")).filter((line) => /^\s*hermod ticket\b/.test(line));
 
+// A launch spelled as inline code is a launch line too — Gru's step-3 Minion
+// launch, the one a Gru runs most, is one — so the fence filter alone left it
+// unchecked. A span counts when a ticket slot follows `hermod ticket`, so
+// `hermod ticket --help` and a bare `hermod ticket` in prose do not.
+const INLINE_LAUNCH_RE = /`(hermod ticket (?:\[?STARK-|<)[^`]*)`/g;
+const inlineTicketLaunches = (file: string): string[] =>
+  [...fs.readFileSync(file, "utf8").matchAll(INLINE_LAUNCH_RE)].map((m) => m[1]);
+
 for (const name of WORKER_SKILLS) {
-  test(`skill smoke: codex ${name} — every fenced hermod ticket launch passes --agent`, () => {
-    const lines = hermodTicketLines(path.join(CODEX_SKILL_ROOT, name, "SKILL.md"));
-    assert.ok(lines.length > 0, "no fenced `hermod ticket` launch line found");
+  test(`skill smoke: codex ${name} — every hermod ticket launch line passes --agent`, () => {
+    const file = path.join(CODEX_SKILL_ROOT, name, "SKILL.md");
+    const lines = [...hermodTicketLines(file), ...inlineTicketLaunches(file)];
+    assert.ok(lines.length > 0, "no `hermod ticket` launch line found");
     for (const line of lines) {
       assert.match(line, / --agent /, `launch line without --agent: ${line.trim()}`);
       assert.doesNotMatch(line, /\[--agent\b/, `--agent is optional on: ${line.trim()}`);

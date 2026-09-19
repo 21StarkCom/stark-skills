@@ -109,8 +109,9 @@ line.
   `hermod panes --pane <paneRef>` is no shortcut either — under a stale stamp
   it answers `not_found`.
 
-  This is a workaround with an end date. Hermod main resolves `panes` from the
-  live tree itself (STARK-7262), in no release up to v0.19.0. The two steps stay
+  This is a workaround with an end date. From `hermod v0.20.0`, `panes` resolves
+  from the live tree itself (STARK-7262; measured there: a bogus stamp on the
+  literal prefix is ignored and the count comes back right). The two steps stay
   correct there — the pasted id is simply what hermod would have found — so keep
   them until this contract pins a minimum hermod version. On that hermod the
   stamp is ignored once your surface resolves, so a mispasted id produces
