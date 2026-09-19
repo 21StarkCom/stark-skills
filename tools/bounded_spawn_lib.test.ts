@@ -13,7 +13,7 @@ import * as nodePath from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { releaseGroup, spawnBounded, trackGroup } from "./bounded_spawn_lib.ts";
+import { makeGroupKiller, releaseGroup, spawnBounded, trackGroup } from "./bounded_spawn_lib.ts";
 
 /** A never-settling call must FAIL the suite, not stall the required check. */
 const HANG_GUARD = { timeout: 30_000 };
@@ -207,6 +207,46 @@ test("trackGroup/releaseGroup pair installs and removes the handlers, release is
   releaseGroup(2_000_000_001);
   releaseGroup(2_000_000_001);
   assert.equal(process.listenerCount("SIGINT"), before);
+});
+
+// STARK-6377. `releaseGroup` is idempotent per ID; a call's release has to be
+// idempotent per CALL. Once the latch lets an id go the kernel may hand it to a
+// concurrent call's child, which tracks it again — and the first call's settle
+// path, releasing by id, would then delete the SECOND call's entry and leave a
+// live agent deaf to Ctrl-C. The id here is above any real pid_max, so the group
+// never exists: every signal draws ESRCH, and re-tracking it stands in for the
+// recycle with no pid counter to race.
+test("a latched call's settle does not release a later call that recycled its group id", () => {
+  const before = process.listenerCount("SIGINT");
+  const recycled = 2_000_000_002;
+  trackGroup(recycled);
+  const first = makeGroupKiller(recycled);
+  first(0);
+  assert.equal(process.listenerCount("SIGINT"), before, "ESRCH did not drop the group from the forwarding set");
+  trackGroup(recycled); // a second call's child was handed the id
+  try {
+    first.release(); // …and only now does the first call settle
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "the first call's settle released the second call's group");
+  } finally {
+    releaseGroup(recycled);
+  }
+  assert.equal(process.listenerCount("SIGINT"), before);
+});
+
+test("a killer that never latched still releases exactly once at settle", () => {
+  const before = process.listenerCount("SIGINT");
+  const id = 2_000_000_003;
+  trackGroup(id);
+  const killer = makeGroupKiller(id);
+  killer.release();
+  assert.equal(process.listenerCount("SIGINT"), before, "the settle-time release did not untrack the group");
+  trackGroup(id);
+  try {
+    killer.release();
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "a second release from the same call reached another call's entry");
+  } finally {
+    releaseGroup(id);
+  }
 });
 
 test("a timeout leaves no handler behind either", HANG_GUARD, async () => {

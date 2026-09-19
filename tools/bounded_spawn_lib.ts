@@ -150,9 +150,9 @@ export function releaseGroup(pgid: number): void {
 }
 
 /**
- * The ONE latched group-killer (STARK-6377). Every detached spawn path that
- * signals `-pgid` takes its killer from here — `spawnBounded` below,
- * `agent_dispatch_lib.ts::run`, and that file's Codex mirror — for the reason
+ * The ONE latched group-killer (STARK-6377). Three detached spawn paths take
+ * their killer from here — `spawnBounded` below, `agent_dispatch_lib.ts::run`,
+ * and that file's Codex mirror (jury is the exception, named below) — for the reason
  * `isSignallableGroup` is exported: a safety rule kept in three copies drifts,
  * and this one did. STARK-6245 taught the `spawnBounded` copy to release the
  * group on ESRCH while both `run()` copies kept a bare latch, so a Ctrl-C could
@@ -175,19 +175,49 @@ export function releaseGroup(pgid: number): void {
  * Signal `0` delivers nothing, which makes it the probe: call it from the
  * leader's `exit`, the first moment the group can have emptied with the call
  * still open and the last at which the id cannot yet have been reused.
+ *
+ * NOT routed through here: `jury_dispatch.ts::killProcessGroup`, which keeps its
+ * own ladder and stops at its first ESRCH, but releases the seat's group only
+ * when the outcome is emitted — so a seat whose leader exited with an escaped
+ * descendant holding stdout sits in the forwarding set, group possibly empty,
+ * for up to `EXIT_CLOSE_GRACE_MS`. Seconds rather than `run()`'s minutes, and
+ * still open.
  */
-export function makeGroupKiller(pgid: number | undefined): (signal: NodeJS.Signals | 0) => void {
+export function makeGroupKiller(pgid: number | undefined): GroupKiller {
+  const usable = pgid !== undefined && isSignallableGroup(pgid);
   let groupGone = false;
-  return (signal) => {
-    if (groupGone || pgid === undefined || !isSignallableGroup(pgid)) return;
+  let released = false;
+  const release = (): void => {
+    if (released || !usable) return;
+    released = true;
+    releaseGroup(pgid);
+  };
+  const kill = (signal: NodeJS.Signals | 0): void => {
+    if (groupGone || !usable) return;
     try {
       process.kill(-pgid, signal);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ESRCH") return;
       groupGone = true;
-      releaseGroup(pgid);
+      release();
     }
   };
+  return Object.assign(kill, { release });
+}
+
+/** What `makeGroupKiller` returns: the latched signaller plus THIS CALL's release. */
+export interface GroupKiller {
+  (signal: NodeJS.Signals | 0): void;
+  /**
+   * Drop the group from the forwarding set — at most once per CALL, which is
+   * not what `releaseGroup`'s per-ID idempotence gives. Once the latch has
+   * released an id the kernel is free to hand it to a concurrent call's child,
+   * which tracks it again; a settle path that then ran a bare
+   * `releaseGroup(pgid)` would delete THAT call's entry and leave a live agent
+   * deaf to Ctrl-C — the recycled-id hazard this factory exists for, turned on
+   * our own bookkeeping. So every settle path releases through here.
+   */
+  release(): void;
 }
 
 export async function spawnBounded(
@@ -231,7 +261,9 @@ export async function spawnBounded(
       // would hold the process open long after the `gh` call it bounded returned.
       clearTimeout(timer);
       clearTimeout(reapTimer);
-      if (pgid !== undefined) releaseGroup(pgid);
+      // Through the killer, never a bare `releaseGroup(pgid)`: if the latch has
+      // already let the id go, it may be another call's by now.
+      killOwnGroup.release();
       return true;
     };
     const settle = (r: BoundedSpawnResult) => { if (claim()) resolve(r); };

@@ -323,7 +323,7 @@ for (const runtime of ["claude", "codex"] as const) {
           await waitFor(() => process.listenerCount("SIGINT") === before),
           "a group the kernel reported gone stayed in the forwarding set",
         );
-        // What makes that drop mean the latch and not the settle: `finish`
+        // What makes that drop mean the latch and not the settle: `tryFinish`
         // releases the group on every settle path, so a drop observed after the
         // call finished would pin nothing at all.
         assert.equal(settled, false, "the call settled first — the drop proves nothing about the latch");
@@ -333,6 +333,10 @@ for (const runtime of ["claude", "codex"] as const) {
         assert.equal(res.timedOut, false, "the call ran to its bound — the descendant was never released");
         assert.equal(process.listenerCount("SIGINT"), before);
       } finally {
+        // The first assertion runs before perl has written its pid. A red there
+        // would reap an empty file and leave a `sleep 20` nobody else can reach
+        // (it left our session) holding the call open into the next test.
+        await waitFor(() => readPids(pidFile).length === 1, 2_000);
         reapPids(pidFile);
         fs.rmSync(dir, { recursive: true, force: true });
       }

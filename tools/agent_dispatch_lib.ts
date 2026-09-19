@@ -30,7 +30,7 @@ import * as path from "node:path";
 
 import { isCredentialEnvKey } from "./agent_env_lib.ts";
 import { assetConfigPath } from "./asset_root_lib.ts";
-import { makeGroupKiller, releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
+import { makeGroupKiller, trackGroup } from "./bounded_spawn_lib.ts";
 import { applyClaudeAuth } from "./claude_auth_lib.ts";
 import { geminiAuthSettings, resolveGeminiAuthMode } from "./gemini_auth_lib.ts";
 import { resolveVertexLocation, resolveVertexProject } from "./vertex_config_lib.ts";
@@ -185,8 +185,8 @@ const DEFAULT_OUTPUT_CAP = 32 * 1024 * 1024; // 32 MiB
 // whatever a headless claude/codex/gemini had spawned was reparented to init and
 // ran on (and billed) past the bound. `detached` also takes the child out of the
 // terminal's foreground group, so Ctrl-C is paid back through bounded_spawn_lib's
-// forwarding half (`trackGroup`/`releaseGroup`); the SIGTERM → SIGKILL ladder
-// stays this function's own.
+// forwarding half (`trackGroup`, released through the killer); the SIGTERM →
+// SIGKILL ladder stays this function's own.
 
 export async function run(
   cmd: string,
@@ -251,7 +251,9 @@ export async function run(
       // a normal close: nothing was killed, so nothing there is ours to signal.
       for (const t of ladder) clearTimeout(t);
       if (timedOutFlag) killTree("SIGKILL");
-      if (pgid !== undefined) releaseGroup(pgid);
+      // Through the killer, never a bare `releaseGroup(pgid)`: if the latch has
+      // already let the id go, it may be another call's by now.
+      killTree.release();
       resolve(closedResult);
     };
 
