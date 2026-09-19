@@ -17,6 +17,7 @@ import * as nodePath from "node:path";
 import { spawnSync } from "node:child_process";
 
 import {
+  GITHUB_REVIEW_BODY_MAX,
   postReview,
   type PostReviewResult,
 } from "./review_post_lib.ts";
@@ -1006,26 +1007,17 @@ export function readPayload(path: string): ReportFindingsPayload {
 }
 
 /**
- * GitHub's hard cap on a pull-request review body, in characters.
+ * Re-exported from `review_post_lib.ts`, where the cap now lives.
  *
- * This matters more since the generated-path split: a demoted finding's full
- * text moves OUT of an inline comment, which carries its own budget, and INTO
- * the one shared review body. Over the cap the POST 422s on `body is too long`
- * with no `errors[].index`, so `extract422Indices` returns `[]` and
- * `postReview`'s fallback demotes the REMAINING inline comments into that same
- * body, retries it larger, 422s again and reports `unposted` — every finding
- * lost, not one. Refusing up front turns that into one actionable message.
+ * STARK-5637 put a *refusal* here: a dry-run probe measured the body and this
+ * tool exited 2 rather than post into a guaranteed 422. That stopped the data
+ * loss but posted nothing, and it protected only this caller. STARK-6094 moved
+ * both the constant and the handling into `postReview`, which now **degrades**
+ * — the findings that fit stay in the review body, the rest are posted in full
+ * as cross-linked follow-up comments on the same PR. Every caller inherits it,
+ * and an oversize payload lands instead of needing a hand re-run.
  */
-export const GITHUB_REVIEW_BODY_MAX = 65536;
-
-/** The cap check, split out so a test can pin it without a network round trip. */
-export function bodyTooLarge(bodyChars: number): string | null {
-  if (bodyChars <= GITHUB_REVIEW_BODY_MAX) return null;
-  return `review body is ${bodyChars} chars, over GitHub's ${GITHUB_REVIEW_BODY_MAX}-char limit. ` +
-    "Posting would 422 on `body is too long`, and the fallback would fold the inline comments " +
-    "into the same body and fail again, losing every finding. Split the payload into smaller " +
-    "batches, or narrow --generated-paths so fewer findings are routed to the body.";
-}
+export { GITHUB_REVIEW_BODY_MAX };
 
 async function main(argv: string[]): Promise<number> {
   if (argv.some((a) => a === "-h" || a === "--help" || a === "help")) {
@@ -1083,17 +1075,9 @@ async function main(argv: string[]): Promise<number> {
     prHeadSha: ctx.headSha,
   };
 
-  // Measure the body EXACTLY rather than estimating it: a dry-run postReview
-  // builds the real body — same marker, same renderer — and returns before any
-  // network call, so this costs one string build and cannot drift from what the
-  // real post would send.
-  const probe = await postReview({ ...postOpts, dryRun: true });
-  const oversize = bodyTooLarge(probe.payloadSummary.bodyChars);
-  if (oversize) throw new Error(oversize);
-
-  const result: PostReviewResult = args.dryRun
-    ? probe
-    : await postReview({ ...postOpts, dryRun: false });
+  // No size refusal here any more: `postReview` owns the cap and degrades over
+  // it (overflow comments), so an oversize payload posts rather than exiting 2.
+  const result: PostReviewResult = await postReview({ ...postOpts, dryRun: args.dryRun });
   console.log(JSON.stringify({
     findings: plan.findings.length,
     generatedPathSplit: {
