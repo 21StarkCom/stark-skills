@@ -528,21 +528,29 @@ describe("defaultRun", () => {
 const BIFROST = "21StarkCom/bifrost";
 
 /**
- * Verbatim from `21StarkCom/bifrost`'s `.gitattributes` — the five
- * `linguist-generated=true` rows plus the `text eol=lf` row that must NOT be
- * read as generated. `catalog/**` appears there only as `text eol=lf`; it
- * reaches the resolved list through the repo CONFIG entry, which is the one
- * deliberate addition.
+ * Verbatim from `21StarkCom/bifrost`'s `.gitattributes`: its
+ * `linguist-generated=true` rows plus `text eol=lf` rows that must NOT be read as
+ * generated. Note `catalog/**` carries ONLY `text eol=lf` — the generated catalog
+ * trees are declared narrowly, per bundle, as standards, skills and commands
+ * (STARK-7363). That narrowness is the point: a bundle's own `bundle.yaml` and its
+ * `mcp` dir are CURATED and must keep their inline threads, which is why no
+ * `catalog` wildcard is shipped for this repo any more (STARK-7536).
+ *
+ * (Paths are spelled out in the array below rather than in this prose: a glob
+ * containing a star-slash would close this block comment.)
  */
 const BIFROST_GITATTRIBUTES = [
   "* text=auto eol=lf",
   "",
-  "dist/**            linguist-generated=true",
-  "vendor/**          linguist-generated=true",
-  "index.json         linguist-generated=true",
-  "bundles/**         linguist-generated=true",
-  ".claude-plugin/**  linguist-generated=true",
-  "catalog/**         text eol=lf",
+  "dist/**                 linguist-generated=true",
+  "catalog/standards/**    linguist-generated=true",
+  "catalog/*/skills/**     linguist-generated=true",
+  "catalog/*/commands/**   linguist-generated=true",
+  "vendor/**               linguist-generated=true",
+  "index.json              linguist-generated=true",
+  "bundles/**              linguist-generated=true",
+  ".claude-plugin/**       linguist-generated=true",
+  "catalog/**              text eol=lf",
   "",
 ].join("\n");
 
@@ -756,13 +764,25 @@ describe("generated-path routing", () => {
       "vendor/stark-skills/tools/gru.ts",
       "dist/claude/stark-ops/skills/gru/SKILL.md",
       "bundles/stark-ops.json",
-      "catalog/stark-ops/bundle.yaml",
+      "catalog/stark-ops/skills/agnes.md",
+      "catalog/stark-analyze/commands/stark-fresh-eyes.md",
       ".claude-plugin/marketplace.json",
       "index.json",
     ]) {
       assert.notEqual(matchGeneratedPath(f, patterns), null, `${f} must demote`);
     }
-    assert.equal(matchGeneratedPath("CHANGELOG.md", patterns), null);
+    // CURATED, and the reason `catalog/**` is no longer shipped for bifrost
+    // (STARK-7536): a finding on the hand-authored membership manifest or on an MCP
+    // server definition is fixable exactly where it is posted and must keep the inline
+    // thread that holds a merge. mcp/ is a code-execution surface on a developer's
+    // machine, so demoting it to a non-gating body entry is the worst case of all.
+    for (const f of [
+      "catalog/stark-ops/bundle.yaml",
+      "catalog/stark-ops/mcp/example.yaml",
+      "CHANGELOG.md",
+    ]) {
+      assert.equal(matchGeneratedPath(f, patterns), null, `${f} must stay inline`);
+    }
   });
 
   test("a generated finding outside every hunk still carries its declared line", () => {
@@ -936,6 +956,9 @@ describe("parseGeneratedGlobs", () => {
   test("reads exactly the linguist-generated=true rows, in file order", () => {
     assert.deepEqual(parseGeneratedGlobs(BIFROST_GITATTRIBUTES), [
       "dist/**",
+      "catalog/standards/**",
+      "catalog/*/skills/**",
+      "catalog/*/commands/**",
       "vendor/**",
       "index.json",
       "bundles/**",
@@ -1044,10 +1067,13 @@ describe("resolveGeneratedPaths precedence", () => {
 });
 
 describe("resolveGeneratedPaths against a real repo", () => {
-  test("bifrost with no flags resolves its own five rows plus catalog/**", () => {
-    // The acceptance case: sourced from the repo's `.gitattributes`, not from a
-    // hand-copied mirror. `catalog/**` is the one deliberate addition and comes
-    // from the repo-keyed config entry, because it is true of bifrost alone.
+  test("bifrost with no flags resolves its own rows and nothing added", () => {
+    // The acceptance case: sourced ENTIRELY from the repo's `.gitattributes`, with no
+    // hand-copied mirror and — since STARK-7536 — no repo-keyed addition either. The
+    // empty `added` is the assertion that matters: while a wildcard covering the whole
+    // catalog was bolted on here, it also demoted bifrost's CURATED bundle.yaml and mcp
+    // entries, whose findings are fixable where they are posted and must keep an inline
+    // thread. Anything reappearing in `added` for this repo is that bug returning.
     const r = resolveGeneratedPaths({
       repo: BIFROST,
       gitattributes: BIFROST_GITATTRIBUTES,
@@ -1057,12 +1083,14 @@ describe("resolveGeneratedPaths against a real repo", () => {
     assert.deepEqual(r.patterns.slice().sort(), [
       ".claude-plugin/**",
       "bundles/**",
-      "catalog/**",
+      "catalog/*/commands/**",
+      "catalog/*/skills/**",
+      "catalog/standards/**",
       "dist/**",
       "index.json",
       "vendor/**",
     ]);
-    assert.deepEqual(r.added, ["catalog/**"]);
+    assert.deepEqual(r.added, []);
     assert.deepEqual(r.warnings, []);
     // bifrost's declared `index.json` is slash-less: git would match it by
     // basename at any depth, this tool anchors it at the repo root on purpose

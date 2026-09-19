@@ -260,9 +260,24 @@ export const DEFAULT_GENERATED_PATHS_CONFIG: GeneratedPathsConfig = {
     ".claude-plugin/**",
     "index.json",
   ],
-  repos: {
-    "21StarkCom/bifrost": { add: ["catalog/**"] },
-  },
+  // Empty on purpose since STARK-7536. It carried
+  // `"21StarkCom/bifrost": { add: ["catalog/**"] }` while bifrost machine-rewrote that
+  // tree WITHOUT declaring it generated — the condition the comment above names. bifrost
+  // now marks `catalog/*/skills/**` and `catalog/*/commands/**` `linguist-generated=true`
+  // itself (STARK-7363), so the entry became redundant on every normal run AND actively
+  // wrong: `catalog/**` is broader than what is generated, so it also demoted bifrost's
+  // CURATED `catalog/*/bundle.yaml` and `catalog/*/mcp/**` — a finding on either is
+  // fixable exactly where it is posted and should hold a merge, and mcp/ is a
+  // code-execution surface on a developer's machine.
+  //
+  // Not re-added in narrowed form on purpose: mirroring another repo's globs here is the
+  // drift this file's own comment argues against, and STARK-6095's stated direction is
+  // that the target repo's rows are the source of truth. Accepted consequence: if
+  // bifrost's `.gitattributes` is ever unfetchable, the resolver fails OPEN to `default`
+  // above, which carries no catalog glob — so generated catalog findings would open
+  // inline threads that run. That path warns on stderr; it is a rare, announced state,
+  // not a silent one.
+  repos: {},
 };
 
 // ---------------------------------------------------------------------------
