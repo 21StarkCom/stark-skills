@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+<!-- idun:pr-merge pr=1013 runId=1013 sha=59baea5e -->
+- Fixed: `/stark-jury` seats now forward Ctrl-C to their detached process groups instead of leaving vendor CLIs running after a cancelled run.
 <!-- idun:pr-merge pr=1012 runId=1012 sha=563eca69 -->
 - Fixed: a timed-out `gh` call now kills its whole process group (not just the direct child), and Ctrl-C is forwarded to in-flight `gh` subprocesses.
 <!-- idun:pr-merge pr=1011 runId=1011 sha=b2628cb9 -->

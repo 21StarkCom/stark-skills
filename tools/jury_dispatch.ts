@@ -49,6 +49,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { isSignallableGroup, releaseGroup, trackGroup } from "./bounded_spawn_lib.ts";
 import { buildCommand as buildClaude, normalizeOutput as normalizeClaude } from "./agent_claude.ts";
 import { buildCommand as buildCodex, extractLastAgentText as lastCodexText } from "./agent_codex.ts";
 import { buildCommand as buildGemini, normalizeOutput as normalizeGemini } from "./agent_gemini.ts";
@@ -664,7 +665,7 @@ export async function killProcessGroup(pgid: number, deps: KillDeps = {}): Promi
   const intervalMs = deps.survivorIntervalMs ?? SURVIVOR_CHECK_INTERVAL_MS;
   const signals: string[] = [];
 
-  if (!Number.isInteger(pgid) || pgid <= 1) {
+  if (!isSignallableGroup(pgid)) {
     return {
       attempted: false,
       signals,
@@ -742,6 +743,10 @@ export async function killProcessGroup(pgid: number, deps: KillDeps = {}): Promi
  * the timeout path can kill the whole tree; stdin is always a pipe that gets
  * the prompt written and then CLOSED (never inherited — an inherited pipe never
  * EOFs, which is how a headless dispatch hangs for hours).
+ *
+ * `detached` also takes the seat out of the terminal's foreground group, so the
+ * group is tracked by `bounded_spawn_lib.ts` for the life of the seat: an
+ * operator's SIGINT/SIGTERM/SIGHUP is forwarded to it (STARK-6135).
  */
 export const realRunner: SeatRunner = (req) =>
   new Promise<RunOutcome>((resolve) => {
@@ -768,6 +773,12 @@ export const realRunner: SeatRunner = (req) =>
       return;
     }
 
+    // `detached` took the seat out of the terminal's foreground group, so an
+    // operator's Ctrl-C no longer reaches it on its own: forward it (the shared
+    // half of bounded_spawn_lib; the kill ladder below stays jury's).
+    const pgid = child.pid;
+    if (pgid !== undefined) trackGroup(pgid);
+
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let stdoutLen = 0;
@@ -782,7 +793,11 @@ export const realRunner: SeatRunner = (req) =>
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      const emit = (kill: KillReport | null): void =>
+      const emit = (kill: KillReport | null): void => {
+        // Released only once the kill ladder is done: until then the group may
+        // still hold descendants, and a Ctrl-C that lands mid-ladder should
+        // still reach them.
+        if (pgid !== undefined) releaseGroup(pgid);
         resolve({
           code,
           signal,
@@ -793,6 +808,7 @@ export const realRunner: SeatRunner = (req) =>
           stdinClosed,
           kill,
         });
+      };
       // A killed group usually closes our pipes the instant SIGTERM lands —
       // well before the no-survivor check finishes. Resolving on "close" alone
       // therefore drops the kill report on the floor, which is the one piece of
@@ -803,10 +819,9 @@ export const realRunner: SeatRunner = (req) =>
 
     const timer = setTimeout(() => {
       timedOut = true;
-      const pid = child.pid;
       // Do NOT resolve here: the result still waits for "close" so the bytes the
       // child already wrote are captured.
-      killing = pid === undefined ? Promise.resolve(null) : killProcessGroup(pid);
+      killing = pgid === undefined ? Promise.resolve(null) : killProcessGroup(pgid);
       void killing.catch(() => null);
     }, req.timeoutMs);
 
