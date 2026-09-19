@@ -519,6 +519,33 @@ describe("generated-path routing", () => {
     assert.match(body, /`index\.json:4`/);
   });
 
+  test("generated-path findings are not filed under the out-of-diff heading (STARK-6096)", () => {
+    // End to end: planReview tags them, buildReviewBody groups on the tag. A
+    // reader scanning the review must not see an in-diff CONFIRMED finding on
+    // `vendor/…/gru.ts:11` presented as being outside the PR's scope.
+    const { plan } = syncPlan();
+    for (const f of plan.findings) {
+      const generated =
+        /^(vendor|dist|\.claude-plugin)\//.test(f.file ?? "") || f.file === "index.json";
+      assert.equal(
+        f.body_reason,
+        generated ? "generated_path" : undefined,
+        `${f.file} carries the wrong body_reason`,
+      );
+    }
+    const { bodyFindings } = partitionInlineVsBody(plan.findings, plan.inlineEligibleFiles, "low");
+    const body = buildReviewBody("<!-- marker -->", plan.humanSummary, bodyFindings);
+    const genIdx = body.indexOf("## In-diff findings on generated paths");
+    assert.ok(genIdx > 0, "generated findings get their own accurate heading");
+    const outIdx = body.indexOf("## Cross-cutting / out-of-diff findings");
+    if (outIdx >= 0) {
+      assert.ok(
+        body.indexOf("`vendor/stark-skills/tools/gru.ts:11`") > genIdx,
+        "a generated-path finding must sit under the generated heading, not the out-of-diff one",
+      );
+    }
+  });
+
   test("a finding on an ordinary source path is unchanged", () => {
     const { plan } = syncPlan();
     const src = plan.findings.find((f) => f.file === "engine/internal/install/install.go");

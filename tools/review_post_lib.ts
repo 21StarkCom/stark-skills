@@ -36,6 +36,7 @@ import {
   findingId,
   severityMeetsThreshold,
   type AgentName,
+  type BodyReason,
   type Finding,
   type Severity,
 } from "./finding_lib.ts";
@@ -419,6 +420,57 @@ export function selectPostingAgent(findings: Finding[]): AgentName | null {
   return best;
 }
 
+/**
+ * The heading for body findings that carry no {@link BodyReason} — the classic
+ * class: unanchored findings, and findings whose file is not in the PR's diff.
+ * This string is the canonical wording for that class and is pinned by its own
+ * test; it must keep describing ONLY that class.
+ */
+export const OUT_OF_DIFF_HEADING = "## Cross-cutting / out-of-diff findings";
+
+/**
+ * Per-reason headings for body findings that DO carry a {@link BodyReason}.
+ * Each must be accurate for its own class — in particular none may claim the
+ * finding was out of diff, which is the falsehood STARK-6096 fixed.
+ */
+export const BODY_REASON_HEADINGS: Record<BodyReason, string> = {
+  generated_path: "## In-diff findings on generated paths — withheld from inline threads",
+};
+
+function bodyReasonHeading(reason: BodyReason | null): string {
+  return reason === null ? OUT_OF_DIFF_HEADING : BODY_REASON_HEADINGS[reason];
+}
+
+/**
+ * Split body findings into one group per reason, preserving the incoming order
+ * (already severity-sorted by {@link partitionInlineVsBody}) inside each group
+ * and emitting the unlabelled group first.
+ *
+ * Unlabelled-first is what keeps the no-reason case byte-identical to the
+ * pre-grouping render: one group means exactly one heading and one pass over
+ * the findings, as before. Labelled groups follow in a deterministic order so a
+ * body with the same findings always renders the same bytes.
+ */
+function groupByBodyReason(
+  bodyFindings: Finding[],
+): Array<[BodyReason | null, Finding[]]> {
+  const groups = new Map<BodyReason | null, Finding[]>();
+  for (const f of bodyFindings) {
+    const reason = f.body_reason ?? null;
+    const existing = groups.get(reason);
+    if (existing) existing.push(f);
+    else groups.set(reason, [f]);
+  }
+  const ordered: Array<[BodyReason | null, Finding[]]> = [];
+  const unlabelled = groups.get(null);
+  if (unlabelled) ordered.push([null, unlabelled]);
+  for (const reason of (Object.keys(BODY_REASON_HEADINGS) as BodyReason[]).sort()) {
+    const group = groups.get(reason);
+    if (group) ordered.push([reason, group]);
+  }
+  return ordered;
+}
+
 export function buildReviewBody(
   marker: string,
   humanSummary: string,
@@ -433,13 +485,15 @@ export function buildReviewBody(
     lines.push("", opts.postingAgentNote);
   }
   if (bodyFindings.length > 0) {
-    lines.push("", "## Cross-cutting / out-of-diff findings", "");
-    for (const f of bodyFindings) {
-      const anchor = f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "(no anchor)";
-      lines.push(`- **${f.severity}** [${f.domain}] (${anchor}) — ${f.title}`);
-      if (f.body) {
-        const indented = f.body.split("\n").map((l) => `  ${l}`).join("\n");
-        lines.push(indented);
+    for (const [reason, group] of groupByBodyReason(bodyFindings)) {
+      lines.push("", bodyReasonHeading(reason), "");
+      for (const f of group) {
+        const anchor = f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "(no anchor)";
+        lines.push(`- **${f.severity}** [${f.domain}] (${anchor}) — ${f.title}`);
+        if (f.body) {
+          const indented = f.body.split("\n").map((l) => `  ${l}`).join("\n");
+          lines.push(indented);
+        }
       }
     }
   }

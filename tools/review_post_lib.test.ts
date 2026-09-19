@@ -87,6 +87,75 @@ test("buildReviewBody: marker is the first line", () => {
   assert.match(body, /^<!-- stark-review:round=2:agent=codex:run=abc -->\n\nsummary/);
 });
 
+// ─── body-finding grouping by reason (STARK-6096) ───────────────────────────
+
+test("buildReviewBody: out-of-diff findings live under the canonical heading", () => {
+  // The class this heading was written about: findings with no anchor, and
+  // findings whose file is not in the PR's diff. It must keep naming exactly
+  // those, and nothing else.
+  const body = buildReviewBody("MARKER", "summary", [
+    makeFinding({ title: "unanchored", file: null, line: null }),
+    makeFinding({ title: "outside the diff", file: "untouched.ts", line: 4 }),
+  ]);
+  assert.match(body, /## Cross-cutting \/ out-of-diff findings/);
+  assert.match(body, /unanchored/);
+  assert.match(body, /outside the diff/);
+});
+
+test("buildReviewBody: no body_reason renders byte-identically to the ungrouped form", () => {
+  // The golden-output guard: every other caller passes findings with no reason,
+  // and their reviews must not shift by a single byte.
+  const findings = [
+    makeFinding({ title: "one", file: "a.ts", line: 1, body: "why one" }),
+    makeFinding({ title: "two", file: null, line: null, body: "why two" }),
+  ];
+  const expected = [
+    "MARKER",
+    "",
+    "summary",
+    "",
+    "## Cross-cutting / out-of-diff findings",
+    "",
+    "- **high** [security] (a.ts:1) — one",
+    "  why one",
+    "- **high** [security] ((no anchor)) — two",
+    "  why two",
+  ].join("\n");
+  assert.equal(buildReviewBody("MARKER", "summary", findings), expected);
+});
+
+test("buildReviewBody: generated-path findings do not sit under the out-of-diff heading", () => {
+  // The defect: an in-diff finding on a real file and line, withheld from a
+  // thread because its path is generated, filed under a heading that says it
+  // was outside the diff — which reads as "out of scope".
+  const body = buildReviewBody("MARKER", "summary", [
+    makeFinding({ title: "gru drift", file: "vendor/stark-skills/tools/gru.ts", line: 11, body_reason: "generated_path" }),
+  ]);
+  assert.doesNotMatch(body, /out-of-diff/);
+  assert.match(body, /## In-diff findings on generated paths — withheld from inline threads/);
+  assert.match(body, /vendor\/stark-skills\/tools\/gru\.ts:11/);
+});
+
+test("buildReviewBody: a mixed body renders both headings with each finding exactly once", () => {
+  const body = buildReviewBody("MARKER", "summary", [
+    makeFinding({ title: "classic", file: null, line: null }),
+    makeFinding({ title: "generated", file: "dist/x.js", line: 3, body_reason: "generated_path" }),
+    makeFinding({ title: "classic two", file: "untouched.ts", line: 9 }),
+  ]);
+  assert.match(body, /## Cross-cutting \/ out-of-diff findings/);
+  assert.match(body, /## In-diff findings on generated paths/);
+  for (const title of ["classic", "generated", "classic two"]) {
+    const hits = body.split("\n").filter((l) => l.endsWith(`— ${title}`)).length;
+    assert.equal(hits, 1, `${title} must appear exactly once`);
+  }
+  // Each finding sits under its own heading, not merely somewhere in the body.
+  const outIdx = body.indexOf("## Cross-cutting / out-of-diff findings");
+  const genIdx = body.indexOf("## In-diff findings on generated paths");
+  assert.ok(outIdx < genIdx, "unlabelled group renders first");
+  assert.ok(body.indexOf("— classic two") < genIdx, "classic findings stay above the generated heading");
+  assert.ok(body.indexOf("— generated") > genIdx, "generated finding sits under its own heading");
+});
+
 test("renderAgentsResolvedSummary: emits per-domain agent list", () => {
   const out = renderAgentsResolvedSummary({
     security: "claude", "test-coverage": "codex", architecture: "gemini",
