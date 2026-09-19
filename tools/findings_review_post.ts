@@ -801,16 +801,19 @@ export async function fetchPrContext(
   pr: number,
   run: RunFn = defaultRun,
 ): Promise<PrContext> {
-  const head = await run("gh", ["api", `repos/${repo}/pulls/${pr}`, "--jq", ".head.sha"]);
+  // Independent reads, so they run together now that `run` is async (it was
+  // `spawnSync` until STARK-6131, which forced them in series). The head sha's
+  // failure is still reported first.
+  const [head, files] = await Promise.all([
+    run("gh", ["api", `repos/${repo}/pulls/${pr}`, "--jq", ".head.sha"]),
+    // --paginate --slurp merges every page into one array; a PR over 30 changed
+    // files would otherwise silently expose only the first page, and a finding
+    // in an unlisted file loses its anchor for no visible reason.
+    run("gh", ["api", `repos/${repo}/pulls/${pr}/files`, "--paginate", "--slurp"]),
+  ]);
   if (head.status !== 0) {
     throw new Error(`gh api pulls/${pr} failed (exit ${head.status}): ${head.stderr.slice(0, 400)}`);
   }
-  // --paginate --slurp merges every page into one array; a PR over 30 changed
-  // files would otherwise silently expose only the first page, and a finding in
-  // an unlisted file loses its anchor for no visible reason.
-  const files = await run("gh", [
-    "api", `repos/${repo}/pulls/${pr}/files`, "--paginate", "--slurp",
-  ]);
   if (files.status !== 0) {
     throw new Error(`gh api pulls/${pr}/files failed (exit ${files.status}): ${files.stderr.slice(0, 400)}`);
   }

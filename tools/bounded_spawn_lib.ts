@@ -1,6 +1,6 @@
 /**
  * bounded_spawn_lib.ts — the ONE spawn primitive behind every `gh` subprocess
- * on the posting path (STARK-6131). `review_post_lib.ts::spawnCollect` and
+ * on the posting path (STARK-6131). `review_post_lib.ts::ghJsonOnce` and
  * `findings_review_post.ts::runCapturing` both wrap it.
  *
  * STARK-6113 bounded those children but killed only the DIRECT child: anything
@@ -12,7 +12,14 @@
  * process group, so an operator's Ctrl-C no longer reaches it. That is paid back
  * here, not left to callers: while any child is in flight SIGINT/SIGTERM/SIGHUP
  * are forwarded to every live group, then re-raised so this process still dies
- * by the signal exactly as it did before.
+ * by the signal exactly as it did before. An embedding tool that handles the
+ * signal ITSELF is left to it: no re-raise (it would receive one Ctrl-C twice),
+ * and the forwarding stays armed for the next one.
+ *
+ * What forwarding cannot pay back: Node's `detached` is `setsid()` — a new
+ * SESSION, not only a new group — so a supervisor that SIGKILLs this tool's
+ * process group no longer reaches `gh`, and nobody can forward a SIGKILL. A
+ * `gh` hung at that moment outlives its bound, which died with this process.
  *
  * It is async-only on purpose. `spawnSync` blocks the event loop, so it can
  * neither group-kill (its `killSignal` goes to one pid) nor run a forwarding
@@ -20,11 +27,18 @@
  */
 import { spawn } from "node:child_process";
 
+import { assertGhTimeoutMs } from "./child_termination_lib.ts";
+
 export interface BoundedSpawnOpts {
   input?: string;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
-  /** Group-kill the child and settle after this long. Validated by the caller. */
+  /**
+   * Group-kill the child and settle after this long. Held to
+   * `assertGhTimeoutMs` HERE as well as in both callers: this function is
+   * exported, and `setTimeout` fires 0 / NaN / anything past 2^31-1 ms after
+   * ~1 ms, so an unvalidated door kills every call it bounds.
+   */
   timeoutMs?: number;
   /** Group-kill the child once stdout or stderr exceeds this many bytes. */
   maxBuffer?: number;
@@ -54,21 +68,26 @@ const FORWARDED: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
 /** Group ids (== the detached child's pid) of every child still in flight. */
 const liveGroups = new Set<number>();
 
-/** Signal a whole group. False when it is already gone (ESRCH) or not ours. */
-function killGroup(pgid: number, signal: NodeJS.Signals): boolean {
+/** Signal a whole group; one that is already gone (ESRCH) is not an error. */
+function killGroup(pgid: number, signal: NodeJS.Signals): void {
   try {
     process.kill(-pgid, signal);
-    return true;
   } catch {
-    return false;
+    /* already gone, or not ours */
   }
 }
 
 function forward(signal: NodeJS.Signals): void {
   for (const pgid of liveGroups) killGroup(pgid, signal);
-  // Re-raise with our handlers gone so the default disposition (or the
-  // embedding tool's own handler) decides this process's fate, as it did when
-  // the terminal delivered the signal to parent and child alike.
+  // Another listener means the embedding tool handles this signal itself. It
+  // has already received THIS delivery, and our listener displaced no default
+  // disposition — so re-raising would hand it one Ctrl-C twice (measured: its
+  // handler fired 2x), and uninstalling would leave a still-live group deaf to
+  // the next one.
+  if (process.listenerCount(signal) > 1) return;
+  // We alone stood between the signal and Node's default exit: re-raise with
+  // our handlers gone, so this process dies BY the signal as it did when the
+  // terminal delivered it to parent and child alike.
   untrack();
   process.kill(process.pid, signal);
 }
@@ -87,7 +106,8 @@ function untrack(): void {
  */
 function trackGroup(pgid: number): void {
   // Keyed on the flag, not on an empty set: `forward` uninstalls with groups
-  // still live, and a tool that survives the re-raise may spawn again.
+  // still live, so a process that somehow outlives its re-raise must be able
+  // to re-arm on the next spawn.
   if (!installed) {
     installed = true;
     for (const s of FORWARDED) process.on(s, forward);
@@ -105,6 +125,8 @@ export async function spawnBounded(
   args: string[],
   opts: BoundedSpawnOpts = {},
 ): Promise<BoundedSpawnResult> {
+  // Refused BEFORE the spawn, like every other door the bound arrives by.
+  if (opts.timeoutMs !== undefined) assertGhTimeoutMs(opts.timeoutMs, "spawnBounded timeoutMs");
   return await new Promise<BoundedSpawnResult>((resolve, reject) => {
     const child = spawn(cmd, args, {
       env: opts.env ?? process.env,

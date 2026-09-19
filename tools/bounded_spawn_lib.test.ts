@@ -33,6 +33,19 @@ function isAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+/** The pid a child wrote to `file`, once it has; `null` if it never does. */
+async function pidFrom(file: string): Promise<number | null> {
+  const read = (): number => (fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8").trim()) : NaN);
+  return (await waitFor(() => read() > 1)) ? read() : null;
+}
+
+/** `finally` cleanup: a red run must not leave a `sleep 30` behind. */
+function reap(file: string): void {
+  const pid = fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8").trim()) : NaN;
+  if (pid > 1 && isAlive(pid)) process.kill(pid, "SIGKILL");
+  fs.rmSync(file, { force: true });
+}
+
 /**
  * A terminal's Ctrl-C goes to the FOREGROUND process group — which a detached
  * `gh` has left. So the faithful simulation signals the tool's pid ALONE: the
@@ -75,17 +88,86 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 
 // A SIGINT listener replaces Node's default exit, so one left behind after the
 // last child settles would make an idle tool ignore Ctrl-C.
+//
+// The long-lived child is ended BY the test, not by a short sleep racing the
+// overlapping child's startup: test files run in parallel, and on a loaded
+// runner a 300 ms head start is not an ordering guarantee.
 test("forwarding handlers exist only while a child is in flight", HANG_GUARD, async () => {
+  const pidFile = nodePath.join(os.tmpdir(), `bounded-spawn-life-${process.pid}-${Date.now()}`);
   const before = process.listenerCount("SIGINT");
-  const running = spawnBounded(process.execPath, ["-e", "setTimeout(() => {}, 300)"], { timeoutMs: 20_000 });
-  assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while a child is live");
-  const overlapping = spawnBounded(process.execPath, ["-e", ""], { timeoutMs: 20_000 });
-  assert.equal(process.listenerCount("SIGINT"), before + 1, "a second child must share the one handler");
-  await overlapping;
-  assert.equal(process.listenerCount("SIGINT"), before + 1, "the handler was dropped with a child still live");
-  await running;
-  assert.equal(process.listenerCount("SIGINT"), before, "the handler outlived the last child");
+  try {
+    const running = spawnBounded("/bin/sh", ["-c", `echo $$ > '${pidFile}'; exec sleep 30`], { timeoutMs: 20_000 });
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "no forwarding handler while a child is live");
+    const overlapping = spawnBounded(process.execPath, ["-e", ""], { timeoutMs: 20_000 });
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "a second child must share the one handler");
+    await overlapping;
+    assert.equal(process.listenerCount("SIGINT"), before + 1, "the handler was dropped with a child still live");
+    const pid = await pidFrom(pidFile);
+    assert.ok(pid !== null, "the long-lived child never reported its pid");
+    process.kill(pid, "SIGKILL");
+    await running;
+    assert.equal(process.listenerCount("SIGINT"), before, "the handler outlived the last child");
+  } finally {
+    reap(pidFile);
+  }
 });
+
+// A tool with its OWN SIGINT handler already received the delivery we are
+// forwarding, and our listener displaced no default exit. Re-raising handed it
+// one Ctrl-C twice (measured: its handler fired 2x). In-process on purpose: with
+// a listener of our own installed the signal cannot kill the test runner.
+test("an embedding tool's own handler gets one SIGINT once, and the child still gets it", HANG_GUARD, async () => {
+  let fired = 0;
+  const own = () => { fired += 1; };
+  process.on("SIGINT", own);
+  try {
+    const running = spawnBounded("/bin/sh", ["-c", "exec sleep 30"], { timeoutMs: 20_000 });
+    process.kill(process.pid, "SIGINT");
+    const r = await running;
+    assert.equal(r.signal, "SIGINT", "the signal was not forwarded to the detached group");
+    // A re-raised duplicate is delivered asynchronously; give it room to land.
+    await new Promise((res) => setTimeout(res, 300));
+    assert.equal(fired, 1, "the tool's own handler received one SIGINT more than once");
+  } finally {
+    process.removeListener("SIGINT", own);
+  }
+});
+
+// The other half of the same defect: `forward` used to uninstall itself on the
+// first signal, so a child that IGNORED it (and a tool that handled it) left
+// the group deaf to every later Ctrl-C.
+test("forwarding stays armed after a signal the tool and the child both survive", HANG_GUARD, async () => {
+  const readyFile = nodePath.join(os.tmpdir(), `bounded-spawn-armed-${process.pid}-${Date.now()}`);
+  let fired = 0;
+  const own = () => { fired += 1; };
+  process.on("SIGINT", own);
+  try {
+    const armed = process.listenerCount("SIGINT") + 1;
+    // The trap is installed BEFORE the ready file exists, and `sleep` inherits it.
+    const running = spawnBounded("/bin/sh", ["-c", `trap '' INT; echo $$ > '${readyFile}'; exec sleep 30`], { timeoutMs: 20_000 });
+    const pid = await pidFrom(readyFile);
+    assert.ok(pid !== null, "the child never reported ready");
+    process.kill(process.pid, "SIGINT");
+    assert.ok(await waitFor(() => fired >= 1), "the tool's own handler never saw the signal");
+    assert.equal(process.listenerCount("SIGINT"), armed, "forwarding was disarmed with a child still live");
+    process.kill(pid, "SIGKILL");
+    await running;
+    assert.equal(process.listenerCount("SIGINT"), armed - 1, "the handler outlived the last child");
+  } finally {
+    process.removeListener("SIGINT", own);
+    reap(readyFile);
+  }
+});
+
+// `spawnBounded` is exported, so it is a door of its own: `setTimeout` fires an
+// unvalidated 0 after ~1 ms and kills the call it was meant to bound.
+for (const bad of [0, NaN, 3_000_000_000]) {
+  test(`an unusable timeoutMs is refused before spawning: ${String(bad)}`, HANG_GUARD, async () => {
+    const before = process.listenerCount("SIGINT");
+    await assert.rejects(spawnBounded(process.execPath, ["-e", ""], { timeoutMs: bad }), /spawnBounded timeoutMs must be/);
+    assert.equal(process.listenerCount("SIGINT"), before, "a refused call must not have spawned or tracked anything");
+  });
+}
 
 test("a timeout leaves no handler behind either", HANG_GUARD, async () => {
   const before = process.listenerCount("SIGTERM");
