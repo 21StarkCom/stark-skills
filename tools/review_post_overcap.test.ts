@@ -22,12 +22,14 @@ import test from "node:test";
 import { buildMarker, type Finding } from "./finding_lib.ts";
 import {
   buildReviewBody,
+  countOverflowFindings,
   GhError,
   GITHUB_ISSUE_COMMENT_MAX,
   GITHUB_REVIEW_BODY_MAX,
   OVERFLOW_SEGMENT_DELIMITER,
   planBodySplit,
   postReview,
+  relocatedSummaryStub,
   renderOverflowChunk,
   splitTextToFit,
 } from "./review_post_lib.ts";
@@ -303,6 +305,122 @@ test("postReview: a non-finding body that is over the cap even WITHOUT its summa
   assert.equal(r.unposted, true);
   assert.match(r.unpostedReason!, /body_over_cap_without_findings/);
   assert.equal(posts, 0, "no overflow comment may be posted for a review that cannot land");
+});
+
+// ─── Review findings on STARK-6116 itself ───────────────────────────────────
+
+test("planBodySplit: a finding that fits alone only at the CURRENT part number is not posted one char over at the next", () => {
+  // `chunkOverflow` sized a finding against the part number of the chunk being
+  // built. When that chunk is non-empty the finding lands in the NEXT one, and
+  // 9 → 10 adds a digit: a finding at exactly the cap became cap + 1 → 422 →
+  // the whole run `unposted`.
+  const cap = 3000;
+  const findings: Finding[] = [];
+  for (let i = 0; i < 9; i++) findings.push(makeFinding({ id: `s${i}`, title: `S${i}`, body: "z".repeat(2700) }));
+  let n = 2600;
+  const exactAt9 = () => makeFinding({ id: "e", title: "E", body: "e".repeat(n) });
+  while (renderOverflowChunk("M", 9, { findings: [exactAt9()] }).length < cap) n++;
+  assert.equal(renderOverflowChunk("M", 9, { findings: [exactAt9()] }).length, cap, "fixture: exactly at the cap as part 9");
+  findings.push(makeFinding({ id: "tiny", title: "tiny", body: "q" }), exactAt9());
+
+  const plan = planBodySplit((kept) => buildReviewBody("M", "s", kept), findings, "M", 4500, cap);
+  assert.ok(plan.chunks.length >= 10, "fixture: the exact-fit finding must land past the digit rollover");
+  plan.chunks.forEach((chunk, i) => {
+    const len = renderOverflowChunk("M", i + 1, chunk).length;
+    assert.ok(len <= cap, `overflow comment ${i + 1} is ${len} chars against a ${cap}-char cap — it would 422`);
+  });
+  assert.equal(countOverflowFindings(plan.chunks) + plan.kept.length, findings.length, "every finding counted once");
+});
+
+test("postReview: a footer that links ONLY the relocated summary does not claim the comments carry findings", async () => {
+  // Every finding fits in the body once the summary is out, so the linked
+  // comments hold the summary and nothing else. "carry the remaining findings"
+  // there is a false statement in the one place a reader is told where to look.
+  const { gh, reviews } = recordingGh();
+  const r = await postReview({
+    ...BASE,
+    humanSummary: structuredText(70_000),
+    findings: [makeFinding({ id: "f1", title: "FINDING-ONE" })],
+    ghJsonFn: gh as GhFn,
+  });
+  assert.equal(r.bodyOverflow!.findingsInOverflow, 0, "fixture: no finding left the body");
+  const footer = reviews[0].slice(reviews[0].indexOf("## Overflow findings"));
+  assert.doesNotMatch(footer, /carry the remaining findings/);
+  assert.match(footer, /carry the review summary in full/);
+});
+
+test("postReview: a footer linking the relocated summary AND overflow findings says which comments are which", async () => {
+  const { gh, reviews } = recordingGh();
+  const r = await postReview({
+    ...BASE,
+    humanSummary: structuredText(70_000),
+    findings: [makeFinding({ id: "huge", title: "HUGE", body: structuredText(70_000) })],
+    ghJsonFn: gh as GhFn,
+  });
+  assert.equal(r.posted, true, `unposted: ${r.unpostedReason}`);
+  const footer = reviews[0].slice(reviews[0].indexOf("## Overflow findings"));
+  assert.match(footer, /carry the review summary \(overflow 1–2\) and the remaining findings in full/);
+});
+
+test("relocatedSummaryStub: a head cut inside a code fence is closed, so the pointer and links still render", () => {
+  // An unclosed fence swallows everything after it — the pointer, the findings
+  // and the overflow links — into one code block, where links are not links.
+  const summary = `intro\n\n\`\`\`ts\n${"const x = 1; // filler\n".repeat(4000)}\`\`\`\n\nend`;
+  const stub = relocatedSummaryStub(summary);
+  const fences = stub.split("\n").filter((l) => /^`{3,}/.test(l));
+  assert.equal(fences.length % 2, 0, `the stub leaves a code fence open: ${fences.length} fence line(s)`);
+  assert.ok(stub.indexOf("```", stub.indexOf("```ts") + 1) < stub.indexOf("_…the review summary"), "closed BEFORE the pointer");
+  // A head with no fence, or a balanced one, is left exactly as it was.
+  const plain = relocatedSummaryStub(structuredText(10_000));
+  assert.ok(!plain.includes("```"));
+});
+
+test("planBodySplit: a segment header clips a long title without stranding half a surrogate pair", () => {
+  const title = `${"x".repeat(199)}😀tail`;
+  const huge = makeFinding({ id: "huge", title, body: structuredText(70_000) });
+  const plan = planBodySplit((kept) => buildReviewBody("M", "s", kept), [huge], "M");
+  const comment = renderOverflowChunk("M", 1, plan.chunks[0]);
+  const header = comment.slice(0, comment.indexOf(OVERFLOW_SEGMENT_DELIMITER));
+  assert.doesNotMatch(header, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/, "header carries a lone high surrogate");
+});
+
+test("planBodySplit: an unfittable plan reports the floor it measured, footer reserve included", () => {
+  // `unfittable` is "non-finding body + the link footer for every overflow
+  // comment > cap". The refusal used to report the body alone, so a payload the
+  // FOOTER pushed over read as "310 chars against a 65536-char cap".
+  const findings = Array.from({ length: 6 }, (_, i) => makeFinding({ id: `m${i}`, title: `M${i}`, body: "z".repeat(2700) }));
+  const plan = planBodySplit((kept) => buildReviewBody("M", "s", kept), findings, "M", 1500, 3000);
+  assert.equal(plan.unfittable, true);
+  assert.ok(plan.floorChars! > 1500, `floorChars ${plan.floorChars} must be the over-cap number the refusal names`);
+  assert.ok(buildReviewBody("M", "s", []).length < 1500, "fixture: the body alone is under the cap");
+});
+
+test("postReview: a 422-fallback rebuild that tips the body over relocates the summary and still lands", async () => {
+  // First pass fits with no overflow at all; the demoted anchor is what pushes
+  // the body over, with a summary too big for moving findings to fix.
+  const summary = "S".repeat(65_300);
+  const inline = makeFinding({ id: "in", title: "INLINE-FINDING", file: "changed.ts", line: 3, body: "inline body ".repeat(40) });
+  const { gh, reviews, comments } = recordingGh();
+  let rejected = false;
+  const rejectAnchorOnce = async (p: string, o?: { method?: string; body?: unknown }) => {
+    if (o?.method === "POST" && p.endsWith("/reviews") && !rejected) {
+      rejected = true;
+      throw new GhError(422, '{"message":"Unprocessable","errors":[{"field":"comments/0","message":"x"}]}', {});
+    }
+    return gh(p, o);
+  };
+  const r = await postReview({
+    ...BASE,
+    humanSummary: summary,
+    findings: [inline],
+    changedFiles: new Set(["changed.ts"]),
+    ghJsonFn: rejectAnchorOnce as GhFn,
+  });
+  assert.equal(r.posted, true, `unposted: ${r.unpostedReason}`);
+  assert.equal(r.bodyOverflow!.summaryRelocated, true);
+  assert.ok(reviews[0].length <= GITHUB_REVIEW_BODY_MAX);
+  assert.ok(reviews[0].includes("INLINE-FINDING"), "the demoted finding keeps the body");
+  assert.equal(comments.map(segmentText).join(""), summary, "the summary is reproduced in full");
 });
 
 test("postReview: dry-run reports a relocated summary and a segmented finding without posting", async () => {

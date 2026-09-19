@@ -27,7 +27,6 @@ import {
   partitionInlineVsBody,
   planBodySplit,
   postReview,
-  renderOverflowComment,
 } from "./review_post_lib.ts";
 
 function makeFinding(over: Partial<Finding> = {}): Finding {
