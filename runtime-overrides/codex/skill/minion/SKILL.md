@@ -48,6 +48,14 @@ and if that is what the operator wants, say so and stop.
    names your own worktree when you are inside one — and pass it as `--cwd`.
    Run that as its own command and paste the path in literally; a `$(...)` in
    the launch line is refused by the worktree guard.
+   **The ticket's id must be free in that repo**: no `worktree` line of that
+   list (with `--repo`, of `git -C <path> worktree list --porcelain`, `<path>`
+   from `frigg repos get <name> --json`) may end in `/<the ticket id>`. One that
+   does is somebody's already — yours, when this session was itself launched on
+   the ticket, which is the likely case if you let the id default to your bound
+   ticket. Codex refuses the path; Claude would attach the Minion to it behind a
+   normal-looking ack, and its stand-down would then aim at the worktree you
+   are standing in. Stop and say so.
 2. Launch, once:
 
    ```
@@ -65,7 +73,11 @@ and if that is what the operator wants, say so and stop.
    (STARK-6974); on v0.19.0 or older, launch with `--prompt-file <brief>`
    instead, the brief being the four things [Gru's step 3](../gru/SKILL.md)
    lists — never `--message`, which hands the brief's quotes and `$` to the
-   shell.
+   shell. Write the file with your file tool, or single-quoted: inside double
+   quotes the shell expands `$minion` to nothing. That older hermod stamps no
+   leader and resolves no bound ticket, so there both are yours to write: your
+   own `hermod msg peers` `id` in the brief, and the `STARK-n` on the launch
+   line.
 3. Read the ack before you call it launched. Its `prompt` must read
    `$minion STARK-n` (`/minion STARK-n` on Claude) and name the leader peer you
    meant. A failed start looks different per `--agent`, and either leaves the
@@ -80,9 +92,10 @@ and if that is what the operator wants, say so and stop.
      the `done`.
    - **You are the leader**: you do not stop. You are Gru for exactly one
      ticket — wait for the Minion's report and handle it by
-     [Gru's protocol](../gru/SKILL.md), steps 4 and 5: what counts as a death,
-     and the confirm that turns a `done` from a claim into a fact (PR merged,
-     the verification comment on it, the ticket closed). Then tell the operator
+     [Gru's protocol](../gru/SKILL.md), steps 4 and 5: what counts as a death
+     (step 4's single relaunch of a real one is the only second launch you ever
+     make), and the confirm that turns a `done` from a claim into a fact (PR
+     merged, the verification comment on it, the ticket closed). Then tell the operator
      the outcome. Gru's Authority section binds you too: you never edit the
      Minion's worktree and never reap its tab.
 
