@@ -17,8 +17,8 @@ const workflow = readFileSync(new URL("../.github/workflows/marketplace-sync.yml
 // generator, which did not move.
 
 // ─── The release-notes generator ────────────────────────────────────────────
-// Exercise the awk program the workflow actually runs, extracted the same way as
-// `review_filter` above. This generator has shipped the same defect twice — a tag
+// Exercise the awk program the workflow actually runs, extracted from the
+// workflow file rather than restated here. This generator has shipped the same defect twice — a tag
 // whose notes never mention the `[Unreleased]` bullets it absorbed — and the second
 // time was a regression of a hand repair. Nothing but a test stops the third.
 const notesAwk = workflow.match(/awk -v version=[^\n]*\n([\s\S]*?)\n\s*' CHANGELOG\.md > CHANGELOG\.md\.next/)?.[1];

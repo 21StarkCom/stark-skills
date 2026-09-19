@@ -281,10 +281,11 @@ jobs:
       # line, the same named `/code-review xhigh --fix` invocation, the same
       # exact-head binding, the same pre-merge recheck and the same
       # `--match-head-commit`. CI alone still never authorizes publication.
+      # No GH_TOKEN: this step calls no `gh`, and the App token is write-scoped
+      # on bifrost. A step that needs nothing gets nothing.
       - name: Report where publication stands
         if: steps.pr.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
