@@ -626,6 +626,12 @@ export function buildReviewBody(
  * The degrade (not a refusal, and never a truncation): the highest-severity
  * findings that fit stay in the review body, the rest are posted in full as
  * follow-up issue comments on the same PR and cross-linked from the body.
+ *
+ * Two shapes that moving findings cannot shrink (STARK-6116): one finding
+ * larger than a comment is SEGMENTED across consecutive comments that
+ * reassemble byte for byte, and a summary that alone blows the cap is RELOCATED
+ * in full with its head + a pointer left behind. The one refusal left is a body
+ * over the cap with nothing movable in it — named, and before any POST.
  */
 export const GITHUB_REVIEW_BODY_MAX = 65536;
 
@@ -707,11 +713,106 @@ export function renderOverflowComment(
   return lines.join("\n");
 }
 
+/** Separates a segment comment's header from the text it carries. Exported so a
+ * reader (or a test) can recover the text exactly: everything after the FIRST
+ * occurrence is payload, byte for byte. */
+export const OVERFLOW_SEGMENT_DELIMITER = "\n\n---\n\n";
+
+/** One overflow issue comment's worth of content. */
+export interface OverflowChunk {
+  /** Whole findings this comment carries. Empty for a segment comment. */
+  findings: Finding[];
+  /**
+   * Set when this comment carries ONE SEGMENT of a text too large for a single
+   * comment (STARK-6116): an over-cap finding, or the relocated review summary.
+   * The segments of one text are consecutive chunks; concatenating their `text`
+   * in order reproduces the original byte for byte.
+   */
+  segment?: {
+    of: "finding" | "summary";
+    /** The finding being continued (`of: "finding"`), for the header and counts. */
+    finding?: Finding;
+    /** 1-based. */
+    index: number;
+    total: number;
+    text: string;
+  };
+}
+
+/** How long a finding's title may run in a segment header before it is clipped.
+ * The header is navigation, not payload — the full title is in the segments. */
+const SEGMENT_HEADER_TITLE_MAX = 200;
+
+function renderSegmentHeader(marker: string, part: number, seg: NonNullable<OverflowChunk["segment"]>): string {
+  const position = `segment ${seg.index} of ${seg.total}`;
+  if (seg.of === "summary") {
+    return [
+      marker,
+      "",
+      `**Review overflow — part ${part}: review summary, ${position}.** The review summary did not fit ` +
+        "under the review body's character limit, so it is reproduced here in full" +
+        (seg.total > 1 ? " across consecutive comments — read the segments in order" : "") +
+        ". Nothing was dropped or truncated.",
+    ].join("\n");
+  }
+  const f = seg.finding!;
+  const anchor = f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "(no anchor)";
+  const title = f.title.length > SEGMENT_HEADER_TITLE_MAX ? `${f.title.slice(0, SEGMENT_HEADER_TITLE_MAX)}…` : f.title;
+  return [
+    marker,
+    "",
+    `**Review overflow — part ${part}: one finding, ${position}.** This finding is larger than GitHub's ` +
+      "comment limit, so its text continues across consecutive comments — read the segments in order. " +
+      "Nothing was dropped or truncated.",
+    "",
+    `Finding: **${f.severity}** [${f.domain}] (${anchor}) — ${title}`,
+  ].join("\n");
+}
+
+/** Body of one overflow issue comment, whole-findings or segment. */
+export function renderOverflowChunk(marker: string, part: number, chunk: OverflowChunk): string {
+  if (!chunk.segment) return renderOverflowComment(marker, part, chunk.findings);
+  return renderSegmentHeader(marker, part, chunk.segment) + OVERFLOW_SEGMENT_DELIMITER + chunk.segment.text;
+}
+
+/** How much of a relocated summary stays in the review body as its head. */
+export const RELOCATED_SUMMARY_HEAD_MAX = 2000;
+
+/**
+ * What the review body carries in place of a summary that had to be relocated
+ * (STARK-6116): its head, then a pointer that SAYS the rest is elsewhere. The
+ * pointer is the point — a summary shortened without one is a silent
+ * truncation; with one, and the full text posted in the linked comment, it is
+ * a table of contents. The full summary is never edited, only moved.
+ */
+export function relocatedSummaryStub(summary: string): string {
+  const head = splitTextToFit(summary, RELOCATED_SUMMARY_HEAD_MAX)[0].trimEnd();
+  return (
+    `${head}\n\n` +
+    `_…the review summary is longer than GitHub's ${GITHUB_REVIEW_BODY_MAX}-char review-body limit allows. ` +
+    "Only its head is shown above; the summary continues in full, unedited, in the overflow comment(s) " +
+    "linked under **Overflow findings** below, starting at overflow 1._"
+  );
+}
+
+/** Findings a plan's chunks carry, counting a segmented finding ONCE. */
+export function countOverflowFindings(chunks: OverflowChunk[]): number {
+  return chunks.reduce(
+    (n, c) => n + c.findings.length + (c.segment?.of === "finding" && c.segment.index === 1 ? 1 : 0),
+    0,
+  );
+}
+
 export interface BodySplitPlan {
   /** Findings that stay in the review body, in the input order (severity-desc). */
   kept: Finding[];
-  /** Overflow findings, chunked to fit one issue comment each. */
-  chunks: Finding[][];
+  /** Overflow content, one entry per issue comment, each fitting under the cap. */
+  chunks: OverflowChunk[];
+  /**
+   * True when the body is over the cap even with NO findings in it — nothing
+   * this function moves can fix that, and posting would 422 (STARK-6116).
+   */
+  unfittable?: boolean;
 }
 
 /**
@@ -728,17 +829,27 @@ export function planBodySplit(
   marker: string,
   cap = GITHUB_REVIEW_BODY_MAX,
   commentCap = GITHUB_ISSUE_COMMENT_MAX,
+  /** Chunks that exist whatever the split decides — the relocated summary
+   * (STARK-6116). They take the first slots and their links share the footer. */
+  leading: OverflowChunk[] = [],
 ): BodySplitPlan {
-  if (buildBody(bodyFindings).length <= cap) {
+  if (leading.length === 0 && buildBody(bodyFindings).length <= cap) {
     return { kept: bodyFindings, chunks: [] };
+  }
+  const footerReserve = (n: number) => (n > 0 ? OVERFLOW_PREAMBLE_RESERVE + OVERFLOW_LINK_RESERVE * n : 0);
+  // The floor: every finding moved out. If THAT is over the cap, no split can
+  // help — say so instead of returning a plan whose body is known to 422.
+  const allOut = [...leading, ...chunkOverflow(bodyFindings, marker, commentCap, leading.length)];
+  if (buildBody([]).length + footerReserve(allOut.length) > cap) {
+    return { kept: [], chunks: allOut, unfittable: true };
   }
   // The footer reserve depends on the chunk count, which depends on the split.
   // Iterate to a fixpoint; the reserve is monotone in the chunk count, so this
   // converges. The bound keeps a pathological payload from looping.
-  let chunkEstimate = 1;
-  let plan: BodySplitPlan = { kept: [], chunks: [] };
+  let chunkEstimate = Math.max(1, leading.length);
+  let plan: BodySplitPlan = { kept: [], chunks: allOut };
   for (let iter = 0; iter < 8; iter++) {
-    const reserve = OVERFLOW_PREAMBLE_RESERVE + OVERFLOW_LINK_RESERVE * chunkEstimate;
+    const reserve = footerReserve(chunkEstimate);
     // `buildBody` is monotone in the prefix length, so the longest fitting
     // prefix is a binary search. A linear scan re-renders the WHOLE body once
     // per finding — quadratic in exactly the payload this function only ever
@@ -752,33 +863,94 @@ export function planBodySplit(
     }
     const keptCount = lo;
     const kept = bodyFindings.slice(0, keptCount);
-    const chunks = chunkOverflow(bodyFindings.slice(keptCount), marker, commentCap);
+    const chunks = [...leading, ...chunkOverflow(bodyFindings.slice(keptCount), marker, commentCap, leading.length)];
     plan = { kept, chunks };
-    if (chunks.length === chunkEstimate) return plan;
+    if (chunks.length <= chunkEstimate) return plan;
     chunkEstimate = Math.max(chunkEstimate + 1, chunks.length);
   }
   return plan;
 }
 
-/** Greedily pack overflow findings into comment-sized chunks. A single finding
- * larger than the cap gets its own chunk rather than being truncated — the
- * no-drop rule outranks the cap. */
-function chunkOverflow(rest: Finding[], marker: string, commentCap: number): Finding[][] {
-  const chunks: Finding[][] = [];
+/**
+ * Cut `text` into consecutive pieces of at most `budget` chars whose
+ * concatenation is `text` exactly. A cut prefers the last newline in the
+ * window — but only in its back half, so one early newline cannot shrink every
+ * segment to a sliver — and never lands between the halves of a surrogate pair,
+ * which would strand a broken code point at the end of one comment and the
+ * start of the next.
+ */
+export function splitTextToFit(text: string, budget: number): string[] {
+  if (budget < 2) throw new Error(`splitTextToFit: budget ${budget} cannot hold a surrogate pair`);
+  const parts: string[] = [];
+  let at = 0;
+  while (text.length - at > budget) {
+    let end = at + budget;
+    const nl = text.lastIndexOf("\n", end - 1);
+    if (nl >= at + Math.floor(budget / 2)) end = nl + 1;
+    else if (/[\uD800-\uDBFF]/.test(text[end - 1])) end -= 1;
+    parts.push(text.slice(at, end));
+    at = end;
+  }
+  if (at < text.length || parts.length === 0) parts.push(text.slice(at));
+  return parts;
+}
+
+/**
+ * Segment one over-cap text into chunks that each render under `commentCap`.
+ * The header's length depends on `total` and the part number only through
+ * their digit counts, so the budget is taken against a worst-case header
+ * rather than solved for — a few chars of slack per comment, no fixpoint.
+ */
+export function segmentChunks(
+  of: "finding" | "summary",
+  text: string,
+  marker: string,
+  commentCap: number,
+  finding?: Finding,
+): OverflowChunk[] {
+  const worst = renderSegmentHeader(marker, 99_999, { of, finding, index: 99_999, total: 99_999, text: "" });
+  const budget = commentCap - worst.length - OVERFLOW_SEGMENT_DELIMITER.length;
+  const parts = splitTextToFit(text, budget);
+  return parts.map((t, i) => ({
+    findings: [],
+    segment: { of, finding, index: i + 1, total: parts.length, text: t },
+  }));
+}
+
+/**
+ * Greedily pack overflow findings into comment-sized chunks.
+ *
+ * A single finding larger than the cap used to get its own chunk "rather than
+ * being truncated" — and that comment then 422'd on `body is too long`, which
+ * failed the whole run to protect one finding (STARK-6116). It is now SEGMENTED
+ * across consecutive comments instead: still every byte, still never cut short,
+ * and each comment actually postable. `partOffset` is how many chunks precede
+ * these (the relocated summary), so part numbers render as they will be posted.
+ */
+function chunkOverflow(rest: Finding[], marker: string, commentCap: number, partOffset = 0): OverflowChunk[] {
+  const chunks: OverflowChunk[] = [];
   let current: Finding[] = [];
+  const part = () => partOffset + chunks.length + 1;
+  const flush = () => {
+    if (current.length > 0) chunks.push({ findings: current });
+    current = [];
+  };
   for (const f of rest) {
+    if (renderOverflowComment(marker, part(), [f]).length > commentCap) {
+      // Keeps its place in the severity order: flush what precedes it first.
+      flush();
+      chunks.push(...segmentChunks("finding", renderBodyFindingLines(f).join("\n"), marker, commentCap, f));
+      continue;
+    }
     const candidate = [...current, f];
-    if (
-      current.length > 0 &&
-      renderOverflowComment(marker, chunks.length + 1, candidate).length > commentCap
-    ) {
-      chunks.push(current);
+    if (current.length > 0 && renderOverflowComment(marker, part(), candidate).length > commentCap) {
+      flush();
       current = [f];
     } else {
       current = candidate;
     }
   }
-  if (current.length > 0) chunks.push(current);
+  flush();
   return chunks;
 }
 
@@ -878,7 +1050,10 @@ export interface PostReviewResult {
     cap: number;
     chunks: number;
     findingsInBody: number;
+    /** Distinct findings — one segmented across several comments counts once. */
     findingsInOverflow: number;
+    /** Present (true) only when the summary itself was moved out (STARK-6116). */
+    summaryRelocated?: true;
   };
 }
 
@@ -931,19 +1106,42 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     agentsResolved: opts.agentsResolved,
     postingAgentNote: opts.postingAgentNote,
   };
-  const renderBody = (kept: Finding[], overflowLinks?: string[]) =>
-    buildReviewBody(marker, opts.humanSummary, kept, { ...bodyOpts, overflowLinks });
-  const plan = (findings: Finding[]) =>
-    planBodySplit((kept) => renderBody(kept), findings, marker);
-  const summarizeSplit = (s: BodySplitPlan) => ({
+  /** A plan plus the summary text its body carries — the caller's own, or the
+   * head-and-pointer form when the full summary had to be relocated. */
+  type ReviewPlan = BodySplitPlan & { summary: string; summaryRelocated: boolean };
+  const renderBody = (p: Pick<ReviewPlan, "summary">, kept: Finding[], overflowLinks?: string[]) =>
+    buildReviewBody(marker, p.summary, kept, { ...bodyOpts, overflowLinks });
+  /**
+   * Plan the body. Moving findings out is always tried first and alone; only
+   * when the body is over the cap with NO findings left in it (STARK-6116) is
+   * the summary relocated — in full — to the leading overflow comment(s), with
+   * its head and a pointer left behind. If even that floor is over the cap the
+   * plan comes back `unfittable`: what remains (`postingAgentNote`, the
+   * `agents_resolved` block) is not something this function may cut.
+   */
+  const plan = (findings: Finding[]): ReviewPlan => {
+    const full = { summary: opts.humanSummary };
+    const first = planBodySplit((kept) => renderBody(full, kept), findings, marker);
+    if (!first.unfittable) return { ...first, ...full, summaryRelocated: false };
+    const head = { summary: relocatedSummaryStub(opts.humanSummary) };
+    const leading = segmentChunks("summary", opts.humanSummary, marker, GITHUB_ISSUE_COMMENT_MAX);
+    const second = planBodySplit(
+      (kept) => renderBody(head, kept), findings, marker,
+      GITHUB_REVIEW_BODY_MAX, GITHUB_ISSUE_COMMENT_MAX, leading,
+    );
+    return { ...second, ...head, summaryRelocated: true };
+  };
+  const summarizeSplit = (s: ReviewPlan) => ({
     cap: GITHUB_REVIEW_BODY_MAX,
     chunks: s.chunks.length,
     findingsInBody: s.kept.length,
-    findingsInOverflow: s.chunks.reduce((n, c) => n + c.length, 0),
+    findingsInOverflow: countOverflowFindings(s.chunks),
+    ...(s.summaryRelocated ? { summaryRelocated: true as const } : {}),
   });
 
   const initialSplit = plan(part.bodyFindings);
   let body = renderBody(
+    initialSplit,
     initialSplit.kept,
     initialSplit.chunks.length > 0
       ? initialSplit.chunks.map((_, i) => `(pending overflow comment ${i + 1})`)
@@ -959,6 +1157,22 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
   if (initialSplit.chunks.length > 0) {
     result.bodyOverflow = summarizeSplit(initialSplit);
   }
+  /** Refuse, by name and BEFORE any POST, a body that is over the cap with no
+   * findings and no summary left to move. Posting it 422s with no index, and
+   * the no-drop fallback answers that by folding the inline comments into the
+   * same body — larger, 422 again, `unposted` with a reason that names nothing.
+   * Reported in dry-run too, so the probe says what the real run would. */
+  const refuseUnfittable = (s: ReviewPlan): boolean => {
+    if (!s.unfittable) return false;
+    result.unposted = true;
+    result.unpostedReason =
+      `body_over_cap_without_findings: the review body's non-finding parts ` +
+      `(postingAgentNote, agents_resolved) are ${renderBody(s, []).length} chars against a ` +
+      `${GITHUB_REVIEW_BODY_MAX}-char cap with every finding and the summary already moved out; ` +
+      "shorten what the caller passes — nothing was posted";
+    return true;
+  };
+  if (refuseUnfittable(initialSplit)) return result;
   if (opts.dryRun) return result;
   const gh = opts.ghJsonFn ?? ghJson;
   // POST transport must NOT retry internally — the outer retry below re-checks
@@ -996,8 +1210,8 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
   /** Put chunk `i` in its slot — posting the comment the first time, editing it
    * when a rebuild changed its contents, reusing it untouched otherwise — and
    * return the cross-link, or null after recording why it failed. */
-  const syncOverflowSlot = async (i: number, chunk: Finding[]): Promise<string | null> => {
-    const content = renderOverflowComment(marker, i + 1, chunk);
+  const syncOverflowSlot = async (i: number, chunk: OverflowChunk): Promise<string | null> => {
+    const content = renderOverflowChunk(marker, i + 1, chunk);
     const slot = slots[i];
     if (slot && slot.content === content) return slot.url;
     if (slot?.id !== undefined) {
@@ -1035,14 +1249,18 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
    */
   const buildBodyWithOverflow = async (
     findings: Finding[],
-    pre?: BodySplitPlan,
+    pre?: ReviewPlan,
   ): Promise<string | null> => {
     const s = pre ?? plan(findings);
+    // A 422-fallback rebuild folds inline comments in and re-plans; the larger
+    // payload can be the one that no longer fits. Checked before any slot sync
+    // so a review that cannot land leaves no orphan comments behind.
+    if (refuseUnfittable(s)) return null;
     if (s.chunks.length === 0) {
       // Rebuilds only ever ADD findings, so a payload that already overflowed
       // cannot come back under the cap; this is the first pass fitting.
       delete result.bodyOverflow;
-      return renderBody(s.kept);
+      return renderBody(s, s.kept);
     }
     const links: string[] = [];
     for (let i = 0; i < s.chunks.length; i++) {
@@ -1056,7 +1274,7 @@ export async function postReview(opts: PostReviewOpts): Promise<PostReviewResult
     result.bodyOverflow = summarizeSplit(s);
     // The reserve is an upper bound (see OVERFLOW_LINK_RESERVE), so the rendered
     // body is under the cap by construction rather than by luck.
-    return renderBody(s.kept, links);
+    return renderBody(s, s.kept, links);
   };
 
   const checkMarker = async (): Promise<{ stopReason?: string } | void> => {
