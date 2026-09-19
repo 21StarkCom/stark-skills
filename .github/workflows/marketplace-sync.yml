@@ -1,6 +1,9 @@
-# Auto-publish: regenerate bifrost (the marketplace) from this repo (the
-# source of truth) and open a draft PR there. A completed operator review on
-# the final head and the marketplace's own CI gate publication.
+# Regenerate bifrost (the marketplace) from this repo (the source of truth) and
+# open or refresh a draft PR there. This workflow does NOT publish: since
+# STARK-6208 the merge is owned by bifrost's own `publish-sync-pr` workflow,
+# which fires on the operator's review attestation. A completed operator review
+# on the final head and the marketplace's own CI still gate publication — see
+# the note above the last step for why the wait moved repos.
 #
 # PREREQUISITES (one-time, set in this repo's settings):
 #   - Variable STARK_MERIDIAN_CI_APP_ID      = the stark-meridian-ci GitHub App ID (4572744)
@@ -256,101 +259,36 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "number=$num" >> "$GITHUB_OUTPUT"
 
-      # Publishing is the point of this workflow, so it does not end at "a PR exists".
-      # bifrost has NO required status checks and auto-merge is disabled on the repo, so
-      # `--auto` would merge on contact, ahead of its own CI — this waits explicitly
-      # instead, and fails the run (loudly, where someone sees it) if bifrost goes red.
-      - name: Require completed head review, then merge on green CI
+      # Publication is NOT done here. This workflow ends at "the sync branch is
+      # pushed and its PR is open and current"; bifrost's own `publish-sync-pr`
+      # workflow merges it when the operator's attestation lands.
+      #
+      # STARK-6208: this step used to wait up to 20 minutes for that attestation
+      # and then run the ready/CI/merge chain. The window could not close at the
+      # fleet's real merge cadence. Measured 2026-09-19, six consecutive runs
+      # published nothing — four expired the deadline, and the two after them
+      # were killed at 6 and 9 minutes by this workflow's own
+      # `cancel-in-progress` when the next stark-skills merge landed. Every
+      # regeneration from e5d2441 onward was generated and stranded.
+      #
+      # Moving publication onto bifrost's `pull_request_review` event removes the
+      # clock entirely: the attestation may arrive minutes or days later. It also
+      # makes `cancel-in-progress` above correct rather than destructive — a
+      # superseded REGENERATION should die; a pending PUBLICATION should not.
+      #
+      # The gate is unchanged, not relaxed: bifrost re-verifies the same author,
+      # the same `<!-- stark-code-review:complete -->` marker on its own first
+      # line, the same named `/code-review xhigh --fix` invocation, the same
+      # exact-head binding, the same pre-merge recheck and the same
+      # `--match-head-commit`. CI alone still never authorizes publication.
+      # No GH_TOKEN: this step calls no `gh`, and the App token is write-scoped
+      # on bifrost. A step that needs nothing gets nothing.
+      - name: Report where publication stands
         if: steps.pr.outputs.changed == 'true'
-        timeout-minutes: 30
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
-          # This is an operator attestation, not proof that CI ran a reviewer.
-          # The latest submitted operator review on this head must attest that
-          # the actual command completed and every finding was fixed or answered.
-          # Pages are kept together so an older matching page cannot hide a
-          # later CHANGES_REQUESTED or DISMISSED review on the same head.
-          # The body is CRLF-normalized first: GitHub returns web-UI-authored
-          # review bodies with \r\n, so matching the raw text would reject the
-          # attestation an operator actually types and burn the whole window
-          # reporting "no completed head review".
-          # shellcheck disable=SC2016
-          review_filter='[.[][] | select(.user.login == "aryeh-stark" and .commit_id == $head and .submitted_at != null)]
-            | sort_by(.submitted_at, .id) | last
-            | . != null and (.state == "COMMENTED" or .state == "APPROVED")
-              and (((.body // "") | gsub("\r\n"; "\n")) | startswith("<!-- stark-code-review:complete -->\n") and contains("/code-review xhigh --fix"))'
-          # Exit 2 = could not read the reviews at all. A transport blip must not
-          # read as "the operator withdrew the attestation" on the pre-merge recheck.
-          completed_review() {
-            local reviews
-            reviews="$(gh api --paginate --slurp "repos/21StarkCom/bifrost/pulls/$PR/reviews")" || return 2
-            printf '%s' "$reviews" | jq -e --arg head "$1" "$review_filter" >/dev/null
-          }
-          # Deadline, not an iteration count: each pass also spends two API
-          # round-trips, so `seq 1 120` ran 23-27 minutes against a 30-minute
-          # step budget and could leave no room for the ready/CI/merge chain.
-          reviewed_head=""
-          review_deadline=$(( SECONDS + 1200 ))
-          waits=0
-          while :; do
-            head=$(gh pr view "$PR" --repo 21StarkCom/bifrost --json headRefOid --jq '.headRefOid')
-            if completed_review "$head"; then
-              reviewed_head="$head"
-              break
-            fi
-            [ "$SECONDS" -lt "$review_deadline" ] || break
-            # One line a minute — 120 identical lines bury the real failure.
-            if [ $(( waits % 6 )) -eq 0 ]; then
-              echo "waiting for completed operator review on $head"
-            fi
-            waits=$(( waits + 1 ))
-            sleep 10
-          done
-          if [ -z "$reviewed_head" ]; then
-            echo "no completed head review within 20 minutes; PR remains unmerged" >&2
-            exit 1
-          fi
-          # Read into a variable so a failed `gh pr view` fails the step instead of
-          # silently skipping the un-draft and failing later on an unmergeable draft.
-          is_draft="$(gh pr view "$PR" --repo 21StarkCom/bifrost --json isDraft --jq '.isDraft')"
-          if [ "$is_draft" = true ]; then
-            gh pr ready "$PR" --repo 21StarkCom/bifrost
-          fi
-          # A just-pushed head carries no check runs for a few seconds. Wait for one to
-          # EXIST — a positive assertion on the count, not on an exit code — because
-          # "zero checks" and "all checks green" are the two states `--watch` cannot tell
-          # apart, and merging on the first would be a gate that passes by finding
-          # nothing to measure.
-          count=0
-          for _ in $(seq 1 30); do
-            count="$(gh pr checks "$PR" --repo 21StarkCom/bifrost --json name --jq 'length' 2>/dev/null || echo 0)"
-            [ "$count" -gt 0 ] && break
-            sleep 10
-          done
-          if [ "$count" -eq 0 ]; then
-            echo "no check runs registered for PR #${PR} after 5 minutes — refusing to merge unverified" >&2
-            exit 1
-          fi
-          echo "watching $count check run(s) on PR #${PR}"
-          gh pr checks "$PR" --repo 21StarkCom/bifrost --watch --fail-fast
-          # `identical` is not mergeable — main already contains this head, so
-          # `gh pr merge` would fail anyway. Name it here instead of later.
-          base_status=$(gh api "repos/21StarkCom/bifrost/compare/main...$reviewed_head" --jq '.status')
-          if [ "$base_status" != ahead ]; then
-            echo "reviewed head is '$base_status' vs main, not ahead; merge withheld" >&2
-            exit 1
-          fi
-          recheck=0
-          completed_review "$reviewed_head" || recheck=$?
-          if [ "$recheck" -eq 2 ]; then
-            echo "could not re-read the PR's reviews before merging; merge withheld" >&2
-            exit 1
-          elif [ "$recheck" -ne 0 ]; then
-            echo "completed head review changed while waiting for CI; merge withheld" >&2
-            exit 1
-          fi
-          gh pr merge "$PR" --repo 21StarkCom/bifrost --squash --match-head-commit "$reviewed_head"
-          echo "published: bifrost PR #${PR} merged"
+          echo "sync PR #${PR} is current: https://github.com/21StarkCom/bifrost/pull/${PR}"
+          echo "publication waits for aryeh-stark's completed review attestation on its head;"
+          echo "bifrost's publish-sync-pr workflow merges it when that lands."

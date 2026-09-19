@@ -4,68 +4,21 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 const workflow = readFileSync(new URL("../.github/workflows/marketplace-sync.yml", import.meta.url), "utf8");
-const filter = workflow.match(/review_filter='([^']+)'/)?.[1];
-assert.ok(filter, "exercise the actual publisher review predicate");
-const head = "a".repeat(40);
-const completed = () => ({ id: 1, user: { login: "aryeh-stark" }, commit_id: head,
-  state: "COMMENTED", submitted_at: "2026-09-15T12:00:00Z",
-  body: "<!-- stark-code-review:complete -->\n/code-review xhigh --fix completed; findings fixed or answered." });
 
-function accepted(pages: unknown[][], expected: boolean): void {
-  const result = spawnSync("jq", ["-e", "--arg", "head", head, filter!], {
-    input: JSON.stringify(pages), encoding: "utf8",
-  });
-  assert.ifError(result.error);
-  assert.equal(result.status, expected ? 0 : 1, result.stderr || result.stdout);
-}
-
-test("publisher requires the operator's explicit completed review on the current head", () => {
-  accepted([[completed()]], true);
-  accepted([[{ ...completed(), state: "APPROVED" }]], true);
-  accepted([[]], false);
-  for (const change of [
-    { user: { login: "stark-meridian-ci[bot]" } },
-    { commit_id: "b".repeat(40) },
-    { submitted_at: null },
-    { state: "PENDING" },
-    { state: "CHANGES_REQUESTED" },
-    { state: "DISMISSED" },
-    { body: "/code-review xhigh --fix is still running." },
-    { body: "Example marker:\n" + completed().body },
-    { body: "<!-- stark-code-review:complete -->\nAn unrelated review passed." },
-    { body: null },
-  ]) accepted([[{ ...completed(), ...change }]], false);
-});
-
-test("publisher accepts the CRLF body GitHub's web UI actually submits", () => {
-  // GitHub returns web-UI-authored review bodies with \r\n line endings (over
-  // half of any sampled comment page carries them). Matching the raw text would
-  // reject the attestation an operator types by hand and report it as "no
-  // completed head review", pointing the blame at the human, not the parser.
-  const crlf = completed().body.replace(/\n/g, "\r\n");
-  accepted([[{ ...completed(), body: crlf }]], true);
-  accepted([[{ ...completed(), body: crlf.replace("/code-review xhigh --fix", "/code-review high") }]], false);
-  // The marker must still own the whole first line, CRLF or not.
-  accepted([[{ ...completed(), body: "Example marker:\r\n" + crlf }]], false);
-  accepted([[{ ...completed(), body: "<!-- stark-code-review:complete --> /code-review xhigh --fix" }]], false);
-  // A review with no author record must not read as the operator's.
-  accepted([[{ ...completed(), user: null }]], false);
-});
-
-test("publisher keeps all review pages and honors the latest operator verdict", () => {
-  const later = { ...completed(), id: 2, submitted_at: "2026-09-15T12:01:00Z" };
-  accepted([[completed()], [{ ...later, state: "CHANGES_REQUESTED" }]], false);
-  accepted([[completed()], [{ ...later, state: "DISMISSED" }]], false);
-  accepted([[{ ...completed(), state: "CHANGES_REQUESTED" }], [later]], true);
-  accepted([[completed()], [{ ...later, commit_id: "b".repeat(40), state: "CHANGES_REQUESTED" }]], true);
-  accepted([[completed()], [{ ...later, user: { login: "unrelated-bot" }, state: "COMMENTED", body: "FYI" }]], true);
-  // Equal timestamps use monotonically increasing review ids, not page order.
-  accepted([[{ ...completed(), id: 2, state: "DISMISSED" }], [completed()]], false);
-});
+// The publisher's review predicate USED to live in this workflow and be exercised
+// here. STARK-6208 moved publication to bifrost's `publish-sync-pr` workflow, so
+// the predicate — and the suite that pins it — moved with it:
+// `bifrost/engine/cmd/stark/publish_sync_pr_test.go`. Every case that ran here
+// runs there, against the same jq program, plus the cases the new event shape
+// adds. Testing it from this repo is not possible: the text no longer exists in
+// any file this repo checks out, and a copy would pin a copy.
+//
+// What remains below is this workflow's OWN remaining logic: the release-notes
+// generator, which did not move.
 
 // ─── The release-notes generator ────────────────────────────────────────────
-// Exercise the awk program the workflow actually runs, extracted the same way as
-// `review_filter` above. This generator has shipped the same defect twice — a tag
+// Exercise the awk program the workflow actually runs, extracted from the
+// workflow file rather than restated here. This generator has shipped the same defect twice — a tag
 // whose notes never mention the `[Unreleased]` bullets it absorbed — and the second
 // time was a regression of a hand repair. Nothing but a test stops the third.
 const notesAwk = workflow.match(/awk -v version=[^\n]*\n([\s\S]*?)\n\s*' CHANGELOG\.md > CHANGELOG\.md\.next/)?.[1];
