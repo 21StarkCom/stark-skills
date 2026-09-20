@@ -131,6 +131,24 @@ standing is the operator's to sweep, not yours.
    ticket and its comments, and note each ticket's repo. A ticket that names
    another in-scope ticket as a dependency waits for it; otherwise tickets are
    independent. Do not add tickets the operator did not name.
+   Once you have the list, register it with houston in one line:
+   `houston register <STARK-epic> --tickets STARK-a,STARK-b,...`. Given
+   `--tickets` there is no epic, so register under `GRU-<the first ticket's
+   number>` — the id [New tab](#new-tab) already names that run by — and never
+   under a ticket you will work. That is what gives the page its denominator
+   and a segment per ticket, and it is what lets each Minion report without
+   knowing its own epic: houston refuses a report from a ticket no roster
+   claims, so an unregistered run is an invisible one. Send it once per `start`
+   with the WHOLE list — re-registering replaces the roster and keeps every
+   event, but a ticket dropped from the list drops out of the denominator with
+   it. Telemetry, never a gate: it exits 0 whether houston answers or not (only
+   a malformed line exits 2 — an empty `--tickets` is refused, so an epic that
+   expanded to nothing is nothing to register), and if `houston` is not on
+   `PATH`, skip it silently and say nothing about it in your report. A ticket
+   you park blocked before any Minion runs — one whose repo will not resolve
+   (step 3) — reports nothing on its own, so say it for it, once, when you park
+   it: `houston report STARK-n queued --agent gru --blocked "<why>" --needs
+   operator`.
 2. **Read the board.** Ticket `done`/`Closed` → run step 5's confirm on it, then
    skip; a Minion can die between closing its ticket and sending its report, so a
    `done` status on its own is a closed ticket, not a confirmed one. With no

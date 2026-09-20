@@ -134,6 +134,61 @@ things are yours on top of it:
 
 Then report to Gru and stand down — both below.
 
+## Tell houston
+
+As you pass each gate of the spine, send houston one line. It is how the
+operator sees a run moving — which ticket is where, how long it has sat there,
+and which Minion has gone quiet — without opening every tab.
+
+```
+houston report <your ticket> <gate> --agent minion:claude \
+  [--repo <repo>] [--note "<the human line>"] [--pr <url>]
+```
+
+| Gate | Send it when |
+|---|---|
+| `started` | your worktree is cut and you are reading the ticket |
+| `pr` | `idun gh pr-open` returned a URL — pass it as `--pr` |
+| `review` | `/code-review xhigh --fix` has begun — and again, `--note` what it found, when it comes back |
+| `merged` | `idun gh pr-merge` reported the squash |
+| `closed` | the ticket is moved and your evidence comment is on it |
+
+Send `closed` **before you arm the poison-pill**. The stand-down ends the
+session, so a `closed` left for afterwards is never sent, and a ticket sitting
+at `merged` reads on the page as a Minion that went quiet one step from the end
+— the exact thing the operator opens it to find.
+
+Every other flag rides that same `report <ticket> <gate>` line; there is no
+blocker verb, and a line missing its gate is refused (exit 2) and sends
+nothing. At the gate you are stuck at, raise a blocker with
+`--blocked "<reason>" --needs operator|dependency|agent`, clear it with
+`--unblock`, and name a follow-up with `--follow-up STARK-m`. A blocker you
+raise and never clear is exactly what the operator is looking for, so raise it
+the moment you are stuck rather than at the end — and a `blocked` or
+`follow-up … stopping` exit raises one too, carrying the reason you send Gru,
+since a Minion that has stopped must not read as one still working.
+
+Keep `--note` plain prose starting with a word: it is a double-quoted shell
+argument, so a `$`, a quote or a backtick in it is expanded, mangled or
+executed, and a value that opens with `--` is read as the next flag and
+refused.
+
+**Pass `--epic` only when no Gru registered you.** Launched by Gru, houston
+resolves your ticket to its epic from the roster Gru wrote at its step 1, and
+naming one yourself is noise. Launched any other way — `--new-tab`, or by hand
+— nothing registered you, so houston refuses every report of yours with a 400
+(*in no roster and has never reported before*) and the run has no page at all:
+there, pass `--epic <the ticket's parent epic, else the ticket's own id>` on
+every report.
+
+**This is never a gate and never a reason to stop.** `houston report` exits 0
+when houston is down, unreachable, or refuses the event — it warns on stderr
+and returns. Only a malformed line exits 2, and that is your own typo, still
+not a reason to stop. If `houston` is not on `PATH`, skip it silently. Nothing
+in your spine waits on it, a failed report is never worth a line in your report
+to Gru, and you never retry one. Your ticket and your PR are the work; this is
+only the view of it.
+
 ## Gaps
 
 [The spine](../../standards/worker-spine.md#6-gaps) decides them: fix in the
