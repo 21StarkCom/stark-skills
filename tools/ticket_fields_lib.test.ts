@@ -16,6 +16,7 @@ import {
   ticketFromBranch,
   ticketFromRepoInfo,
   writePrOpenFields,
+  firstDiagnosticLine,
   writeTicketFields,
   type FieldRun,
   type FieldRunResult,
@@ -316,6 +317,47 @@ test("writeTicketFields: an exit 0 that wrote nothing is reported as a skip", ()
     }),
   });
   assert.equal(wrote.wrote, true);
+});
+
+test("writeTicketFields: alfred's JSON log lines never stand in for the error", () => {
+  // Measured live on STARK-6108 (2026-09-20). alfred logs one JSON record per
+  // HTTP attempt to stderr, so they are the FIRST thing there on any run that
+  // reached ClickUp, and "first non-empty line" reported
+  // `exited 1: {"time":…,"level":"INFO","msg":"clickup.request",…}` — noise
+  // occupying the single line rule 2 promises is the whole report.
+  const LOGS = [
+    '{"time":"2026-09-20T06:44:08.104569+03:00","level":"INFO","msg":"clickup.request","op":"clickup.get_task","attempt":1}',
+    '{"time":"2026-09-20T06:44:08.615397+03:00","level":"INFO","msg":"clickup.request","op":"clickup.get_task","status":200,"latency_ms":511}',
+  ].join("\n");
+
+  const result = writeTicketFields(
+    "STARK-6108",
+    [{ name: "pr_state", value: "open" }],
+    () => ({
+      code: 1,
+      stdout: "",
+      stderr: `${LOGS}\nalfred: task edit: delivery failed: field pr_url left journaled\n`,
+    }),
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /delivery failed: field pr_url left journaled/);
+  assert.doesNotMatch(result.error ?? "", /clickup\.request/);
+
+  // Recognised by SHAPE, not by a leading `{`: alfred's own `--json` payload is
+  // an object too, and on a failure with nothing else to say it is the most
+  // informative thing available — so it must not be filtered out.
+  assert.equal(
+    firstDiagnosticLine("", '{"fields_set":[],"error":"something structured"}'),
+    '{"fields_set":[],"error":"something structured"}',
+  );
+
+  // Degrade, never blank: when a stream carried ONLY log lines, report one of
+  // them rather than claiming "no output" over a stream that had content.
+  assert.match(firstDiagnosticLine(LOGS, ""), /clickup\.request/);
+  assert.equal(firstDiagnosticLine("", ""), "no output");
+
+  // stderr still outranks stdout when both carry a real message.
+  assert.equal(firstDiagnosticLine("the real error", "some stdout"), "the real error");
 });
 
 test("writeTicketFields: a spawn that never happened does not report an exit status", () => {

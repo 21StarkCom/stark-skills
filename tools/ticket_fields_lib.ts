@@ -291,6 +291,51 @@ export function alfredSkipReason(stdout: string, stderr = ""): string | null {
 }
 
 /**
+ * A structured-log record rather than a message meant for a human?
+ *
+ * alfred logs to stderr as JSON lines — `{"time":…,"level":"INFO","msg":
+ * "clickup.request",…}` — one per HTTP attempt, rate-limit reading and write
+ * audit. They are the FIRST thing on stderr on any run that reached ClickUp, so
+ * "the first non-empty line" is a log record, not the failure.
+ *
+ * Measured live on STARK-6108 (2026-09-20): a partially-delivered write exited
+ * 1 and this module reported
+ * `skipped (alfred task edit exited 1: {"time":"…","level":"INFO","msg":
+ * "clickup.request","op":"clickup.get_task","attempt":1})` — a line that tells
+ * the operator nothing about what went wrong, inside the one line rule 2
+ * promises is the whole report.
+ *
+ * Recognised by shape, not by key order: a `{`-leading line that parses as a
+ * JSON object carrying `level` or `msg`. A line that merely starts with `{` is
+ * NOT skipped — alfred's `--json` payload is an object too, and on a failure
+ * with nothing else to say it is the most informative thing available.
+ */
+function isStructuredLogLine(line: string): boolean {
+  if (!line.startsWith("{")) return false;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (!parsed || typeof parsed !== "object") return false;
+    const record = parsed as Record<string, unknown>;
+    return typeof record["level"] === "string" || typeof record["msg"] === "string";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The most useful single line across stderr then stdout, skipping alfred's
+ * structured-log noise. Falls back to a log line rather than to nothing — a log
+ * record is poor, but "no output" over a stream that had content is worse.
+ */
+export function firstDiagnosticLine(stderr: string, stdout: string): string {
+  const lines = [stderr, stdout]
+    .flatMap((stream) => (stream ?? "").split("\n"))
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return lines.find((line) => !isStructuredLogLine(line)) ?? lines[0] ?? "no output";
+}
+
+/**
  * `alfred task edit --field name=value … --json <ticket>`.
  *
  * Refuses an empty field VALUE before spawning rather than letting alfred
@@ -337,11 +382,7 @@ export function writeTicketFields(
     // scanned in stderr-first order rather than `stderr || stdout`: a stderr
     // that is non-empty but blank is truthy, and that spelling threw away a
     // real stdout message to report "no output".
-    const detail =
-      [result.stderr, result.stdout]
-        .flatMap((stream) => (stream ?? "").split("\n"))
-        .map((line) => line.trim())
-        .find((line) => line.length > 0) ?? "no output";
+    const detail = firstDiagnosticLine(result.stderr, result.stdout);
     // `code` is the exit status, and -1 is this module's documented sentinel
     // for a spawn that never happened. "exited -1" names a status no process
     // has; say what actually went wrong, as the sibling throw path does.
