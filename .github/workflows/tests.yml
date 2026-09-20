@@ -78,37 +78,6 @@ jobs:
           # also needs a recent runtime. 24 is the oldest LTS carrying both.
           node-version: '24'
 
-      # Coverage gate at PR TIME, so an unclaimed skill goes red on the PR that adds
-      # it rather than on `main` (STARK-6468).
-      #
-      # `marketplace-sync` runs this same script before its regen, which is what closes
-      # the hole that shipped `agnes` un-membered (STARK-6249). But that gate fires
-      # AFTER merge: it precedes the regen, so a skill reaching `main` unclaimed opens no
-      # sync PR and every later push fails there too — publication stops for everyone,
-      # including changes unrelated to the offending skill, until a human lands bundle
-      # membership in bifrost. Catching it here keeps `main` publishable and puts the
-      # failure in front of the person who can fix it.
-      #
-      # bifrost is public, so this needs no token. It is checked out to a subdirectory
-      # that nothing else reads: `npm test` runs from tools/ and check-rest-only.sh
-      # scopes itself to named files there, so the extra tree cannot perturb either.
-      - name: Checkout bifrost (for the coverage gate)
-        uses: actions/checkout@v6
-        with:
-          repository: 21StarkCom/bifrost
-          path: .bifrost-gate
-
-      - name: Coverage gate — every skill is claimed by a bundle
-        run: |
-          set -euo pipefail
-          gate="$GITHUB_WORKSPACE/.bifrost-gate/docs/scripts/coverage-gate.sh"
-          if [ ! -x "$gate" ]; then
-            # stdout, not stderr: GitHub parses ::error:: workflow commands off stdout.
-            echo "::error::bifrost's default branch no longer ships an executable docs/scripts/coverage-gate.sh at that path; this gate and marketplace-sync both depend on it (STARK-6468). Restore it, or update both callers in lockstep."
-            exit 1
-          fi
-          "$gate" "$GITHUB_WORKSPACE"
-
       # `npm test` = ./check-rest-only.sh && node --test *.test.ts. Run it from
       # tools/, which is where package.json lives — the repo has no root
       # package.json.

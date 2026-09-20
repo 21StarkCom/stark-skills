@@ -1,5 +1,12 @@
 # stark-skills
 
+> **Superseded by [`21StarkCom/bifrost`](https://github.com/21StarkCom/bifrost).**
+> The skill source tree (`skill/ tools/ standards/ global/ scripts/ data/ config/
+> runtime-overrides/`) now lives in bifrost, which is the single repo to edit.
+> The marketplace generation pipeline this repo used to drive — `marketplace-sync.yml`
+> and the bifrost coverage gate — has been removed, so nothing here publishes any more.
+> This repo is kept for history only.
+
 AI-powered development workflow system for Claude Code and Codex, covering the full development lifecycle — from planning through code review, shipping, and maintenance. Optional Gemini support is available through config.
 
 ## Quick Start
