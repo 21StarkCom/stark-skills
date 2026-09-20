@@ -131,6 +131,13 @@ standing is the operator's to sweep, not yours.
    ticket and its comments, and note each ticket's repo. A ticket that names
    another in-scope ticket as a dependency waits for it; otherwise tickets are
    independent. Do not add tickets the operator did not name.
+   Once you have the list, register it with houston in one line:
+   `houston register <STARK-epic> --tickets STARK-a,STARK-b,...`. That is what
+   gives the epic's page its denominator and a segment per ticket, and it is
+   what lets each Minion report without knowing its own epic. Send it once per
+   `start`; re-registering replaces the roster and loses nothing. Telemetry,
+   never a gate: it exits 0 whether houston answers or not, and if `houston` is
+   not on `PATH`, skip it silently and say nothing about it in your report.
 2. **Read the board.** Ticket `done`/`Closed` → run step 5's confirm on it, then
    skip; a Minion can die between closing its ticket and sending its report, so a
    `done` status on its own is a closed ticket, not a confirmed one. With no

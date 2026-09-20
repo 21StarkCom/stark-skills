@@ -137,6 +137,40 @@ things are yours on top of it:
 
 Then report to Gru and stand down — both below.
 
+## Tell houston
+
+As you pass each gate of the spine, send houston one line. It is how the
+operator sees a run moving — which ticket is where, how long it has sat there,
+and which Minion has gone quiet — without opening every tab.
+
+```
+houston report <your ticket> <gate> --agent minion:<claude|codex> \
+  [--repo <repo>] [--note "<the human line>"] [--pr <url>]
+```
+
+| Gate | Send it when |
+|---|---|
+| `started` | your worktree is cut and you are reading the ticket |
+| `pr` | `idun gh pr-open` returned a URL — pass it as `--pr` |
+| `review` | `/code-review xhigh --fix` has begun; `--note` what it found |
+| `merged` | `idun gh pr-merge` reported the squash |
+| `closed` | the ticket is moved and your evidence comment is on it |
+
+Raise a blocker with `--blocked "<reason>" --needs operator|dependency|agent`,
+clear it with `--unblock`, and name a follow-up with `--follow-up STARK-m`. A
+blocker you raise and never clear is exactly what the operator is looking for,
+so raise it the moment you are stuck rather than at the end.
+
+You do **not** pass `--epic`: houston resolves your ticket to its epic from the
+roster Gru registered.
+
+**This is never a gate and never a reason to stop.** `houston report` exits 0
+when houston is down, unreachable, or refuses the event — it warns on stderr
+and returns. If `houston` is not on `PATH`, skip it silently. Nothing in your
+spine waits on it, a failed report is never worth a line in your report to Gru,
+and you never retry one. Your ticket and your PR are the work; this is only the
+view of it.
+
 ## Gaps
 
 [The spine](../../standards/worker-spine.md#6-gaps) decides them: fix in the
