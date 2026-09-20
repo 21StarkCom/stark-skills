@@ -1,11 +1,22 @@
 # stark-skills
 
+> **Being superseded by [`21StarkCom/bifrost`](https://github.com/21StarkCom/bifrost)** (epic STARK-8248).
+> The skill source tree (`skill/ tools/ standards/ global/ scripts/ data/ config/
+> runtime-overrides/`) is moving to bifrost, which becomes the single repo to edit.
+> The move is in progress — check bifrost before editing anything here.
+> **This repo no longer publishes.** The generation pipeline it drove —
+> `.github/workflows/marketplace-sync.yml` and the bifrost coverage gate — has been
+> removed, so a change merged here does NOT reach an installed plugin. Everything
+> below that describes publishing from this repo is history.
+
 AI-powered development workflow system for Claude Code and Codex, covering the full development lifecycle — from planning through code review, shipping, and maintenance. Optional Gemini support is available through config.
 
 ## Quick Start
 
 ```bash
-# Install the plugins from the marketplace (in Claude Code)
+# Install the plugins from the marketplace (in Claude Code).
+# NOTE: what the marketplace serves is frozen at the last sync from this repo;
+# nothing merged here after that reaches it. See the banner at the top.
 /plugin marketplace add 21StarkCom/bifrost
 /plugin install stark-analyze@bifrost   # + stark-plan, stark-implement, stark-ops, ...
 
@@ -167,22 +178,21 @@ stark-skills/
 │   └── prompts/{iac-review,refactor-planner}/  ← per-dispatcher rubrics
 ├── runtime-overrides/codex/      ← Codex-only artifact + support overlays; never shipped to Claude
 ├── data/persona/                 ← persona roster
-├── .github/workflows/            ← GitHub Actions (tests, project sync, marketplace-sync)
+├── .github/workflows/            ← GitHub Actions (tests, project sync, stale detection, secret scan)
 └── standards/                    ← org-wide doc templates and workflows
 ```
 
 ## Distribution
 
-This repo is the **source of truth** for the skills + tools; they ship as separate self-contained Claude Code and native Codex plugin packages via the [bifrost](https://github.com/21StarkCom/bifrost) marketplace.
+**Publication from this repo is RETIRED (epic STARK-8248).** `marketplace-sync.yml` — the workflow that regenerated bifrost's `catalog/` + `vendor/` from this tree and opened the sync PR there — has been deleted, along with the PR-time bifrost coverage gate in `tests.yml`. Nothing merged here reaches an installed plugin; the published bundles are frozen at the last sync. What follows describes the pipeline as it was, and is kept only to explain what an installed plugin contains.
 
-- Canonical `skill/` and shared support files remain the Claude-authored surface. `runtime-overrides/codex/` contains complete Codex-only variants and their changed support files. Bifrost keeps those inputs and generated packages isolated; a Codex overlay must never enter `dist/claude/`.
-- The marketplace `catalog/` is **generated from this repo** by `stark sync`. Bifrost emits Claude packages under `dist/claude/`, native Codex packages under `dist/codex-plugins/`, and host-specific marketplace manifests at the repository root.
-- CI auto-publishes on every push to `main` touching a canonical vendored asset root or `runtime-overrides/codex/`.
+- Canonical `skill/` and shared support files were the Claude-authored surface. `runtime-overrides/codex/` contains complete Codex-only variants and their changed support files. Bifrost kept those inputs and generated packages isolated; a Codex overlay never entered `dist/claude/`.
+- The marketplace `catalog/` was **generated from this repo** by `stark sync`. Bifrost emits Claude packages under `dist/claude/`, native Codex packages under `dist/codex-plugins/`, and host-specific marketplace manifests at the repository root.
 
 ```
 /plugin marketplace add 21StarkCom/bifrost
 /plugin install stark-analyze@bifrost   # then stark-plan, stark-implement, stark-ops, ...
-/plugin update  stark-analyze@bifrost   # pull the latest published version
+/plugin update  stark-analyze@bifrost   # pull the last published version (frozen; see above)
 
 codex plugin marketplace add 21StarkCom/bifrost
 codex plugin add stark-plan@bifrost

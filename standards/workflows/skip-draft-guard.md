@@ -50,11 +50,13 @@ runs on the current head. Marking ready is the single CI-triggering moment.
 
 ## What is NOT guarded
 
-- **`push`-triggered workflows** (e.g. deploy-on-merge, `marketplace-sync`) — a
+- **`push`-triggered workflows** (e.g. deploy-on-merge, a cross-repo regen) — a
   merge to the default branch is never "draft", so leave them alone. A workflow
-  that itself *opens* a downstream PR still follows the review gate.
-  `marketplace-sync` opens a draft, waits for a completed review on that head,
-  then marks it ready and waits for CI before merging that exact head.
+  that itself *opens* a downstream PR still follows the review gate: it opens a
+  draft, and publication waits for a completed review on that exact head and
+  then for CI, in whichever repo owns the merge. (The worked example used to be
+  stark-skills' `marketplace-sync`, retired under STARK-8248; the rule is
+  unchanged.)
   - **The CI that publisher gate reads must NOT be draft-guarded.** bifrost's
     `ci.yml` is `pull_request: branches: [main]` with the default `types`, so it
     runs on the draft itself and `gh pr ready` fires nothing extra. Add the guard

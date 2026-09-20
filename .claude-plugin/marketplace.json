@@ -1,9 +1,0 @@
-{
-  "name": "stark-skills",
-  "description": "Local stark-skills marketplace — multi-agent code review, GitHub workflow, and token-efficiency plugins",
-  "owner": {
-    "name": "Evinced",
-    "email": "engineering@evinced.com"
-  },
-  "plugins": []
-}
